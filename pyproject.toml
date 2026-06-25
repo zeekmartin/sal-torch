@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sal-torch"
+version = "0.1.0.dev0"
+description = "Structurally Adaptive Learning — training-time sparsification for robust neural networks"
+readme = "README.md"
+license = "LicenseRef-BSL-1.1"
+requires-python = ">=3.10"
+authors = [{ name = "Cognitive Engineering", email = "contact@cognitive-engineering.dev" }]
+keywords = ["pytorch", "pruning", "sparsification", "compression", "transformers"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python :: 3",
+]
+dependencies = ["torch>=2.1", "numpy", "scipy"]
+
+[project.optional-dependencies]
+hf = ["transformers>=4.38", "peft>=0.8"]
+reports = ["matplotlib", "fpdf2"]
+crypto = ["PyNaCl>=1.5.0"]
+dev = ["pytest>=7.0", "pytest-cov", "ruff"]
+all = ["sal-torch[hf,reports,crypto,dev]"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["sal"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
