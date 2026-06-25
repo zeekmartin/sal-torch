@@ -28,7 +28,7 @@ PRUNE_SEED = 7  # both models are compressed with the identical 33% head set
 def load_split(split, n):
     try:
         from datasets import load_dataset
-        ds = load_dataset("glue", "sst2", split=f"{split}[:{n}]")
+        ds = load_dataset("stanfordnlp/sst2", split=f"{split}[:{n}]")
         return list(ds["sentence"]), list(ds["label"])
     except Exception:
         pos = ["a beautiful and moving film", "sharp, funny and alive"]

@@ -22,7 +22,7 @@ MODEL = "gpt2"
 def load_sentences(n: int = 100):
     try:
         from datasets import load_dataset
-        return list(load_dataset("glue", "sst2", split=f"train[:{n}]")["sentence"])
+        return list(load_dataset("stanfordnlp/sst2", split=f"train[:{n}]")["sentence"])
     except Exception:
         base = ["the film was a quiet triumph", "an utterly tedious experience",
                 "bright, funny and warm", "a joyless and clumsy mess"]

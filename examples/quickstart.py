@@ -22,7 +22,7 @@ def load_sst2(n: int = 100):
     """A small SST-2 slice (falls back to a tiny built-in sample if offline)."""
     try:
         from datasets import load_dataset
-        ds = load_dataset("glue", "sst2", split=f"train[:{n}]")
+        ds = load_dataset("stanfordnlp/sst2", split=f"train[:{n}]")
         return list(ds["sentence"]), list(ds["label"])
     except Exception:
         pos = ["a wonderful, moving film", "funny and deeply heartfelt"]
