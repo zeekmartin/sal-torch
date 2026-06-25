@@ -24,6 +24,15 @@ trainer.train()
 
 Three lines. Any transformer. Compression-resilient.
 
+## Examples
+
+- [`examples/quickstart.py`](examples/quickstart.py) — 3-line SAL training on DistilBERT
+- [`examples/standalone_fi.py`](examples/standalone_fi.py) — Fragility Index scan, no training
+- [`examples/full_control.py`](examples/full_control.py) — manual config + standalone trainer
+- [`examples/compare_with_without_sal.py`](examples/compare_with_without_sal.py) — SAL vs. baseline under compression
+
+New here? Start with [docs/getting_started.md](docs/getting_started.md).
+
 ## License
 
 BSL 1.1 — free for research and evaluation. Commercial production requires a license.
