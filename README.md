@@ -1,8 +1,18 @@
 # sal-torch
 
+![CI](https://github.com/zeekmartin/sal-torch/actions/workflows/ci.yml/badge.svg)
+
 **Structurally Adaptive Learning for PyTorch**
 
 Training-time sparsification that makes neural networks structurally resilient to compression.
+
+## Install
+
+```bash
+pip install sal-torch            # core
+pip install sal-torch[hf]        # + HuggingFace Trainer
+pip install sal-torch[all]       # everything
+```
 
 ```python
 from sal import SALConfig, SALCallback

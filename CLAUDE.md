@@ -99,10 +99,29 @@ Planned-but-not-yet-implemented (per design doc): `plasticity.py`,
 ## Development phase status
 
 - **Phase 1 (Reconciliation + Core SAL): DONE.** masker.py and fi.py aligned to
-  the validated mechanism; tests updated; 26 tests pass on CPU.
-- Next: Phase 2 (architecture auto-detection breadth + tests),
-  Phase 3 (FIScanner/FIMonitor hardening), Phase 4 (PlasticityScanner),
+  the validated mechanism; 26 unit tests pass on CPU.
+- **Phase 2 (Architecture Support): DONE.** Module/projection finding centralized
+  in `arch_support.py` (relative to `model.base_model`, so masker + FI hook the
+  same modules). Validated on real models — DistilBERT, GPT-2, ViT, BERT — both
+  on CPU and on a Modal T4 GPU. SAL training pipeline (SALConfig.auto -> SALCallback
+  -> HF Trainer -> FIScanner) verified end-to-end.
+- Next: Phase 3 (FIScanner/FIMonitor hardening), Phase 4 (PlasticityScanner),
   Phase 5 (license signing + reports).
+
+## Integration tests
+
+CPU unit suite stays at **26 passed**; integration tests are marked
+`@pytest.mark.integration` and **skipped by default** (need network + model
+downloads):
+```
+python -m pytest                                   # 26 unit tests (CPU), integration skipped
+python -m pytest --run-integration                 # + real-model arch + training tests
+modal run scripts/modal_integration_test.py        # same logic on a Modal T4 GPU
+```
+The Modal image needs `pytest` + `accelerate>=1.1.0` (Trainer dep). On
+Windows, run Modal with `PYTHONUTF8=1` so the CLI can print its build glyphs.
+Transformers 5.x silently ignores `head_mask` — confirming why SAL hooks the
+projection directly.
 
 ## Reference docs
 

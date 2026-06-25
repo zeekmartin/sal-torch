@@ -18,12 +18,14 @@ app = modal.App("sal-torch-integration")
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .pip_install("torch", "transformers", "datasets", "scipy", "numpy")
-    # copy_local_* runs at build time so `pip install -e .` below can see the package
-    .copy_local_dir("sal", "/root/sal-torch/sal")
-    .copy_local_dir("tests", "/root/sal-torch/tests")
-    .copy_local_file("pyproject.toml", "/root/sal-torch/pyproject.toml")
-    .copy_local_file("README.md", "/root/sal-torch/README.md")
+    .pip_install("torch", "transformers", "datasets", "scipy", "numpy",
+                 "pytest", "accelerate>=1.1.0")
+    # copy=True bakes the files into the image at build time so `pip install -e .`
+    # below can see them (without copy, local files are mounted only at runtime).
+    .add_local_dir("sal", "/root/sal-torch/sal", copy=True)
+    .add_local_dir("tests", "/root/sal-torch/tests", copy=True)
+    .add_local_file("pyproject.toml", "/root/sal-torch/pyproject.toml", copy=True)
+    .add_local_file("README.md", "/root/sal-torch/README.md", copy=True)
     .run_commands("cd /root/sal-torch && pip install -e .")
 )
 

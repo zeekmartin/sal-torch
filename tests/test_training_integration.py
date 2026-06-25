@@ -72,20 +72,34 @@ def check_sal_training() -> dict:
     # FI before training
     fi_before = FIScanner(model, probe, num_samples=16, batch_size=8).scan().fi_score
 
+    # Record masker stats live (HF Trainer appends to log_history *before* on_log,
+    # so we read the masker directly rather than via injected log fields).
+    class RecordingSAL(SALCallback):
+        peak_events = 0
+        peak_pruned = 0
+        was_active = False
+
+        def on_step_end(self, args, state, control, **kw):
+            if self.masker:
+                s = self.masker.stats
+                self.peak_events = max(self.peak_events, s["prune_events"])
+                self.peak_pruned = max(self.peak_pruned, s["pruned_heads"])
+                self.was_active = self.was_active or s["active"]
+
     with tempfile.TemporaryDirectory() as out:
         args = TrainingArguments(
             output_dir=out, max_steps=20, per_device_train_batch_size=8,
             learning_rate=5e-5, logging_steps=1, save_strategy="no",
             report_to=[], disable_tqdm=True,
         )
-        callback = SALCallback(config, seed=42)
+        callback = RecordingSAL(config, seed=42)
         trainer = Trainer(model=model, args=args, train_dataset=dataset, callbacks=[callback])
         trainer.train()
 
     log = trainer.state.log_history
     losses = [e["loss"] for e in log if "loss" in e]
-    prune_events = max((e.get("sal/prune_events", 0) for e in log), default=0)
-    pruned_peak = max((e.get("sal/pruned_heads", 0) for e in log), default=0)
+    prune_events = callback.peak_events
+    pruned_peak = callback.peak_pruned
 
     # FI after training
     fi_after = FIScanner(model, probe, num_samples=16, batch_size=8).scan().fi_score
@@ -93,6 +107,7 @@ def check_sal_training() -> dict:
     # ---- assertions ----
     assert len(losses) >= 2, f"expected logged losses, got {losses}"
     assert all(math.isfinite(x) for x in losses), f"non-finite loss: {losses}"
+    assert callback.was_active, "masker never activated during training"
     assert prune_events > 0, "masker never pruned (prune_events == 0)"
     assert pruned_peak > 0, "masker never activated (no heads pruned)"
     k = min(5, len(losses) // 2)
