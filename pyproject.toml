@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sal-torch"
-version = "0.1.0"
+version = "0.2.0.dev0"
 description = "Structurally Adaptive Learning — training-time sparsification for robust neural networks"
 readme = "README.md"
 license = "LicenseRef-BSL-1.1"
