@@ -45,6 +45,7 @@ class TinyAttn(nn.Module):
         k = self.k_proj(x).view(bs, sl, self.nh, self.hd).transpose(1, 2)
         v = self.v_proj(x).view(bs, sl, self.nh, self.hd).transpose(1, 2)
         a = torch.softmax(q @ k.transpose(-2, -1) / self.hd**0.5, dim=-1)
+        self._last_attn = a.detach()  # [bs, nh, sl, sl] — read when output_attentions=True
         o = (a @ v).transpose(1, 2).contiguous().view(bs, sl, -1)
         return self.out_proj(o)
 
@@ -71,11 +72,18 @@ class TinyTransformer(nn.Module):
         self.ln_f = nn.LayerNorm(hs)
         self.head = nn.Linear(hs, vs, bias=False)
 
-    def forward(self, input_ids=None, labels=None, **kw):
+    def forward(self, input_ids=None, labels=None, output_attentions=False,
+                output_hidden_states=False, **kw):
         bs, sl = input_ids.shape
         x = self.embed(input_ids) + self.pos_embed(torch.arange(sl, device=input_ids.device).unsqueeze(0))
+        hidden_states = [x] if output_hidden_states else None
+        attentions = [] if output_attentions else None
         for block in self.transformer.h:
             x = block(x)
+            if output_hidden_states:
+                hidden_states.append(x)
+            if output_attentions:
+                attentions.append(block.attn._last_attn)
         logits = self.head(self.ln_f(x))
         loss = None
         if labels is not None:
@@ -83,6 +91,8 @@ class TinyTransformer(nn.Module):
                                                labels[...,1:].contiguous().view(-1))
         class Out: pass
         o = Out(); o.logits = logits; o.loss = loss
+        o.attentions = tuple(attentions) if output_attentions else None
+        o.hidden_states = tuple(hidden_states) if output_hidden_states else None
         return o
 
 @pytest.fixture
