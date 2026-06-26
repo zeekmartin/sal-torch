@@ -33,8 +33,11 @@ class ScanResult:
             data = {"fi_score": self.fi_score, "num_layers": self.num_layers,
                     "layer_classification": {str(k): v.value for k,v in self.layer_map.items()}}
             p.write_text(json.dumps(data, indent=2))
+        elif p.suffix == ".pdf":
+            from sal.visualize import render_fi_pdf
+            render_fi_pdf(self, str(p))
         else:
-            raise ValueError(f"Unsupported: {p.suffix}. Use .json")
+            raise ValueError(f"Unsupported: {p.suffix}. Use .json or .pdf")
 
 class FIScanner:
     def __init__(self, model, probe_dataset, num_samples=500, batch_size=16):
