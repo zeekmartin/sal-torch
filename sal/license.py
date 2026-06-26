@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 # Embedded Ed25519 public key (hex). Set with tools/generate_license.py --embed-key.
 # Kept as a single 64-char literal so --embed-key can replace it cleanly.
 _PLACEHOLDER = "0000000000000000000000000000000000000000000000000000000000000000"
-_PUBLIC_KEY_HEX = "0000000000000000000000000000000000000000000000000000000000000000"
+_PUBLIC_KEY_HEX = "dfdd68b1d11fa5bae45d20d8ee9e234397d62b7e2a77afd70eedc3d71f9aaae6"
 _SEPARATOR = b"\n---\n"
 
 class LicenseError(Exception): pass
