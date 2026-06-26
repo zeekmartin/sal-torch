@@ -8,5 +8,11 @@ build/
 
 # Secrets / local state
 .env
-*.lic
 .modal/
+
+# Internal license tooling & artifacts — NEVER commit
+tools/generate_license.py
+keys/
+licenses/
+*.pem
+*.lic
