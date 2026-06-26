@@ -1,7 +1,6 @@
 # sal-torch
 
-![CI](https://github.com/zeekmartin/sal-torch/actions/workflows/ci.yml/badge.svg)
-![Downloads](https://pepy.tech/badge/sal-torch)
+![CI](https://github.com/zeekmartin/sal-torch/actions/workflows/ci.yml/badge.svg) ![PyPI](https://img.shields.io/pypi/v/sal-torch) ![Python](https://img.shields.io/pypi/pyversions/sal-torch) ![Downloads](https://pepy.tech/badge/sal-torch) ![License](https://img.shields.io/badge/license-BSL%201.1-blue)
 
 
 **Structurally Adaptive Learning for PyTorch**
