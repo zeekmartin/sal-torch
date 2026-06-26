@@ -26,6 +26,7 @@ def test_per_head_fragility_shape():
 
 
 def test_fi_pdf(tiny_model, probe_data, tmp_path):
+    pytest.importorskip("matplotlib"); pytest.importorskip("fpdf")
     res = FIScanner(tiny_model, probe_data, num_samples=40).scan()
     out = tmp_path / "fi.pdf"
     res.save(str(out))
@@ -33,6 +34,7 @@ def test_fi_pdf(tiny_model, probe_data, tmp_path):
 
 
 def test_plasticity_pdf(tiny_model, probe_data, tmp_path):
+    pytest.importorskip("matplotlib"); pytest.importorskip("fpdf")
     pmap = PlasticityScanner(tiny_model, probe_data, num_samples=40).scan()
     out = tmp_path / "plasticity.pdf"
     pmap.save(str(out))
@@ -40,6 +42,7 @@ def test_plasticity_pdf(tiny_model, probe_data, tmp_path):
 
 
 def test_comparison_pdf(tiny_model, tmp_path):
+    pytest.importorskip("matplotlib"); pytest.importorskip("fpdf")
     data = _labeled_data()
     res = compare(tiny_model, data, data, methods=["magnitude", "random_posthoc"], metric="loss")
     out = tmp_path / "comparison.pdf"
