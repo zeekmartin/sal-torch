@@ -3,7 +3,7 @@
 (c) 2026 Cognitive Engineering — cognitive-engineering.dev
 Licensed under BSL 1.1.
 """
-__version__ = "0.2.0"
+__version__ = "0.3.0.dev0"
 
 from sal.config import SALConfig
 from sal.masker import HeadMasker
@@ -12,6 +12,8 @@ from sal.fi import compute_fi, extract_activation_graph, classify_layers, LayerC
 from sal.scanner import FIScanner, FIMonitor
 from sal.plasticity import PlasticityScanner, PlasticityMap, Recommendation
 from sal.compare import compare
+from sal.guard import StructuralGuard, StructuralGuardCallback
+from sal.drift import DriftMonitor, DriftReport, StructuralSnapshot
 
 import sal.license as _lic
 
@@ -40,4 +42,6 @@ _check_env()
 __all__ = ["SALConfig", "SALCallback", "HeadMasker", "FIScanner", "FIMonitor",
            "compute_fi", "extract_activation_graph", "classify_layers", "LayerClass",
            "PlasticityScanner", "PlasticityMap", "Recommendation", "compare",
+           "StructuralGuard", "StructuralGuardCallback",
+           "DriftMonitor", "DriftReport", "StructuralSnapshot",
            "set_license", "license_info"]

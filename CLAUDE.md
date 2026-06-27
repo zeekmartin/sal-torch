@@ -87,14 +87,19 @@ sal/
   trainer.py       SALTrainer (standalone PyTorch loop)
   fi.py            compute_fi (triangle fragility), extract_activation_graph, classify_layers
   scanner.py       FIScanner, FIMonitor
-  arch_support.py  detect_architecture() — registry of supported archs
+  plasticity.py    PlasticityScanner (routing/CKA/MI), PlasticityMap, Recommendation
+  compare.py       sal.compare() — SAL vs magnitude/random post-hoc baselines
+  guard.py         StructuralGuard, StructuralGuardCallback — head-level continual learning
+  drift.py         DriftMonitor, DriftReport, StructuralSnapshot — structural forgetting
+  visualize.py     PDF reports (FI heatmap, plasticity, comparison, guard, drift)
+  arch_support.py  detect_architecture(), output/QKV projection finding
   license.py       Ed25519 offline license (signature verify still a stub)
   report.py        compliance report (stub — Phase 5)
 tests/             CPU-only unit tests + conftest tiny model fixture
 ```
 
-Planned-but-not-yet-implemented (per design doc): `plasticity.py`,
-`guard.py`, `ExpertMasker`, PDF reports.
+Planned-but-not-yet-implemented (per design doc): `plasticity.py` axes beyond
+the three shipped, `ExpertMasker`.
 
 ## Development phase status
 
@@ -105,8 +110,19 @@ Planned-but-not-yet-implemented (per design doc): `plasticity.py`,
   same modules). Validated on real models — DistilBERT, GPT-2, ViT, BERT — both
   on CPU and on a Modal T4 GPU. SAL training pipeline (SALConfig.auto -> SALCallback
   -> HF Trainer -> FIScanner) verified end-to-end.
-- Next: Phase 3 (FIScanner/FIMonitor hardening), Phase 4 (PlasticityScanner),
-  Phase 5 (license signing + reports).
+- **Phase 4 (Plasticity + compare + reports): DONE (v0.2.0).** PlasticityScanner
+  (3-axis routing/CKA/MI absorption map), sal.compare(), visual PDF reports.
+- **v0.3.0 (Continual learning): DONE.** `StructuralGuard` protects critical
+  attention heads (HUB + SATURATED layers + low-redundancy ELASTIC heads) during
+  fine-tuning by zeroing their gradients with backward hooks — head-level
+  granularity, composes with SAL, serializable. `DriftMonitor` measures
+  structural forgetting (forgetting_score, FI delta, per-layer CKA retention,
+  protected_integrity, classification changes). Protection ranking is driven by
+  PlasticityScanner (routing/CKA/MI) + per-head redundancy — **no spectral
+  internals**. 83 unit tests pass on CPU; validated guarded-vs-unguarded on Modal
+  T4 (DistilBERT SST-2 → MNLI). `arch_support.get_qkv_projections()` added for
+  head-level Q/K/V/O weight slicing.
+- Next: Phase 5 (license signing + compliance reports).
 
 ## Integration tests
 
