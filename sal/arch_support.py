@@ -155,3 +155,42 @@ def get_output_projections(model, attention_pattern: str | None = None) -> list:
         if p is not None:
             projs.append(p)
     return projs
+
+
+# Q/K/V projection names. Separate triples are tried first (Linear modules);
+# fused names hold Q, K, V concatenated in a single projection.
+_QKV_TRIPLES = [
+    ("q_proj", "k_proj", "v_proj"),   # llama / mistral / phi / gemma / qwen / tiny test
+    ("query", "key", "value"),        # bert / roberta / vit (often under `.self`)
+    ("q_lin", "k_lin", "v_lin"),      # distilbert
+    ("q", "k", "v"),
+]
+_QKV_FUSED = ["c_attn", "qkv_proj", "in_proj", "Wqkv", "query_key_value"]
+
+
+def get_qkv_projections(attn_module):
+    """Locate the Q/K/V projection(s) for an attention container.
+
+    Returns one of:
+      * ``{"mode": "separate", "q": mod, "k": mod, "v": mod}`` — three modules, or
+      * ``{"mode": "fused", "qkv": mod, "name": str}`` — one module holding Q|K|V, or
+      * ``None`` if nothing recognizable is found.
+
+    BERT/ViT keep Q/K/V one level down in ``.self``; both levels are searched.
+    """
+    candidates = [attn_module]
+    sub = getattr(attn_module, "self", None)
+    if sub is not None:
+        candidates.append(sub)
+
+    for c in candidates:
+        for qn, kn, vn in _QKV_TRIPLES:
+            q, k, v = getattr(c, qn, None), getattr(c, kn, None), getattr(c, vn, None)
+            if q is not None and k is not None and v is not None:
+                return {"mode": "separate", "q": q, "k": k, "v": v}
+    for c in candidates:
+        for name in _QKV_FUSED:
+            m = getattr(c, name, None)
+            if m is not None:
+                return {"mode": "fused", "qkv": m, "name": name}
+    return None
