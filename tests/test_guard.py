@@ -161,6 +161,7 @@ class TestComposeWithSAL:
 
 class TestCallback:
     def test_callback(self, tiny_model, probe_data):
+        pytest.importorskip("transformers")  # callback requires the HF Trainer API
         g = StructuralGuard.from_model(tiny_model, probe_data, protection_level=0.5, num_samples=40)
         cb = StructuralGuardCallback(g)
         cb.on_train_begin(None, None, None, model=tiny_model)
