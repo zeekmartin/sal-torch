@@ -3,7 +3,7 @@
 (c) 2026 Cognitive Engineering — cognitive-engineering.dev
 Licensed under BSL 1.1.
 """
-__version__ = "0.3.0.dev0"
+__version__ = "0.3.0"
 
 from sal.config import SALConfig
 from sal.masker import HeadMasker
