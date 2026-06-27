@@ -48,3 +48,12 @@ def test_comparison_pdf(tiny_model, tmp_path):
     out = tmp_path / "comparison.pdf"
     res.save(str(out))
     assert out.exists() and out.stat().st_size > 0
+
+
+def test_guard_pdf(tiny_model, probe_data, tmp_path):
+    pytest.importorskip("matplotlib"); pytest.importorskip("fpdf")
+    from sal.guard import StructuralGuard
+    g = StructuralGuard.from_model(tiny_model, probe_data, protection_level=0.5, num_samples=40)
+    out = tmp_path / "guard.pdf"
+    g.save(str(out))
+    assert out.exists() and out.stat().st_size > 0
