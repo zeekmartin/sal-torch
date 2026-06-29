@@ -16,3 +16,8 @@ keys/
 licenses/
 *.pem
 *.lic
+
+# Internal research experiments — local only, never shipped or pushed
+sal/experiments/
+scripts/modal_cumulant_experiment.py
+SKILL_EulerianCutSpectrum.md
