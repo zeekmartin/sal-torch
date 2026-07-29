@@ -126,9 +126,13 @@ def _run_arm(arm: str, model, train_b, eval_b, device, use_sal: bool):
 
 
 def _plain_train(pipe, batches, device):
-    """The no-SAL control: identical loop, no masker."""
+    """The no-SAL control: identical loop and clipping, no masker."""
+    import time
+
     import torch
     from torch.optim import AdamW
+
+    t0 = time.time()
 
     torch.manual_seed(pipe.seed)
     model = pipe.model
@@ -138,10 +142,12 @@ def _plain_train(pipe, batches, device):
         for batch in batches:
             loss = model(**batch).loss
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
             opt.zero_grad()
     model.eval()
-    pipe._record("fine_tuned", detail=f"{EPOCHS} epochs, full fine-tune, no SAL")
+    pipe._record("fine_tuned", detail=f"{EPOCHS} epochs, full fine-tune, no SAL",
+                 seconds=time.time() - t0)
 
 
 @app.function(image=image, gpu="T4", timeout=3600, memory=32768)
@@ -172,7 +178,13 @@ def pipeline_end_to_end():
     reload_acc = None
     try:
         from sal.robustness import _evaluate
-        reloaded = type(sal_pipe.model).from_pretrained(sal_export["path"])
+        # Prefer the fallback artifact when save_pretrained could not round-trip
+        # a sliced model — that is the file the pipeline says to use.
+        if sal_export.get("fallback"):
+            reloaded = torch.load(sal_export["fallback"], weights_only=False)
+            print(f"\nreloading from fallback {sal_export['fallback']}", flush=True)
+        else:
+            reloaded = type(sal_pipe.model).from_pretrained(sal_export["path"])
         reloaded.to(device).eval()
         reload_acc = _evaluate(reloaded, eval_b, "accuracy", BATCH_SIZE)
         print(f"\nreloaded SAL model accuracy: {reload_acc:.4f}", flush=True)

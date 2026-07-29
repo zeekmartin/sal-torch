@@ -308,7 +308,7 @@ class CompressionPipeline:
     # ---------------------------------------------------------------- sal_train
     def sal_train(self, train_dataset, epochs: int = 3, prune_fraction: float = 0.33,
                   lr: float = 5e-5, batch_size: Optional[int] = None,
-                  optimizer=None) -> "CompressionPipeline":
+                  optimizer=None, max_grad_norm: Optional[float] = 1.0) -> "CompressionPipeline":
         """Fully fine-tune with SAL head masking active.
 
         Every parameter is trained — that is the point. The masker is removed
@@ -353,6 +353,12 @@ class CompressionPipeline:
                     out = self.model(**batch) if isinstance(batch, dict) else self.model(batch)
                     loss = out.loss if hasattr(out, "loss") else out
                     loss.backward()
+                    # Silencing a third of the heads makes gradients spikier than
+                    # normal fine-tuning; SALTrainer clips by default and this
+                    # path should not silently differ from it.
+                    if max_grad_norm:
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(),
+                                                       max_grad_norm)
                     opt.step()
                     opt.zero_grad()
                     step += 1
@@ -496,12 +502,21 @@ class CompressionPipeline:
         if verify:
             result["roundtrip_verified"] = self._verify_export(out, result["format"])
             self._roundtrip = result["roundtrip_verified"]
-            if result["roundtrip_verified"] is False:
+            if result["roundtrip_verified"] is False and result["format"] == "huggingface":
+                # A directory that reloads to a *different* model is worse than no
+                # export at all, so write a format that does round-trip alongside it
+                # rather than leaving the caller with a warning and a broken artifact.
+                torch.save(self.model, out / "model.pt")
+                result["format"] = "huggingface+torch.save"
+                result["fallback"] = str(out / "model.pt")
+                result["roundtrip_verified"] = self._verify_export(out, "torch.save")
+                self._roundtrip = result["roundtrip_verified"]
                 logger.warning(
-                    "The exported model did not reload identically. Architectures that "
-                    "derive attention width from hidden_size (GPT-2, BERT) rebuild "
-                    "sliced models at full width. The in-memory model is still correct; "
-                    "serialize it with torch.save to keep it.")
+                    "save_pretrained did not reload identically: architectures that "
+                    "derive attention width from hidden_size (GPT-2, BERT) rebuild a "
+                    "sliced model at full width. Wrote model.pt alongside it, which "
+                    "loads with torch.load and needs transformers but not sal-torch. "
+                    f"Round-trip via that file: {result['roundtrip_verified']}.")
         return result
 
     def _verify_export(self, out: Path, fmt: str) -> Optional[bool]:
