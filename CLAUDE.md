@@ -89,6 +89,7 @@ sal/
   scanner.py       FIScanner, FIMonitor
   plasticity.py    PlasticityScanner (routing/CKA/MI), PlasticityMap, Recommendation
   compare.py       sal.compare() — SAL vs magnitude/random post-hoc baselines
+  robustness.py    RobustnessTest, RobustnessReport, robustness_compare — compression survival
   guard.py         StructuralGuard, StructuralGuardCallback — head-level continual learning
   drift.py         DriftMonitor, DriftReport, StructuralSnapshot — structural forgetting
   visualize.py     PDF reports (FI heatmap, plasticity, comparison, guard, drift)
@@ -122,7 +123,17 @@ the three shipped, `ExpertMasker`.
   internals**. 83 unit tests pass on CPU; validated guarded-vs-unguarded on Modal
   T4 (DistilBERT SST-2 → MNLI). `arch_support.get_qkv_projections()` added for
   head-level Q/K/V/O weight slicing.
-- Next: Phase 5 (license signing + compliance reports).
+- **v0.4.0 (Robustness suite): IN DEVELOPMENT.** `RobustnessTest` scores a model
+  under INT8, INT4, head pruning, and inference-time FFN neuron dropout;
+  `robustness_compare()` puts a SAL-trained model head-to-head with a standard
+  one, each scored against its own clean baseline. INT4 prefers bitsandbytes NF4
+  (`[quant]` extra) and falls back to a simulated per-channel INT4 round-trip,
+  recording which backend ran. Head pruning reuses `HeadMasker`; neuron dropout
+  targets FFN *expansion* projections (out_features > in_features) with a fixed
+  fault pattern per trial. 108 unit tests pass on CPU. Motivated by a community
+  poll (33 votes): 39% quantize, 24% magnitude-prune, 21% distill.
+- Next: Phase 5 (license signing + compliance reports); v0.5.0 topology-guided
+  distillation. See `ROADMAP.md` (public).
 
 ## Integration tests
 
