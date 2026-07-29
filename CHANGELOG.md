@@ -1,7 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.4.0.dev0 — Robustness suite (in development)
 
+- **`RobustnessTest` / `RobustnessReport`** — run a model through INT8, INT4,
+  head pruning, and inference-time FFN neuron dropout, and report baseline /
+  after / delta / survived per method plus an aggregate `robustness_score`.
+  INT4 uses bitsandbytes NF4 when available and falls back to a simulated
+  per-channel INT4 round-trip otherwise.
+- **`robustness_compare()`** — head-to-head resilience of a SAL-trained model
+  against a standard one, scored against each model's own clean baseline.
+- Robustness bar chart, retention radar, and comparison PDF in `sal.visualize`.
+- New `[quant]` extra (bitsandbytes) for real 4-bit quantization.
 - `StructuralGuard.release()` no longer takes a `model` argument — the gradient
   hooks live on the parameter tensors, so releasing them needs no model
   reference. Call `guard.release()` instead of `guard.release(model)`.

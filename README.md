@@ -111,6 +111,79 @@ result.save("comparison.pdf")    # bar chart + table
 compare.register_method("my_pruner", lambda model, ds, eval_ds, ctx: my_score)
 ```
 
+## Does it survive real compression?
+
+We polled practitioners on how they actually compress models. Of 33 responses,
+**39% quantize** (INT8/INT4) — more than pruning and distillation. SAL was built
+against head pruning, so the honest question is whether the resilience it trains
+in generalizes to the compression people actually ship.
+
+### RobustnessTest — one model, every degradation
+
+```python
+from sal import RobustnessTest
+
+test = RobustnessTest(model, eval_dataset, metric="accuracy")
+report = test.run(methods=["int8", "int4", "head_pruning_33", "head_pruning_50",
+                           "neuron_dropout_10", "neuron_dropout_20"])
+
+print(report.table)
+# method              baseline     after     delta     std  survived
+# ------------------------------------------------------------------
+# int8                  0.9230    0.9180   -0.0050       -        OK
+# int4                  0.9230    0.8910   -0.0320       -        OK
+# head_pruning_33       0.9230    0.8120   -0.1110       -      FAIL
+# neuron_dropout_10     0.9230    0.9190   -0.0040   0.002        OK
+
+print(report.robustness_score)   # aggregate 0-1: mean quality retained
+print(report.survival_rate)      # fraction of methods survived
+
+report.save("robustness.json")
+report.save("robustness.pdf")    # bars + retention radar (needs sal-torch[reports])
+```
+
+A method counts as **survived** when relative degradation stays within
+`survival_threshold` (default 5% of the clean baseline). Methods:
+
+| Method | What it does |
+|---|---|
+| `int8` | Dynamic INT8 over every `nn.Linear` (`torch.ao.quantization`, CPU) |
+| `int4` | 4-bit weight-only — bitsandbytes NF4 when available, otherwise a simulated per-channel INT4 round-trip (the backend used is recorded on each result) |
+| `head_pruning_<pct>` | Silences `<pct>`% of attention heads using the shipped `HeadMasker` |
+| `neuron_dropout_<pct>` | Zeroes `<pct>`% of FFN neurons at inference — dead units / noisy hardware. Repeated over several fault patterns; mean ± std reported |
+
+`pip install sal-torch[quant]` adds bitsandbytes for real NF4. Without it, `int4`
+falls back to simulation rather than disappearing from your report — pass
+`allow_simulated_quant=False` if you would rather see the row skipped.
+
+### robustness_compare() — SAL-trained vs. standard
+
+```python
+from sal import robustness_compare
+
+result = robustness_compare(
+    sal_model=sal_trained_model,
+    baseline_model=standard_model,
+    eval_dataset=eval_dataset,
+    methods=["int8", "int4", "head_pruning_33"],
+    metric="accuracy",
+)
+
+print(result.table)
+# method            base_after  base_deg   sal_after   sal_deg    winner
+# int8                  0.8910     3.47%      0.9180     0.54%       SAL
+# int4                  0.8410     8.87%      0.8850     4.11%       SAL
+
+print(result.summary)
+# "SAL-trained model is more robust in 2/2 compression methods ..."
+
+result.save("robustness_comparison.pdf")
+```
+
+Each model is scored against **its own** clean baseline, so the comparison
+measures resilience rather than which model was better to begin with. The row
+winner is whichever model loses proportionally less.
+
 ## Continual learning without replay buffers
 
 ### StructuralGuard — protect what matters when you fine-tune

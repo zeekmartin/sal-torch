@@ -3,7 +3,7 @@
 (c) 2026 Cognitive Engineering — cognitive-engineering.dev
 Licensed under BSL 1.1.
 """
-__version__ = "0.3.0"
+__version__ = "0.4.0.dev0"
 
 from sal.config import SALConfig
 from sal.masker import HeadMasker
@@ -15,6 +15,7 @@ from sal.plasticity import PlasticityScanner, PlasticityMap, Recommendation
 from sal.compare import compare
 from sal.guard import StructuralGuard, StructuralGuardCallback
 from sal.drift import DriftMonitor, DriftReport, StructuralSnapshot
+from sal.robustness import RobustnessTest, RobustnessReport, robustness_compare
 
 import sal.license as _lic
 
@@ -46,4 +47,5 @@ __all__ = ["SALConfig", "SALCallback", "SALTrainer", "HeadMasker",
            "PlasticityScanner", "PlasticityMap", "Recommendation", "compare",
            "StructuralGuard", "StructuralGuardCallback",
            "DriftMonitor", "DriftReport", "StructuralSnapshot",
+           "RobustnessTest", "RobustnessReport", "robustness_compare",
            "set_license", "license_info"]

@@ -51,7 +51,7 @@ The mechanism and the diagnostic.
 
 ## Next: v0.4.0 — the Robustness Suite
 
-**In development.**
+**In development — API shipped on `main`, validation in progress.**
 
 We asked practitioners how they actually compress models. 33 people answered:
 
@@ -72,14 +72,18 @@ we will say so in this document and scope SAL honestly.
 
 **Scope:**
 
-- **`RobustnessTest`** — run one model through a battery of degradations (INT8,
-  INT4, head pruning at several rates, inference-time neuron dropout) and report
-  baseline / after / delta / survived per method, plus an aggregate robustness
-  score.
-- **`robustness_compare()`** — the head-to-head: a SAL-trained model versus a
+- ✅ **`RobustnessTest`** — run one model through a battery of degradations
+  (INT8, INT4, head pruning at several rates, inference-time neuron dropout) and
+  report baseline / after / delta / survived per method, plus an aggregate
+  robustness score.
+- ✅ **`robustness_compare()`** — the head-to-head: a SAL-trained model versus a
   standard one, across every method, with a winner per row.
-- **Visual robustness reports** — bar and radar charts, JSON and PDF.
-- **Honest publication of the result**, whichever way it lands.
+- ✅ **Visual robustness reports** — bar and radar charts, JSON and PDF.
+- ⏳ **Honest publication of the result**, whichever way it lands.
+
+INT4 uses bitsandbytes NF4 when `sal-torch[quant]` is installed, and falls back
+to a simulated per-channel INT4 round-trip otherwise, so the row never silently
+vanishes from a report.
 
 For the 24% on magnitude pruning: `sal.compare()` already covers you today.
 For the 21% on distillation: see v0.5.0.
