@@ -18,10 +18,19 @@ Three tiers, three GPU classes:
 
 Protocol, identical per tier
 ----------------------------
-**Phase A — training.** Fine-tune twice from the same checkpoint with LoRA
-r=16 for 3 epochs: once plain, once with SAL at ``prune_fraction=0.33``. Both
-arms see the same data in the same order with the same seed. Adapters are merged
-before evaluation, so the battery compresses a plain dense model.
+**Phase A — training.** Fine-tune twice from the same checkpoint for 3 epochs:
+once plain, once with SAL at ``prune_fraction=0.33``. Both arms see the same data
+in the same order with the same seed. Tiers train with LoRA r=16 by default
+(adapters merged before evaluation, so the battery compresses a plain dense
+model); the ``gpt2_full`` tier updates every weight instead.
+
+That extra tier exists to settle a specific question. SAL's mechanism is the
+model *reorganizing* around silenced heads, but LoRA freezes the base weights —
+only the adapters can redistribute. SAL halved pruning damage on DistilBERT
+(full fine-tuning) and won at 50% pruning on GPT-2 Medium under LoRA, yet showed
+nothing at all on Phi-2 2.7B under LoRA. Either LoRA starves the mechanism as
+the adapter-to-model ratio shrinks, or SAL does not scale. Running the same
+model and task with and without LoRA separates the two.
 
 **Phase B — compression battery.** Seven variants per arm::
 
@@ -135,6 +144,20 @@ TIERS = {
         "lora_targets": ["c_attn"],
         "n_train": 1024, "n_eval": 512, "max_len": 96,
         "train_bs": 8, "grad_accum": 1, "eval_bs": 16, "lr": 2e-4,
+    },
+    # Same model, same task, same data as "gpt2" — the only difference is that
+    # every weight moves. Compare the two tiers to see whether LoRA is what
+    # starves SAL. Full fine-tuning needs a much smaller LR than adapters do.
+    "gpt2_full": {
+        "model": "gpt2-medium",
+        "task": "sst2",
+        "gpu": "T4",
+        "memory": 16384,
+        "dtype": "float32",
+        "finetune": "full",
+        "lora_targets": [],
+        "n_train": 1024, "n_eval": 512, "max_len": 96,
+        "train_bs": 8, "grad_accum": 1, "eval_bs": 16, "lr": 2e-5,
     },
 }
 
@@ -268,29 +291,40 @@ def _train_batch(tok, examples, idxs, max_len: int):
     return {"input_ids": input_ids, "attention_mask": attn, "labels": labels}
 
 
-def train_lora(base_model, tok, examples, cfg: dict, device, use_sal: bool, seed: int = 0):
-    """LoRA fine-tune, optionally with SAL head masking. Returns the merged model.
+def train_arm(base_model, tok, examples, cfg: dict, device, use_sal: bool, seed: int = 0):
+    """Fine-tune one arm, optionally with SAL head masking. Returns a dense model.
 
-    SAL runs against ``base_model`` (the object PEFT wraps in place), so the head
-    masks sit on the real attention output projections while the LoRA adapters
-    take the gradient. The masker is removed before merging.
+    ``cfg["finetune"]`` selects ``"lora"`` (default) or ``"full"``. Either way SAL
+    runs against ``base_model`` — the object PEFT wraps in place — so the head
+    masks sit on the real attention output projections while whichever parameters
+    are trainable take the gradient. The masker is removed before returning, and
+    LoRA adapters are merged, so the compression battery always sees a plain
+    dense model.
     """
     import numpy as np
     import torch
-    from peft import LoraConfig, get_peft_model
     from torch.optim import AdamW
 
     from sal.config import SALConfig
     from sal.masker import HeadMasker
 
     torch.manual_seed(seed)
-
+    mode = cfg.get("finetune", "lora")
     sal_config = SALConfig.auto(base_model, prune_fraction=PRUNE_FRACTION) if use_sal else None
 
-    peft_model = get_peft_model(base_model, LoraConfig(
-        r=LORA_R, lora_alpha=2 * LORA_R, lora_dropout=0.05, bias="none",
-        task_type="CAUSAL_LM", target_modules=cfg["lora_targets"]))
-    peft_model.to(device)
+    if mode == "lora":
+        from peft import LoraConfig, get_peft_model
+        train_model = get_peft_model(base_model, LoraConfig(
+            r=LORA_R, lora_alpha=2 * LORA_R, lora_dropout=0.05, bias="none",
+            task_type="CAUSAL_LM", target_modules=cfg["lora_targets"]))
+    elif mode == "full":
+        train_model = base_model
+        for p in train_model.parameters():
+            p.requires_grad_(True)
+    else:
+        raise ValueError(f"cfg['finetune'] must be 'lora' or 'full', got '{mode}'")
+
+    train_model.to(device)
 
     # Install after .to(device): masks are allocated on the model's device.
     masker = HeadMasker(base_model, sal_config, seed=seed) if use_sal else None
@@ -302,9 +336,14 @@ def train_lora(base_model, tok, examples, cfg: dict, device, use_sal: bool, seed
     batches = [order[i:i + bs] for i in range(0, len(examples), bs)]
     total_steps = max(1, (len(batches) * EPOCHS) // accum)
 
-    params = [p for p in peft_model.parameters() if p.requires_grad]
+    params = [p for p in train_model.parameters() if p.requires_grad]
+    n_trainable = sum(p.numel() for p in params)
+    n_total = sum(p.numel() for p in train_model.parameters())
+    print(f"    {mode}: {n_trainable / 1e6:.1f}M trainable / {n_total / 1e6:.1f}M "
+          f"({n_trainable / max(n_total, 1):.1%}), lr={cfg['lr']:g}", flush=True)
+
     opt = AdamW(params, lr=cfg["lr"])
-    peft_model.train()
+    train_model.train()
 
     step, micro = 0, 0
     for _ in range(EPOCHS):
@@ -313,7 +352,7 @@ def train_lora(base_model, tok, examples, cfg: dict, device, use_sal: bool, seed
                 masker.step(step, total_steps)
             batch = {k: v.to(device) for k, v in
                      _train_batch(tok, examples, idxs, cfg["max_len"]).items()}
-            loss = peft_model(**batch).loss / accum
+            loss = train_model(**batch).loss / accum
             loss.backward()
             micro += 1
             if micro % accum == 0:
@@ -328,10 +367,12 @@ def train_lora(base_model, tok, examples, cfg: dict, device, use_sal: bool, seed
         print(f"    SAL: {stats['pruned_heads']}/{stats['total_heads']} heads silenced "
               f"by end of training over {stats['prune_events']} prune events", flush=True)
 
-    peft_model.eval()
-    merged = peft_model.merge_and_unload()
-    del peft_model
-    return merged
+    train_model.eval()
+    if mode == "lora":
+        merged = train_model.merge_and_unload()
+        del train_model
+        return merged
+    return train_model
 
 
 # ----------------------------------------------------------------- quantization
@@ -678,8 +719,8 @@ def run_tier(tier: str) -> dict:
     cfg = TIERS[tier]
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = getattr(torch, cfg["dtype"])
-    print(f"=== tier '{tier}': {cfg['model']} on {cfg['task']} ({device}, {cfg['dtype']}) ===",
-          flush=True)
+    print(f"=== tier '{tier}': {cfg['model']} on {cfg['task']} ({device}, {cfg['dtype']}, "
+          f"{cfg.get('finetune', 'lora')} fine-tune) ===", flush=True)
 
     tok = AutoTokenizer.from_pretrained(cfg["model"])
     if tok.pad_token is None:
@@ -690,12 +731,14 @@ def run_tier(tier: str) -> dict:
           f"{len(eval_ex[0]['choices'])}-way", flush=True)
 
     results = {}
+    mode = cfg.get("finetune", "lora")
     for arm, use_sal in (("baseline", False), ("SAL", True)):
-        print(f"\n[{tier}/{arm}] LoRA r={LORA_R}, {EPOCHS} epochs"
+        label = f"LoRA r={LORA_R}" if mode == "lora" else "full fine-tune"
+        print(f"\n[{tier}/{arm}] {label}, {EPOCHS} epochs"
               f"{', SAL prune_fraction=0.33' if use_sal else ''}...", flush=True)
         base = AutoModelForCausalLM.from_pretrained(cfg["model"], dtype=dtype)
         t0 = time.time()
-        merged = train_lora(base, tok, train_ex, cfg, device, use_sal=use_sal, seed=0)
+        merged = train_arm(base, tok, train_ex, cfg, device, use_sal=use_sal, seed=0)
         print(f"    trained in {time.time() - t0:.0f}s", flush=True)
 
         # Park the master on CPU: each variant deep-copies from here, and holding
@@ -714,7 +757,9 @@ def run_tier(tier: str) -> dict:
     verdict = summarize(tier, results["baseline"], results["SAL"], n_eval=cfg["n_eval"])
     return {"tier": tier, "model": cfg["model"], "task": cfg["task"],
             "gpu": cfg["gpu"], "n_train": cfg["n_train"], "n_eval": cfg["n_eval"],
-            "epochs": EPOCHS, "lora_r": LORA_R, "prune_fraction": PRUNE_FRACTION,
+            "epochs": EPOCHS, "finetune": mode, "lr": cfg["lr"],
+            "lora_r": LORA_R if mode == "lora" else None,
+            "prune_fraction": PRUNE_FRACTION,
             "baseline": results["baseline"], "SAL": results["SAL"], "verdict": verdict}
 
 
@@ -743,7 +788,12 @@ def tier_gpt2():
     return run_tier("gpt2")
 
 
-_ENTRYPOINTS = {"mistral": tier_mistral, "phi2": tier_phi2, "gpt2": tier_gpt2}
+def tier_gpt2_full():
+    return run_tier("gpt2_full")
+
+
+_ENTRYPOINTS = {"mistral": tier_mistral, "phi2": tier_phi2,
+                "gpt2": tier_gpt2, "gpt2_full": tier_gpt2_full}
 
 
 def _register(name: str):
