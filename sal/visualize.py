@@ -20,9 +20,6 @@ _SATURATED_COLOR = "#c62828"  # red    — structural bottleneck
 _HUB_COLOR = "#ef6c00"        # orange — compensates for others
 _CLASS_COLORS = {"ELASTIC": _ELASTIC_COLOR, "SATURATED": _SATURATED_COLOR, "HUB": _HUB_COLOR}
 
-# FI layer classes share the colour language (immune≈elastic, critical≈saturated).
-_FI_CLASS_COLORS = {"IMMUNE": _ELASTIC_COLOR, "BUFFER": _HUB_COLOR, "CRITICAL": _SATURATED_COLOR}
-
 
 def _require():
     """Import the optional plotting stack with a friendly error."""

@@ -93,7 +93,7 @@ sal/
   drift.py         DriftMonitor, DriftReport, StructuralSnapshot — structural forgetting
   visualize.py     PDF reports (FI heatmap, plasticity, comparison, guard, drift)
   arch_support.py  detect_architecture(), output/QKV projection finding
-  license.py       Ed25519 offline license (signature verify still a stub)
+  license.py       Ed25519 offline license verification (PyNaCl, embedded pubkey)
   report.py        compliance report (stub — Phase 5)
 tests/             CPU-only unit tests + conftest tiny model fixture
 ```
@@ -126,11 +126,12 @@ the three shipped, `ExpertMasker`.
 
 ## Integration tests
 
-CPU unit suite stays at **26 passed**; integration tests are marked
+The CPU unit suite must stay all-green (**83 passed** as of v0.3.0, plus the
+6 integration tests skipped); integration tests are marked
 `@pytest.mark.integration` and **skipped by default** (need network + model
 downloads):
 ```
-python -m pytest                                   # 26 unit tests (CPU), integration skipped
+python -m pytest                                   # CPU unit tests, integration skipped
 python -m pytest --run-integration                 # + real-model arch + training tests
 modal run scripts/modal_integration_test.py        # same logic on a Modal T4 GPU
 ```

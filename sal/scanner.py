@@ -3,7 +3,6 @@ from __future__ import annotations
 import json, logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 import numpy as np
 from sal.fi import LayerClass, classify_layers, compute_fi, extract_activation_graph
 

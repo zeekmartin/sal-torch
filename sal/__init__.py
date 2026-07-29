@@ -8,8 +8,9 @@ __version__ = "0.3.0"
 from sal.config import SALConfig
 from sal.masker import HeadMasker
 from sal.callback import SALCallback
+from sal.trainer import SALTrainer
 from sal.fi import compute_fi, extract_activation_graph, classify_layers, LayerClass
-from sal.scanner import FIScanner, FIMonitor
+from sal.scanner import FIScanner, FIMonitor, ScanResult
 from sal.plasticity import PlasticityScanner, PlasticityMap, Recommendation
 from sal.compare import compare
 from sal.guard import StructuralGuard, StructuralGuardCallback
@@ -39,7 +40,8 @@ def _check_env():
 
 _check_env()
 
-__all__ = ["SALConfig", "SALCallback", "HeadMasker", "FIScanner", "FIMonitor",
+__all__ = ["SALConfig", "SALCallback", "SALTrainer", "HeadMasker",
+           "FIScanner", "FIMonitor", "ScanResult",
            "compute_fi", "extract_activation_graph", "classify_layers", "LayerClass",
            "PlasticityScanner", "PlasticityMap", "Recommendation", "compare",
            "StructuralGuard", "StructuralGuardCallback",

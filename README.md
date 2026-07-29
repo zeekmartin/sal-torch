@@ -12,6 +12,8 @@ Training-time sparsification that makes neural networks structurally resilient t
 ```bash
 pip install sal-torch            # core
 pip install sal-torch[hf]        # + HuggingFace Trainer
+pip install sal-torch[reports]   # + PDF/visual reports
+pip install sal-torch[crypto]    # + commercial license verification
 pip install sal-torch[all]       # everything
 ```
 
@@ -26,6 +28,45 @@ trainer.train()
 Three lines. Any transformer. Compression-resilient.
 
 ## Know your model before you touch it
+
+### FIScanner — how fragile is this model?
+
+The **Fragility Index** is a structural diagnostic, scored in `[0, 1]`, that
+measures how much redundant pathway a model's attention graph has. Heads are
+compared by their activation signatures; an edge between two heads is *fragile*
+when they share no common neighbour, i.e. the function it carries has no backup.
+FI is the fraction of such edges.
+
+- **Low FI** → heavily triangulated graph, lots of redundancy → robust.
+- **High FI** → many unsupported edges → fragile under compression.
+
+FI is purely diagnostic — it measures, it never perturbs. You can use it with or
+without SAL training.
+
+```python
+from sal import FIScanner
+
+result = FIScanner(model, probe_dataset).scan()
+
+print(result.fi_score)         # 0.0 - 1.0; lower is more robust
+print(result.summary)          # "FI=0.1842 | 3 immune, 2 buffer, 1 critical"
+print(result.critical_layers)  # layers whose removal moves FI the most
+print(result.immune_layers)    # layers you can compress with little effect
+
+result.save("fragility.json")
+result.save("fragility.pdf")   # per-head heatmap (needs sal-torch[reports])
+```
+
+Track it *during* training with `FIMonitor`, or call the primitives directly:
+
+```python
+from sal import FIMonitor, compute_fi, extract_activation_graph
+
+trainer = Trainer(model=model, callbacks=[FIMonitor(probe_dataset, interval=500)])
+
+adjacency = extract_activation_graph(model, probe_dataset)
+fi = compute_fi(adjacency)
+```
 
 ### PlasticityScanner — where can a model absorb compression?
 
@@ -93,7 +134,7 @@ print(guard.protection_map)    # {layer: [protected head indices]}
 
 guard.protect(model)           # zero gradients for protected heads (backward hooks)
 trainer.train()                # fine-tune on task B with ANY training loop
-guard.release(model)
+guard.release()
 
 drift = guard.measure_drift(model, probe_dataset=probe_dataset)
 print(drift.forgetting_score)      # 0 = nothing forgot, 1 = total reorganization

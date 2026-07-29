@@ -1,6 +1,5 @@
 """Tests for FI computation (triangle-support fragility)."""
 import numpy as np
-import pytest
 from sal.fi import LayerClass, classify_layers, compute_fi, extract_activation_graph
 
 

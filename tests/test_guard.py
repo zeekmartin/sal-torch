@@ -1,7 +1,6 @@
 """Tests for StructuralGuard (CPU, tiny model fixture)."""
 import json
 
-import numpy as np
 import pytest
 import torch
 

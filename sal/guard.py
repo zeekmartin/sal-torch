@@ -277,8 +277,12 @@ class StructuralGuard:
                     f"across {len(self.protection_map)} layers ({len(masks)} weight tensors).")
         return self
 
-    def release(self, model=None) -> "StructuralGuard":
-        """Remove all gradient hooks; gradients flow normally afterwards."""
+    def release(self) -> "StructuralGuard":
+        """Remove all gradient hooks; gradients flow normally afterwards.
+
+        Takes no model — the hooks live on the parameter tensors themselves, so
+        releasing them needs no reference back to the model.
+        """
         for h in self._handles:
             h.remove()
         self._handles = []

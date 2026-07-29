@@ -100,7 +100,7 @@ class HeadMasker:
     def step(self, global_step: int, total_steps: int):
         self._step_count = global_step
         progress = global_step / max(total_steps, 1)
-        start, end = self.config.prune_start_ratio, self.config.prune_end_ratio
+        start = self.config.prune_start_ratio
 
         if progress < start:
             if self._active:
