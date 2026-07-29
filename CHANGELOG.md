@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.4.0.dev0 — Robustness suite (in development)
+## 0.4.0 (2026-07-29) — Robustness suite, full fine-tuning validation
+
+Models that prove their resilience.
 
 - **`RobustnessTest` / `RobustnessReport`** — run a model through INT8, INT4,
   head pruning, and inference-time FFN neuron dropout, and report baseline /
@@ -27,6 +29,19 @@
   reference. Call `guard.release()` instead of `guard.release(model)`.
 - `SALTrainer` and `ScanResult` are now exported from the `sal` namespace.
 - Dropped unused dependencies: `scipy` (core) and `peft` (the `hf` extra).
+- 110 unit tests pass on CPU (was 83).
+
+**Headline result.** Fully fine-tuned on GPT-2 Medium / SST-2, SAL wins all
+seven compression variants — INT8, INT4, head pruning at 33% and 50%, and both
+combined recipes — at no cost to clean accuracy (+0.39pp). `SAL/int4` scores
+0.8926 at 361.9MB against the *uncompressed* standard model's 0.8848 at
+1419.3MB: higher accuracy at a quarter of the size, and the only point on the
+accuracy-vs-size frontier.
+
+**Known limitation.** Under LoRA/QLoRA the identical setup loses. SAL works by
+letting the model reorganize around silenced heads, and adapters freeze the
+weights that would do the reorganizing. Not recommended — see the "When to use
+SAL" table in the README.
 
 ## 0.3.0 (2026-06-27)
 
