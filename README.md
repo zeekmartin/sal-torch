@@ -52,20 +52,32 @@ pipe.compress(pruning=0.33, quantization="int4", slice_heads=True)
 
 report = pipe.validate()
 print(report.table)
-# stage                    size_mb   ratio    accuracy  seconds     <- shape of the
-# ---------------------------------------------------------------      output; run
-# original                     ...   1.00x         ...      ...        it for your
-# sal_trained                  ...   1.00x         ...      ...        own numbers
-# pruned+sliced                ...     ...x        ...      ...
-# quantized (int4)             ...     ...x        ...      ...
+# measured — GPT-2 Medium / SST-2, one T4 (scripts/modal_v050_test.py)
+# stage                    size_mb   ratio    accuracy  seconds
+# -------------------------------------------------------------
+# original                  1419.3   1.00x      0.5020      0.0
+# sal_trained               1419.3   1.00x      0.8965    242.1
+# pruned+sliced             1293.4   1.10x      0.8496      0.4
+# quantized (int4)           346.5   4.10x      0.8398      3.1
 
 pipe.export("compressed_model/")       # reloaded and checked, not just written
+# the exported model reloads at 0.8398 — exactly what was measured
 pipe.report().save("compression_report.pdf")
 ```
 
 `slice_heads=True` is what makes the saving real: masking a head makes it
 *behave* as if it were gone, slicing removes it from the weight matrices. The
 exported model runs with **no hooks and without sal-torch installed**.
+
+One caveat on that run, because it did not go SAL's way: a no-SAL control taken
+through the identical pipeline finished at **0.8633**, above SAL's 0.8398. Dense
+accuracy was a tie (0.8965 vs 0.8926, two eval examples apart), so the gap opened
+under compression — the opposite of the v0.4.0 result. The leading suspect is
+head *selection*: `compress()` removes the lowest-magnitude heads, while the
+v0.4.0 battery removed random ones, and random removal is precisely what SAL
+trains against. Being deliberately resilient to losing any head may leave head
+magnitude a worse guide to which one to drop. Untested either way — see
+[ROADMAP.md](ROADMAP.md).
 
 **It refuses LoRA/QLoRA models.** Not a warning — an error, with the reason and
 what to do instead. SAL works by letting the model reorganize around silenced

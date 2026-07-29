@@ -217,8 +217,43 @@ Shipped on `main`:
   export, measured at every stage. **Refuses LoRA/QLoRA** with an explanation,
   warns under 100M parameters, and `export()` reloads what it wrote rather than
   assuming the round trip held.
-- ⏳ End-to-end validation on GPT-2 Medium, reproducing the Pareto result
-  through the pipeline rather than by hand.
+- ✅ End-to-end validation on GPT-2 Medium — the pipeline runs, and the export
+  reloads at exactly the accuracy that was measured.
+
+**The validation run, honestly.** GPT-2 Medium / SST-2 on one T4, both arms
+through the identical pipeline (`scripts/modal_v050_test.py`):
+
+```
+                       original      trained    sliced      int4     final size
+SAL                      0.5020       0.8965    0.8496    0.8398    347MB (4.1x)
+standard (no SAL)        0.5020       0.8926    0.8770    0.8633    347MB (4.1x)
+```
+
+The pipeline does what it claims: 1419MB → 347MB, every stage measured, and the
+exported artifact reloads at 0.8398 — the number it was given, to four decimals.
+
+**SAL lost this one.** Dense accuracy was a tie (0.8965 vs 0.8926, two eval
+examples apart), so the 2.3-point gap opened under compression — the reverse of
+the v0.4.0 result on the same model and task.
+
+The difference we can name is **head selection**. `compress()` removes the
+lowest-magnitude heads; the v0.4.0 battery removed *random* ones, and random
+removal is exactly what SAL trains against. A model deliberately made resilient
+to losing any given head may also be one whose head magnitudes say less about
+which head to drop — so magnitude ranking could be a worse guide on a SAL-trained
+model specifically. That is a hypothesis, not a finding.
+
+Next on this, before v0.5.0 ships:
+
+- a selection strategy option on `compress()` (magnitude / random / plasticity),
+  measured against each other on both arms;
+- the same run at more seeds, since single-seed 2.3-point gaps have been
+  overturned once already in this project by a missing gradient clip.
+
+**Also fixed by this run:** `sal_train` was not clipping gradients while
+`SALTrainer` clips by default. Silencing a third of the heads makes gradients
+spikier, and the unclipped run scored 0.7676 against the clipped run's 0.8965 —
+a 13-point artifact that would have been reported as "SAL does not work".
 
 Also queued for this window: **more seeds and full eval splits** on the four
 runs above, so the v0.4.0 section can stop calling itself a signal.

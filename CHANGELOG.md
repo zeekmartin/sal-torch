@@ -21,6 +21,14 @@ Turns the v0.4.0 recipe into one object, and makes the savings real.
   model. `export()` reloads what it wrote and reports whether the round trip
   actually held.
 - Compression waterfall and per-stage quality charts in `sal.visualize`.
+- `sal_train()` now clips gradients (1.0 by default), matching `SALTrainer`.
+  Silencing a third of the heads makes gradients spikier than ordinary
+  fine-tuning; unclipped, GPT-2 Medium scored 0.7676 where clipped it scores
+  0.8965.
+- Validated end to end on GPT-2 Medium / SST-2: 1419MB → 347MB (4.1x), export
+  reloads at exactly the measured accuracy. **A no-SAL control finished ahead
+  under compression** (0.8633 vs 0.8398) — see `ROADMAP.md`; head-selection
+  strategy is the leading suspect and is being measured next.
 
 ## 0.4.0 (2026-07-29) — Robustness suite, full fine-tuning validation
 
