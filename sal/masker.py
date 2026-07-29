@@ -167,6 +167,9 @@ class HeadMasker:
             if mask is None or bool(mask.all()):
                 return None
             x = inputs[0]
+            # Masks are built on the model's device at install(); a later .to()
+            # would strand them. Re-home once, then this is a no-op.
+            mask = self._masks[layer_idx] = mask.to(x.device)
             bs, sl, hidden = x.shape
             head_dim = hidden // nh
             # Input to the output projection is the concatenation of per-head
