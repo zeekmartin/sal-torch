@@ -36,6 +36,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -49,6 +50,30 @@ SMALL_MODEL_PARAMS = 100_000_000
 
 class PipelineError(Exception):
     """Raised when the pipeline is asked to do something unsafe or out of order."""
+
+
+@contextmanager
+def _without_hooks(model):
+    """Temporarily strip every hook dict on every submodule.
+
+    ``torch.save`` pickles the module graph, and transformers installs
+    output-capturing hooks that are local closures — unpicklable, so saving a
+    real HF model fails outright. Stripping them is also the right thing on the
+    merits: an exported compressed model is supposed to be standalone, and a
+    pickled hook is exactly the kind of hidden dependency that promise rules out.
+    Restored afterwards so the live model is unchanged.
+    """
+    saved = []
+    for mod in model.modules():
+        for key, value in list(mod.__dict__.items()):
+            if key.endswith("_hooks") and hasattr(value, "clear"):
+                saved.append((mod, key, value))
+                mod.__dict__[key] = type(value)()
+    try:
+        yield
+    finally:
+        for mod, key, value in saved:
+            mod.__dict__[key] = value
 
 
 # ------------------------------------------------------------------- detection
@@ -496,7 +521,8 @@ class CompressionPipeline:
             self.model.save_pretrained(str(out))
             result["format"] = "huggingface"
         else:
-            torch.save(self.model, out / "model.pt")
+            with _without_hooks(self.model):
+                torch.save(self.model, out / "model.pt")
             result["format"] = "torch.save"
 
         if verify:
@@ -506,7 +532,8 @@ class CompressionPipeline:
                 # A directory that reloads to a *different* model is worse than no
                 # export at all, so write a format that does round-trip alongside it
                 # rather than leaving the caller with a warning and a broken artifact.
-                torch.save(self.model, out / "model.pt")
+                with _without_hooks(self.model):
+                    torch.save(self.model, out / "model.pt")
                 result["format"] = "huggingface+torch.save"
                 result["fallback"] = str(out / "model.pt")
                 result["roundtrip_verified"] = self._verify_export(out, "torch.save")
