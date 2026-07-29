@@ -88,3 +88,27 @@ class TestHeadMasker:
         assert m.stats["active"]
         assert m.stats["pruned_heads"] == tiny_config.num_heads_to_prune
         m.remove()
+
+
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
+def test_half_precision_forward(tiny_model, tiny_config, dtype):
+    """Masks must follow the activation dtype.
+
+    Masks are allocated float32; multiplying a half-precision activation by one
+    promotes the result, and the attention output projection then raises
+    "mat1 and mat2 must have the same dtype". Half precision is the normal case
+    for any model large enough to care about SAL.
+    """
+    model = tiny_model.to(dtype).eval()
+    ids = torch.randint(0, 100, (2, 16))
+    m = HeadMasker(model, tiny_config, seed=0)
+    m.install()
+    m.activate()
+    try:
+        with torch.no_grad():
+            out = model(input_ids=ids)
+        assert out.logits.dtype == dtype
+        assert torch.isfinite(out.logits.float()).all()
+        assert m._masks[0].dtype == dtype
+    finally:
+        m.remove()

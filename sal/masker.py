@@ -167,9 +167,12 @@ class HeadMasker:
             if mask is None or bool(mask.all()):
                 return None
             x = inputs[0]
-            # Masks are built on the model's device at install(); a later .to()
-            # would strand them. Re-home once, then this is a no-op.
-            mask = self._masks[layer_idx] = mask.to(x.device)
+            # Masks are built float32 on the model's device at install(), but the
+            # model may live elsewhere (a later .to(device)) or in half precision.
+            # Multiplying a bf16/fp16 activation by an fp32 mask promotes it, and
+            # the projection then rejects the dtype. Follow the activation on both
+            # axes; re-homing is cached, so this is a no-op after the first call.
+            mask = self._masks[layer_idx] = mask.to(x.device, x.dtype)
             bs, sl, hidden = x.shape
             head_dim = hidden // nh
             # Input to the output projection is the concatenation of per-head
