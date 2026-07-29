@@ -779,9 +779,20 @@ def main():
             print(f"tier '{name}' failed: {e}")
             results[name] = {"tier": name, "error": str(e)}
 
+    # Merge into whatever is already on disk: tiers run one at a time (they need
+    # different GPUs and different budget approvals), so a fresh write would
+    # silently discard every tier not in this run.
+    merged = {}
+    if os.path.exists(RESULTS_PATH):
+        try:
+            with open(RESULTS_PATH, encoding="utf-8") as fh:
+                merged = json.load(fh)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"could not read existing {RESULTS_PATH} ({e}); starting fresh")
+    merged.update(results)
     with open(RESULTS_PATH, "w", encoding="utf-8") as fh:
-        json.dump(results, fh, indent=2)
-    print(f"\nwrote {RESULTS_PATH}")
+        json.dump(merged, fh, indent=2)
+    print(f"\nwrote {RESULTS_PATH} (tiers on file: {sorted(merged)})")
 
     print("\n########## CROSS-TIER SUMMARY ##########")
     print(f"{'':<10}{'':<24}{'quant':>13}{'prune':>13}{'combined':>13}{'clean':>10}")
