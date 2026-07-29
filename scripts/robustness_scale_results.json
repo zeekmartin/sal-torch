@@ -126,9 +126,21 @@
       }
     },
     "verdict": {
-      "quantization_only": "2/2",
-      "pruning_only": "2/2",
-      "combined": "2/2",
+      "n_eval": 512,
+      "noise_floor": 0.001953125,
+      "absolute": {
+        "quantization": "0/2",
+        "pruning": "1/2",
+        "combined": "1/2"
+      },
+      "retention": {
+        "quantization": "2/2",
+        "pruning": "2/2",
+        "combined": "2/2"
+      },
+      "dense_baseline": 0.890625,
+      "dense_sal": 0.859375,
+      "clean_accuracy_delta": -0.03125,
       "pareto_front": [
         "baseline/dense",
         "baseline/int8",

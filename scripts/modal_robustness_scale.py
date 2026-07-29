@@ -444,13 +444,22 @@ def quantize_int4(model, device):
 
 # -------------------------------------------------------------------- measurement
 def model_size_mb(model) -> float:
-    """Serialized state-dict size in MB — what the artifact actually costs on disk."""
-    import io
+    """Total tensor bytes in MB — what the artifact costs to store.
 
-    import torch
-    buf = io.BytesIO()
-    torch.save(model.state_dict(), buf)
-    return len(buf.getbuffer()) / 1e6
+    Summed analytically rather than by serializing to a buffer: at 2.7B+ this is
+    called once per variant, and round-tripping several GB fourteen times eats a
+    meaningful slice of the run's timeout for a number that matches to within a
+    fraction of a percent (GPT-2 Medium fp32: 1419.4MB serialized vs 1420.0MB
+    analytic). Quantized parameters report their packed storage, which is the
+    point of the measurement.
+    """
+    seen, total = set(), 0
+    for t in list(model.parameters()) + list(model.buffers()):
+        if id(t) in seen:
+            continue
+        seen.add(id(t))
+        total += t.numel() * t.element_size()
+    return total / 1e6
 
 
 def tokens_per_second(model, tok, examples, max_len: int, batch_size: int, device,
@@ -592,7 +601,7 @@ def retention_table(base: dict, sal: dict) -> str:
     return "\n".join(lines)
 
 
-def summarize(tier: str, base: dict, sal: dict) -> dict:
+def summarize(tier: str, base: dict, sal: dict, n_eval: int = 0) -> dict:
     """Print the tables and return the machine-readable verdict for this tier."""
     print(f"\n===== {tier}: accuracy and size =====", flush=True)
     print(comparison_table(base, sal), flush=True)
@@ -611,35 +620,53 @@ def summarize(tier: str, base: dict, sal: dict) -> dict:
 
     b0 = base.get("dense", {}).get("accuracy")
     s0 = sal.get("dense", {}).get("accuracy")
-    quant_wins = prune_wins = combo_wins = 0
-    quant_n = prune_n = combo_n = 0
-    if b0 and s0:
-        for v in VARIANTS:
-            b, s = base.get(v, {}), sal.get(v, {})
-            if v == "dense" or "accuracy" not in b or "accuracy" not in s:
-                continue
-            sal_better = (s["accuracy"] / s0) > (b["accuracy"] / b0)
-            if "+" in v:
-                combo_n += 1
-                combo_wins += int(sal_better)
-            elif v.startswith("prune"):
-                prune_n += 1
-                prune_wins += int(sal_better)
-            else:
-                quant_n += 1
-                quant_wins += int(sal_better)
 
-    verdict = {
-        "quantization_only": f"{quant_wins}/{quant_n}",
-        "pruning_only": f"{prune_wins}/{prune_n}",
-        "combined": f"{combo_wins}/{combo_n}",
+    # Two scorings, because they can disagree and only one of them is a
+    # deployment number. Absolute asks "which model would I ship?"; retention
+    # asks "which model degrades more gracefully?" — and retention flatters
+    # whichever arm started lower, so it must never be reported alone.
+    cats = {"quantization": [], "pruning": [], "combined": []}
+    for v in VARIANTS:
+        b, s = base.get(v, {}), sal.get(v, {})
+        if v == "dense" or "accuracy" not in b or "accuracy" not in s:
+            continue
+        key = "combined" if "+" in v else ("pruning" if v.startswith("prune") else "quantization")
+        abs_win = s["accuracy"] > b["accuracy"]
+        ret_win = (b0 and s0) and (s["accuracy"] / s0) > (b["accuracy"] / b0)
+        cats[key].append((bool(abs_win), bool(ret_win)))
+
+    def tally(rows, idx):
+        return f"{sum(1 for r in rows if r[idx])}/{len(rows)}"
+
+    absolute = {k: tally(v, 0) for k, v in cats.items()}
+    retention = {k: tally(v, 1) for k, v in cats.items()}
+    clean_delta = (s0 - b0) if (b0 is not None and s0 is not None) else None
+
+    print(f"\n===== {tier}: SAL wins by category =====", flush=True)
+    print(f"  {'category':<16}{'absolute':>10}{'retention':>12}", flush=True)
+    for k in ("quantization", "pruning", "combined"):
+        print(f"  {k:<16}{absolute[k]:>10}{retention[k]:>12}", flush=True)
+    if clean_delta is not None:
+        print(f"\n  clean accuracy: baseline {b0:.4f} -> SAL {s0:.4f} ({clean_delta:+.4f})",
+              flush=True)
+    print("  absolute = which model scores higher, the deployment question.", flush=True)
+    print("  retention = degradation vs each arm's own dense model; it flatters", flush=True)
+    print("              whichever arm started lower, so read it alongside absolute.",
+          flush=True)
+    if n_eval:
+        print(f"\n  noise floor: {n_eval} eval examples, so one example is "
+              f"{1.0 / n_eval:.3%}; margins below that are not evidence.", flush=True)
+
+    return {
+        "n_eval": n_eval,
+        "noise_floor": (1.0 / n_eval) if n_eval else None,
+        "absolute": absolute,
+        "retention": retention,
+        "dense_baseline": b0,
+        "dense_sal": s0,
+        "clean_accuracy_delta": clean_delta,
         "pareto_front": front,
     }
-    print(f"\n===== {tier}: SAL wins by category (retention-normalized) =====", flush=True)
-    print(f"  quantization only : {verdict['quantization_only']}", flush=True)
-    print(f"  pruning only      : {verdict['pruning_only']}", flush=True)
-    print(f"  combined          : {verdict['combined']}", flush=True)
-    return verdict
 
 
 # ------------------------------------------------------------------- the runner
@@ -684,7 +711,7 @@ def run_tier(tier: str) -> dict:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    verdict = summarize(tier, results["baseline"], results["SAL"])
+    verdict = summarize(tier, results["baseline"], results["SAL"], n_eval=cfg["n_eval"])
     return {"tier": tier, "model": cfg["model"], "task": cfg["task"],
             "gpu": cfg["gpu"], "n_train": cfg["n_train"], "n_eval": cfg["n_eval"],
             "epochs": EPOCHS, "lora_r": LORA_R, "prune_fraction": PRUNE_FRACTION,
@@ -757,14 +784,21 @@ def main():
     print(f"\nwrote {RESULTS_PATH}")
 
     print("\n########## CROSS-TIER SUMMARY ##########")
-    print(f"{'tier':<10}{'model':<28}{'quant':>8}{'prune':>8}{'combo':>8}")
-    print("-" * 62)
+    print(f"{'':<10}{'':<24}{'quant':>13}{'prune':>13}{'combined':>13}{'clean':>10}")
+    print(f"{'tier':<10}{'model':<24}{'abs / ret':>13}{'abs / ret':>13}"
+          f"{'abs / ret':>13}{'delta':>10}")
+    print("-" * 83)
     for name, res in results.items():
         if "verdict" not in res:
-            print(f"{name:<10}{'(failed)':<28}{'-':>8}{'-':>8}{'-':>8}")
+            print(f"{name:<10}{'(failed)':<24}{'-':>13}{'-':>13}{'-':>13}{'-':>10}")
             continue
         v = res["verdict"]
-        print(f"{name:<10}{res['model']:<28}{v['quantization_only']:>8}"
-              f"{v['pruning_only']:>8}{v['combined']:>8}")
-    print("\nSAL wins per category, normalized against each arm's own dense accuracy.")
-    print("Single seed per tier — treat sub-point margins as noise.")
+        a, r = v["absolute"], v["retention"]
+        delta = v.get("clean_accuracy_delta")
+        cells = [f"{a[k]} / {r[k]}" for k in ("quantization", "pruning", "combined")]
+        print(f"{name:<10}{res['model']:<24}{cells[0]:>13}{cells[1]:>13}{cells[2]:>13}"
+              f"{(f'{delta:+.4f}' if delta is not None else '-'):>10}")
+    print("\nSAL wins per category. abs = higher accuracy outright (the deployment")
+    print("question); ret = less degradation from its own dense model. They disagree")
+    print("whenever SAL trades clean accuracy for a flatter curve — see 'clean delta'.")
+    print("Single seed per tier — treat sub-noise-floor margins as noise.")
