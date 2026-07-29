@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.0.dev0 — CompressionPipeline (in development)
+
+Turns the v0.4.0 recipe into one object, and makes the savings real.
+
+- **`slice_heads()`** — physically removes attention heads from the weights.
+  Masking makes a head *behave* as if it were gone; slicing makes the model
+  smaller. Narrows Q/K/V by rows and the output projection by the matching
+  columns, updates head bookkeeping, and returns a model that runs with no
+  hooks and without sal-torch installed. Handles separate and fused Q/K/V and
+  both `nn.Linear` and GPT-2 `Conv1D`. Refuses uneven per-layer removal and
+  grouped-query attention rather than producing a subtly wrong model.
+- **`quantize()` / `quantize_info()`** — one call over bitsandbytes (LLM.int8(),
+  NF4) and `torch.ao` (dynamic INT8), with backend auto-selection, GPT-2
+  `Conv1D` conversion, and the output head never quantized.
+- **`CompressionPipeline`** — scan → sal_train → compress → validate → export,
+  measuring size and accuracy at every stage. **Refuses LoRA/QLoRA models**
+  with an explanation, warns below 100M parameters, and supports an
+  `accuracy_floor` that stops the run rather than returning a small broken
+  model. `export()` reloads what it wrote and reports whether the round trip
+  actually held.
+- Compression waterfall and per-stage quality charts in `sal.visualize`.
+
 ## 0.4.0 (2026-07-29) — Robustness suite, full fine-tuning validation
 
 Models that prove their resilience.

@@ -32,6 +32,64 @@ Three lines. Any transformer. Compression-resilient.
 > LoRA/QLoRA we measured it as actively harmful — see
 > [When to use SAL](#when-to-use-sal).
 
+## CompressionPipeline — the validated path, in one object
+
+The measured recipe is: **fully fine-tune with SAL, then compress.** Doing that
+by hand means wiring config → masker → training loop → head selection → slicing
+→ a quantization backend → an eval harness, and getting the training method
+wrong quietly costs about three points of accuracy. `CompressionPipeline` makes
+that path the default and measures every stage, so what comes out is a
+deployment decision rather than a number.
+
+```python
+from sal import CompressionPipeline
+
+pipe = CompressionPipeline(model, eval_dataset, metric="accuracy")
+
+print(pipe.scan().recommendation)      # fragility, absorption map, projected sizes
+pipe.sal_train(train_dataset, epochs=3, prune_fraction=0.33)
+pipe.compress(pruning=0.33, quantization="int4", slice_heads=True)
+
+report = pipe.validate()
+print(report.table)
+# stage                    size_mb   ratio    accuracy  seconds     <- shape of the
+# ---------------------------------------------------------------      output; run
+# original                     ...   1.00x         ...      ...        it for your
+# sal_trained                  ...   1.00x         ...      ...        own numbers
+# pruned+sliced                ...     ...x        ...      ...
+# quantized (int4)             ...     ...x        ...      ...
+
+pipe.export("compressed_model/")       # reloaded and checked, not just written
+pipe.report().save("compression_report.pdf")
+```
+
+`slice_heads=True` is what makes the saving real: masking a head makes it
+*behave* as if it were gone, slicing removes it from the weight matrices. The
+exported model runs with **no hooks and without sal-torch installed**.
+
+**It refuses LoRA/QLoRA models.** Not a warning — an error, with the reason and
+what to do instead. SAL works by letting the model reorganize around silenced
+heads, and adapters freeze the weights that would do the reorganizing; measured,
+SAL under LoRA lost four of six compression variants *and* gave up 3.1 points of
+clean accuracy. It also warns below 100M parameters, and an optional
+`accuracy_floor` stops the run rather than handing back a model that is small
+and broken.
+
+### The pieces, if you want them separately
+
+```python
+from sal import slice_heads, quantize, quantize_info
+
+print(quantize_info(model))   # sizes per method + which backends work here
+small = slice_heads(model, heads_to_remove=[(0, 3), (1, 3), ...])
+small = quantize(small, method="int4")   # bitsandbytes NF4, or torch.ao INT8
+```
+
+`slice_heads` requires the same number of heads removed from every layer, and
+refuses grouped-query attention — architectures store one head count, and
+removing query heads without whole KV groups corrupts the mapping. It raises in
+both cases rather than returning something quietly wrong.
+
 ## Know your model before you touch it
 
 ### FIScanner — how fragile is this model?

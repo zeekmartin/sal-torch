@@ -514,8 +514,9 @@ class CompressionPipeline:
             mine = mine.logits if hasattr(mine, "logits") else mine
 
             if fmt == "huggingface":
-                from transformers import AutoModelForCausalLM
-                other = AutoModelForCausalLM.from_pretrained(str(out))
+                # Reload through the model's own class — AutoModelForCausalLM would
+                # be wrong for classification, encoder, or vision heads.
+                other = type(self.model).from_pretrained(str(out))
             else:
                 other = torch.load(out / "model.pt", weights_only=False)
             other.eval()

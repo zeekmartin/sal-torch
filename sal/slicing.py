@@ -362,11 +362,11 @@ def verify_roundtrip(sliced, batch, tmpdir: Optional[str] = None) -> bool:
 
     if not hasattr(sliced, "save_pretrained"):
         return False
-    from transformers import AutoModelForCausalLM
     with tempfile.TemporaryDirectory(dir=tmpdir) as d:
         try:
             sliced.save_pretrained(d)
-            reloaded = AutoModelForCausalLM.from_pretrained(d)
+            # The model's own class, not an Auto* guess at its head type.
+            reloaded = type(sliced).from_pretrained(d)
         except Exception as e:  # noqa: BLE001 — the point of the check
             logger.info(f"Round-trip unavailable for this architecture: {e}")
             return False

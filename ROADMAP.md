@@ -195,22 +195,30 @@ path, because "should I compress at all?" is a legitimate answer.
 
 ## Planned
 
-### v0.5.0 — `CompressionPipeline`
+### v0.5.0 — `CompressionPipeline` · in development
 
 The v0.4.0 evidence points at one specific recipe: **fully fine-tune with SAL,
 then quantize to INT4.** On GPT-2 Medium that beat the uncompressed standard
-model at a quarter of the size. Right now getting there means wiring
-`SALConfig` → `SALCallback` → your training loop → `RobustnessTest` by hand, and
-getting the training method wrong silently costs you 3 points of accuracy.
+model at a quarter of the size. Getting there by hand means wiring `SALConfig` →
+`HeadMasker` → your training loop → head selection → a quantization backend →
+`RobustnessTest`, and getting the training method wrong silently costs 3 points
+of accuracy.
 
-`CompressionPipeline` will make the validated path the default one:
+Shipped on `main`:
 
-- train with SAL, apply a compression recipe, and verify with the robustness
-  battery in a single call;
-- **refuse to run silently on LoRA** — the one configuration we have measured as
-  actively harmful. It will say so and tell you what to do instead;
-- report the accuracy-vs-size frontier for the recipes it tried, so the output
-  is a deployment decision rather than a number.
+- ✅ **`slice_heads()`** — the missing piece. Everything before v0.5.0 *masked*
+  heads, so the model behaved as if smaller while staying exactly as large.
+  Slicing removes them from the weights: a model that actually shrinks, runs
+  without hooks, and does not need sal-torch installed.
+- ✅ **`quantize()` / `quantize_info()`** — one call over bitsandbytes and
+  `torch.ao`, with the output head never quantized and GPT-2's `Conv1D`
+  converted first (miss that and nothing gets quantized, silently).
+- ✅ **`CompressionPipeline`** — scan → sal_train → compress → validate →
+  export, measured at every stage. **Refuses LoRA/QLoRA** with an explanation,
+  warns under 100M parameters, and `export()` reloads what it wrote rather than
+  assuming the round trip held.
+- ⏳ End-to-end validation on GPT-2 Medium, reproducing the Pareto result
+  through the pipeline rather than by hand.
 
 Also queued for this window: **more seeds and full eval splits** on the four
 runs above, so the v0.4.0 section can stop calling itself a signal.
