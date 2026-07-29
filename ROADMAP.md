@@ -236,12 +236,12 @@ exported artifact reloads at 0.8398 — the number it was given, to four decimal
 examples apart), so the 2.3-point gap opened under compression — the reverse of
 the v0.4.0 result on the same model and task.
 
-The difference we can name is **head selection**. `compress()` removes the
-lowest-magnitude heads; the v0.4.0 battery removed *random* ones, and random
-removal is exactly what SAL trains against. A model deliberately made resilient
-to losing any given head may also be one whose head magnitudes say less about
-which head to drop — so magnitude ranking could be a worse guide on a SAL-trained
-model specifically. That is a hypothesis, not a finding.
+The difference we could name was **head selection**. `compress()` removed the
+lowest-magnitude heads at the time; the v0.4.0 battery removed *random* ones,
+and random removal is exactly what SAL trains against. So the hypothesis was
+that magnitude ranking is a worse guide on a SAL-trained model specifically —
+one deliberately made resilient to losing any given head. That turned out to be
+half right, and the default has since changed to `random`.
 
 **Measured** (`scripts/modal_selection_experiment.py`, 2 arms × 3 strategies, the
 same 120 heads removed in every cell, masked then INT4 so only *which* heads

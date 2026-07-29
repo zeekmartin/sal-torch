@@ -79,11 +79,12 @@ standard     0.8926       0.8594       0.8867       0.7520
 SAL          0.8965       0.8398       0.8906       0.7617
 ```
 
-`strategy="random"` is the best of the three **for both arms**, and the current
-default (`magnitude`) is 2.7 points worse for a standard model and 5.7 for a
-SAL-trained one. `fi_guided` — spend the budget where the fragility scan says it
-is cheap — is much worse than either, because concentrating removal does more
-damage than spreading it.
+`random` is the best of the three **for both arms** and is the default. The
+obvious heuristic, `magnitude`, is 2.7 points worse for a standard model and 5.7
+for a SAL-trained one — a small weight norm turns out to be a poor proxy for a
+head the model can spare. `fi_guided` — spend the budget where the fragility scan
+says it is cheap — is much worse than either, because concentrating removal does
+more damage than spreading it.
 
 Read the SAL row honestly: under `random` the two arms land 0.0039 apart, two
 eval examples, which is a tie rather than a win. On this task the v0.4.0 sweep

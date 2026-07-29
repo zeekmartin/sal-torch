@@ -21,6 +21,13 @@ Turns the v0.4.0 recipe into one object, and makes the savings real.
   model. `export()` reloads what it wrote and reports whether the round trip
   actually held.
 - Compression waterfall and per-stage quality charts in `sal.visualize`.
+- **`compress()` gains `strategy=`, defaulting to `"random"`** (`random` /
+  `magnitude` / `fi_guided`). Measured on GPT-2 Medium at a matched 120-head
+  budget, `random` retains 99.3% of accuracy against `magnitude`'s 96.3%
+  (standard) and 93.7% (SAL-trained) — better for both arms, so the default is
+  not SAL-specific. `fi_guided` retains ~84% and is not recommended at this
+  budget. The earlier `magnitude` default was responsible for most of the
+  v0.5.0 compression regression.
 - `sal_train()` now clips gradients (1.0 by default), matching `SALTrainer`.
   Silencing a third of the heads makes gradients spikier than ordinary
   fine-tuning; unclipped, GPT-2 Medium scored 0.7676 where clipped it scores
