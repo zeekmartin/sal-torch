@@ -174,6 +174,75 @@ def draw_drift_bars(report, ax):
     return ax
 
 
+def draw_robustness_bars(report, ax):
+    """Clean vs post-compression score per method; survivors green, casualties red."""
+    rows = report.evaluated
+    names = [r.method for r in rows]
+    base = [r.baseline for r in rows]
+    after = [r.after for r in rows]
+    errs = [r.std or 0.0 for r in rows]
+    x = np.arange(len(names))
+    w = 0.38
+    ax.bar(x - w / 2, base, w, label="clean", color="#90a4ae")
+    ax.bar(x + w / 2, after, w, yerr=errs, capsize=3, label="compressed",
+           color=[_ELASTIC_COLOR if r.survived else _SATURATED_COLOR for r in rows])
+    for xi, v in zip(x, after):
+        ax.text(xi + w / 2, v, f"{v:.3f}", ha="center", va="bottom", fontsize=7)
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, rotation=20, ha="right", fontsize=8)
+    ax.set_ylabel(report.metric)
+    ax.set_title(f"Survival per compression method  "
+                 f"(robustness={report.robustness_score:.3f})")
+    ax.legend(fontsize=8)
+    return ax
+
+
+def draw_robustness_radar(report, ax):
+    """Spider chart of retained quality per method. ``ax`` must be a polar axes."""
+    rows = report.evaluated
+    labels = [r.method for r in rows]
+    vals = [r.retention for r in rows]
+    if len(labels) < 3:
+        ax.set_axis_off()
+        ax.text(0.5, 0.5, "radar needs >= 3 methods", ha="center", va="center",
+                transform=ax.transAxes, fontsize=9)
+        return ax
+    angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False).tolist()
+    closed_vals = vals + vals[:1]
+    closed_angles = angles + angles[:1]
+    ax.plot(closed_angles, closed_vals, color=_HUB_COLOR, linewidth=2)
+    ax.fill(closed_angles, closed_vals, color=_HUB_COLOR, alpha=0.25)
+    ax.set_xticks(angles)
+    ax.set_xticklabels(labels, fontsize=7)
+    ax.set_ylim(0, 1)
+    ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+    ax.set_yticklabels(["25%", "50%", "75%", "100%"], fontsize=6)
+    ax.set_title("Quality retained", pad=16)
+    return ax
+
+
+def draw_robustness_comparison(comparison, ax):
+    """Relative degradation per method, baseline vs SAL — shorter bars are better."""
+    rows = comparison.comparable
+    names = [r.method for r in rows]
+    base = [100.0 * r.base.degradation for r in rows]
+    sal = [100.0 * r.sal.degradation for r in rows]
+    x = np.arange(len(names))
+    w = 0.38
+    ax.bar(x - w / 2, base, w, label="standard", color="#90a4ae")
+    ax.bar(x + w / 2, sal, w, label="SAL-trained", color=_ELASTIC_COLOR)
+    for xi, r in zip(x, rows):
+        ax.text(xi, max(100.0 * r.base.degradation, 100.0 * r.sal.degradation),
+                r.winner, ha="center", va="bottom", fontsize=7, fontweight="bold")
+    ax.axhline(0, color="#455a64", linewidth=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, rotation=20, ha="right", fontsize=8)
+    ax.set_ylabel("quality lost (%)")
+    ax.set_title("Degradation under compression (lower is better)")
+    ax.legend(fontsize=8)
+    return ax
+
+
 def draw_comparison_bars(compare_result, ax):
     """Method-vs-score bars, winner highlighted, onto ``ax``."""
     results = compare_result.results
@@ -282,6 +351,37 @@ def render_drift_pdf(report, path: str):
         "Taller bars = more of the layer's representation was retained.",
     ]
     _pdf_with_image(FPDF, "SAL - Structural Drift", lines, png, path)
+
+
+def render_robustness_pdf(report, path: str):
+    """One-page robustness report: per-method survival bars + retention radar."""
+    plt, FPDF = _require()
+    fig = plt.figure(figsize=(7, 7))
+    ax1 = fig.add_subplot(2, 1, 1)
+    draw_robustness_bars(report, ax1)
+    ax2 = fig.add_subplot(2, 1, 2, projection="polar")
+    draw_robustness_radar(report, ax2)
+    fig.tight_layout()
+    png = _fig_to_png(fig)
+
+    skipped = [r.method for r in report.results if r.skipped]
+    lines = [
+        report.summary,
+        f"survival threshold: {report.survival_threshold:.0%} relative degradation",
+        f"skipped: {', '.join(skipped) if skipped else 'none'}",
+    ] + report.table.splitlines()
+    _pdf_with_image(FPDF, "SAL - Robustness Report", lines, png, path)
+
+
+def render_robustness_comparison_pdf(comparison, path: str):
+    """One-page SAL-vs-standard robustness comparison: degradation bars + table."""
+    plt, FPDF = _require()
+    fig, ax = plt.subplots(figsize=(7, 4))
+    draw_robustness_comparison(comparison, ax)
+    fig.tight_layout()
+    png = _fig_to_png(fig)
+    lines = [comparison.summary, f"metric={comparison.metric}"] + comparison.table.splitlines()
+    _pdf_with_image(FPDF, "SAL - Robustness Comparison", lines, png, path)
 
 
 def render_comparison_pdf(compare_result, path: str):
