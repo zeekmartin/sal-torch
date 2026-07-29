@@ -194,6 +194,12 @@ compare any pair.
 
 New here? Start with [docs/getting_started.md](docs/getting_started.md).
 
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for what's shipped, what's next, and how to request
+features. v0.4.0 is a **robustness suite** answering whether SAL-trained models
+also survive quantization — 39% of practitioners we polled compress that way.
+
 ## License
 
 BSL 1.1 — free for research and evaluation. Commercial production requires a license.
