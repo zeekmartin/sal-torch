@@ -61,9 +61,16 @@ Read the results with these caveats
 
 Usage::
 
+    SAL_TIERS=gpt2 modal run scripts/modal_robustness_scale.py
+    SAL_TIERS=mistral,phi2 modal run scripts/modal_robustness_scale.py
     modal run scripts/modal_robustness_scale.py                  # all three tiers
-    modal run scripts/modal_robustness_scale.py --tier gpt2      # one tier
-    modal run scripts/modal_robustness_scale.py --tier mistral,phi2
+
+Tier selection is an **environment variable, not a CLI flag**, because Modal
+validates every ``@app.function`` in the app when the app is created — including
+GPU entitlement. A registered A100 function your account cannot provision fails
+the whole run before a single T4 function starts. ``SAL_TIERS`` controls which
+functions get registered at all, so cheap tiers run on accounts that cannot
+touch the expensive ones.
 
 Mistral-7B is a gated repo. Export ``HF_TOKEN`` locally before running; it is
 forwarded to the container. Results are written to
@@ -103,6 +110,7 @@ TIERS = {
         "model": "mistralai/Mistral-7B-v0.3",
         "task": "hellaswag",
         "gpu": "A100-40GB",
+        "memory": 65536,
         "dtype": "bfloat16",
         "lora_targets": ["q_proj", "k_proj", "v_proj", "o_proj"],
         "n_train": 512, "n_eval": 256, "max_len": 256,
@@ -112,6 +120,7 @@ TIERS = {
         "model": "microsoft/phi-2",
         "task": "mmlu",
         "gpu": "A10G",
+        "memory": 32768,
         "dtype": "bfloat16",
         "lora_targets": ["q_proj", "k_proj", "v_proj", "dense"],
         "n_train": 512, "n_eval": 256, "max_len": 256,
@@ -121,6 +130,7 @@ TIERS = {
         "model": "gpt2-medium",
         "task": "sst2",
         "gpu": "T4",
+        "memory": 16384,
         "dtype": "float32",
         "lora_targets": ["c_attn"],
         "n_train": 1024, "n_eval": 512, "max_len": 96,
@@ -681,32 +691,57 @@ def run_tier(tier: str) -> dict:
             "baseline": results["baseline"], "SAL": results["SAL"], "verdict": verdict}
 
 
-@app.function(image=image, gpu="A100-40GB", timeout=1800, memory=65536, secrets=[hf_secret])
+def _selected_tiers() -> list:
+    """Tiers to register, from ``SAL_TIERS`` (default: all)."""
+    raw = os.environ.get("SAL_TIERS", "all").strip()
+    if raw in ("", "all"):
+        return list(TIERS)
+    names = [t.strip() for t in raw.split(",") if t.strip()]
+    unknown = [n for n in names if n not in TIERS]
+    if unknown:
+        raise SystemExit(f"Unknown tier(s) {unknown} in SAL_TIERS. "
+                         f"Choose from {list(TIERS)} or 'all'.")
+    return names
+
+
 def tier_mistral():
     return run_tier("mistral")
 
 
-@app.function(image=image, gpu="A10G", timeout=1800, memory=32768, secrets=[hf_secret])
 def tier_phi2():
     return run_tier("phi2")
 
 
-@app.function(image=image, gpu="T4", timeout=1800, memory=16384, secrets=[hf_secret])
 def tier_gpt2():
     return run_tier("gpt2")
 
 
-_FUNCS = {"mistral": tier_mistral, "phi2": tier_phi2, "gpt2": tier_gpt2}
+_ENTRYPOINTS = {"mistral": tier_mistral, "phi2": tier_phi2, "gpt2": tier_gpt2}
+
+
+def _register(name: str):
+    """Decorate one tier's entrypoint as a Modal function sized for its GPU.
+
+    The decorator is applied programmatically rather than with ``@`` syntax so
+    only the selected tiers are registered. Modal checks GPU entitlement for
+    every function in the app at creation time, so an unregistered A100 tier is
+    the difference between a T4 run that works and one that never starts. The
+    functions themselves stay at module scope — Modal requires that.
+    """
+    cfg = TIERS[name]
+    return app.function(image=image, gpu=cfg["gpu"], timeout=1800,
+                        memory=cfg["memory"], secrets=[hf_secret])(_ENTRYPOINTS[name])
+
+
+_FUNCS = {name: _register(name) for name in _selected_tiers()}
 RESULTS_PATH = "scripts/robustness_scale_results.json"
 
 
 @app.local_entrypoint()
-def main(tier: str = "all"):
-    """``--tier`` accepts ``all``, one name, or a comma-separated list."""
-    names = list(TIERS) if tier == "all" else [t.strip() for t in tier.split(",")]
-    unknown = [n for n in names if n not in _FUNCS]
-    if unknown:
-        raise SystemExit(f"Unknown tier(s) {unknown}. Choose from {list(_FUNCS)} or 'all'.")
+def main():
+    """Runs whichever tiers ``SAL_TIERS`` selected (default: all three)."""
+    names = list(_FUNCS)
+    print(f"tiers registered: {names}  (set SAL_TIERS to change)")
 
     results = {}
     for name in names:

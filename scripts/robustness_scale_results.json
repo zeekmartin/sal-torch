@@ -1,0 +1,139 @@
+{
+  "gpt2": {
+    "tier": "gpt2",
+    "model": "gpt2-medium",
+    "task": "sst2",
+    "gpu": "T4",
+    "n_train": 1024,
+    "n_eval": 512,
+    "epochs": 3,
+    "lora_r": 16,
+    "prune_fraction": 0.33,
+    "baseline": {
+      "dense": {
+        "accuracy": 0.890625,
+        "size_mb": 1419.4,
+        "tokens_per_sec": 3171.8,
+        "backend": null,
+        "device": "cuda",
+        "seconds": 13.1
+      },
+      "int8": {
+        "accuracy": 0.8828125,
+        "size_mb": 514.4,
+        "tokens_per_sec": 3803.2,
+        "backend": "bitsandbytes-int8",
+        "device": "cuda",
+        "seconds": 14.9
+      },
+      "int4": {
+        "accuracy": 0.859375,
+        "size_mb": 367.1,
+        "tokens_per_sec": 2244.1,
+        "backend": "bitsandbytes-nf4",
+        "device": "cuda",
+        "seconds": 21.4
+      },
+      "prune33": {
+        "accuracy": 0.849609375,
+        "size_mb": 1419.4,
+        "tokens_per_sec": 3096.1,
+        "backend": null,
+        "device": "cuda",
+        "seconds": 13.5
+      },
+      "prune50": {
+        "accuracy": 0.814453125,
+        "size_mb": 1419.4,
+        "tokens_per_sec": 3097.6,
+        "backend": null,
+        "device": "cuda",
+        "seconds": 13.4
+      },
+      "prune33+int8": {
+        "accuracy": 0.849609375,
+        "size_mb": 514.4,
+        "tokens_per_sec": 3541.3,
+        "backend": "bitsandbytes-int8",
+        "device": "cuda",
+        "seconds": 15.3
+      },
+      "prune33+int4": {
+        "accuracy": 0.830078125,
+        "size_mb": 367.1,
+        "tokens_per_sec": 2178.7,
+        "backend": "bitsandbytes-nf4",
+        "device": "cuda",
+        "seconds": 21.1
+      }
+    },
+    "SAL": {
+      "dense": {
+        "accuracy": 0.859375,
+        "size_mb": 1419.4,
+        "tokens_per_sec": 3112.5,
+        "backend": null,
+        "device": "cuda",
+        "seconds": 13.4
+      },
+      "int8": {
+        "accuracy": 0.861328125,
+        "size_mb": 514.4,
+        "tokens_per_sec": 3783.9,
+        "backend": "bitsandbytes-int8",
+        "device": "cuda",
+        "seconds": 15.1
+      },
+      "int4": {
+        "accuracy": 0.830078125,
+        "size_mb": 367.1,
+        "tokens_per_sec": 2230.9,
+        "backend": "bitsandbytes-nf4",
+        "device": "cuda",
+        "seconds": 21.3
+      },
+      "prune33": {
+        "accuracy": 0.841796875,
+        "size_mb": 1419.4,
+        "tokens_per_sec": 3109.4,
+        "backend": null,
+        "device": "cuda",
+        "seconds": 13.4
+      },
+      "prune50": {
+        "accuracy": 0.849609375,
+        "size_mb": 1419.4,
+        "tokens_per_sec": 3084.2,
+        "backend": null,
+        "device": "cuda",
+        "seconds": 13.2
+      },
+      "prune33+int8": {
+        "accuracy": 0.84765625,
+        "size_mb": 514.4,
+        "tokens_per_sec": 3616.3,
+        "backend": "bitsandbytes-int8",
+        "device": "cuda",
+        "seconds": 15.8
+      },
+      "prune33+int4": {
+        "accuracy": 0.8359375,
+        "size_mb": 367.1,
+        "tokens_per_sec": 2188.7,
+        "backend": "bitsandbytes-nf4",
+        "device": "cuda",
+        "seconds": 21.4
+      }
+    },
+    "verdict": {
+      "quantization_only": "2/2",
+      "pruning_only": "2/2",
+      "combined": "2/2",
+      "pareto_front": [
+        "baseline/dense",
+        "baseline/int8",
+        "baseline/int4"
+      ]
+    }
+  }
+}
