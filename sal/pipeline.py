@@ -400,42 +400,129 @@ class CompressionPipeline:
         return self
 
     # ----------------------------------------------------------------- compress
-    def select_heads(self, fraction: float) -> list:
-        """Heads to remove: the lowest-magnitude ``fraction`` **within each layer**.
+    SELECTION_STRATEGIES = ("magnitude", "random", "fi_guided")
 
-        Uniform per layer by construction, because slicing needs it — see
-        :mod:`sal.slicing`. Ranking by the L2 norm of each head's slice of the
-        output projection keeps the choice deterministic and probe-free.
-        """
+    def _head_norms(self) -> dict:
+        """L2 norm of each head's slice of its layer's output projection."""
         from sal import arch_support
         from sal.fi import _infer_num_heads
 
         nh = _infer_num_heads(self.model)
-        projs = arch_support.get_output_projections(self.model)
+        out: dict = {}
+        for li, proj in enumerate(arch_support.get_output_projections(self.model)):
+            w = proj.weight.detach().abs().float()
+            is_conv1d = type(proj).__name__ == "Conv1D"
+            width = w.shape[0] if is_conv1d else w.shape[1]
+            hd = width // nh
+            for h in range(nh):
+                sl = slice(h * hd, (h + 1) * hd)
+                block = w[sl, :] if is_conv1d else w[:, sl]
+                out[(li, h)] = float(block.norm())
+        return out
+
+    def select_heads(self, fraction: float, strategy: str = "magnitude") -> list:
+        """Which heads to remove, at a matched total count across strategies.
+
+        ``magnitude`` (default)
+            Lowest output-projection slice norm within each layer. Uniform per
+            layer, deterministic, needs no probe data — and the only strategy
+            here that :func:`sal.slicing.slice_heads` can physically apply.
+        ``random``
+            A random set within each layer. Also uniform. This is the removal
+            distribution SAL trains against, which makes it the control worth
+            having.
+        ``fi_guided``
+            Spend the budget on IMMUNE layers first, then BUFFER, never CRITICAL,
+            ranking by magnitude within a layer. Deliberately **not** uniform —
+            concentrating removal where the fragility scan says it is cheap is
+            the whole idea — so it cannot be sliced, only masked.
+        """
+        if strategy not in self.SELECTION_STRATEGIES:
+            raise PipelineError(f"strategy must be one of {self.SELECTION_STRATEGIES}, "
+                                f"got '{strategy}'")
+        from sal import arch_support
+        from sal.fi import _infer_num_heads
+
+        nh = _infer_num_heads(self.model)
+        nl = len(arch_support.get_output_projections(self.model))
         k = int(round(fraction * nh))
         if k < 1:
             raise PipelineError(f"pruning={fraction} removes no heads from a "
                                 f"{nh}-head layer; use a larger fraction.")
         if k >= nh:
             raise PipelineError(f"pruning={fraction} would remove every head.")
+        budget = k * nl                      # matched across all three strategies
 
-        chosen = []
-        for li, proj in enumerate(projs):
-            w = proj.weight.detach().abs().float()
-            is_conv1d = type(proj).__name__ == "Conv1D"
-            width = w.shape[0] if is_conv1d else w.shape[1]
-            hd = width // nh
-            norms = []
-            for h in range(nh):
-                sl = slice(h * hd, (h + 1) * hd)
-                block = w[sl, :] if is_conv1d else w[:, sl]
-                norms.append((float(block.norm()), h))
-            norms.sort()
-            chosen.extend((li, h) for _, h in norms[:k])
+        if strategy == "magnitude":
+            norms = self._head_norms()
+            chosen = []
+            for li in range(nl):
+                ranked = sorted((norms[(li, h)], h) for h in range(nh))
+                chosen.extend((li, h) for _, h in ranked[:k])
+            return chosen
+
+        if strategy == "random":
+            import random as _random
+            rng = _random.Random(self.seed)
+            chosen = []
+            for li in range(nl):
+                chosen.extend((li, h) for h in rng.sample(range(nh), k))
+            return chosen
+
+        # fi_guided
+        from sal.fi import classify_layers, extract_activation_graph
+
+        adj = extract_activation_graph(self.model, self.probe_dataset,
+                                       num_samples=min(200, 10 * self.batch_size),
+                                       batch_size=self.batch_size)
+        layer_map = classify_layers(self.model, adj, num_heads_per_layer=nh)
+        rank = {"IMMUNE": 0, "BUFFER": 1, "CRITICAL": 2}
+        norms = self._head_norms()
+
+        def cls_of(li) -> str:
+            c = layer_map.get(li)
+            return getattr(c, "value", str(c))
+
+        if all(cls_of(li) == "CRITICAL" for li in range(nl)):
+            raise PipelineError(
+                "fi_guided found no IMMUNE or BUFFER layers — every layer is "
+                "CRITICAL, so there is nowhere cheap to prune. Use "
+                "strategy='magnitude' or lower the pruning fraction.")
+
+        # Spend the budget in fragility order: immune layers first, then buffer,
+        # and only spill into critical layers if the budget cannot be met without
+        # them. Capped at half a layer, because a "guided" strategy that guts one
+        # layer to spare another is not guidance, it is a strawman — and the spill
+        # is reported so an unmatched-looking win cannot hide in the total.
+        cap = max(1, nh // 2)
+        order = sorted(range(nl), key=lambda li: (rank.get(cls_of(li), 1), li))
+        chosen: list = []
+        spill = 0
+        for li in order:
+            if len(chosen) >= budget:
+                break
+            take = min(cap, budget - len(chosen))
+            ranked = sorted((norms[(li, h)], h) for h in range(nh))
+            picked = [(li, h) for _, h in ranked[:take]]
+            chosen.extend(picked)
+            if cls_of(li) == "CRITICAL":
+                spill += len(picked)
+        self._fi_guided_spill = spill
+        self._fi_guided_classes = {li: cls_of(li) for li in range(nl)}
+        if spill:
+            logger.warning(
+                f"fi_guided placed {spill} of {len(chosen)} heads in CRITICAL layers: "
+                f"IMMUNE/BUFFER layers could not absorb a {fraction:.0%} budget at a "
+                f"cap of {cap} heads per layer. Budget is matched to the other "
+                "strategies, but the 'never CRITICAL' property does not hold here.")
+        if len(chosen) < budget:
+            logger.warning(f"fi_guided placed only {len(chosen)} of {budget} heads; "
+                           "the comparison is not at a matched count.")
         return chosen
 
     def compress(self, pruning: Optional[float] = 0.33, quantization: Optional[str] = "int4",
-                 slice_heads: bool = True, backend: str = "auto") -> "CompressionPipeline":
+                 slice_heads: bool = True, backend: str = "auto",
+                 strategy: str = "magnitude") -> "CompressionPipeline":
         """Apply head pruning and/or quantization, measuring after each.
 
         With ``slice_heads=True`` the pruned heads are physically removed, so the
@@ -452,18 +539,22 @@ class CompressionPipeline:
 
         if pruning:
             t0 = time.time()
-            heads = self.select_heads(pruning)
+            heads = self.select_heads(pruning, strategy=strategy)
             self._pruned_heads = heads
             if slice_heads:
                 probe = self._probe_batch()
                 self.model = do_slice(self.model, heads, verify_input=probe)
-                detail = f"{len(heads)} heads removed from the weights"
+                detail = f"{len(heads)} heads removed from the weights ({strategy})"
                 name = "pruned+sliced"
             else:
-                from sal.robustness import _PrunedHeads
-                self._mask_ctx = _PrunedHeads(self.model, pruning, self.seed)
+                # Mask exactly the selected set. Re-deriving a random set here
+                # would silently discard the strategy that was asked for.
+                from sal.compare import _MaskedHeads
+                from sal.fi import _infer_num_heads
+                self._mask_ctx = _MaskedHeads(self.model, heads, _infer_num_heads(self.model))
                 self._mask_ctx.__enter__()
-                detail = f"{len(heads)} heads masked (not removed — size unchanged)"
+                detail = (f"{len(heads)} heads masked ({strategy}) — "
+                          "not removed, size unchanged")
                 name = "pruned (masked)"
             self._record(name, detail=detail, seconds=time.time() - t0)
 

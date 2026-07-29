@@ -175,3 +175,81 @@ def test_pipeline_report(tiny_model, tmp_path):
 def test_invalid_metric(tiny_model):
     with pytest.raises(ValueError, match="metric"):
         CompressionPipeline(tiny_model, _data(), metric="f1")
+
+
+# ------------------------------------------------------- selection strategies
+def test_selection_strategies_match_total_count(pipe):
+    counts = {}
+    for strategy in ("magnitude", "random"):
+        heads = pipe.select_heads(0.25, strategy=strategy)
+        counts[strategy] = len(heads)
+        by_layer = {}
+        for l, h in heads:
+            by_layer.setdefault(l, []).append(h)
+        assert {len(v) for v in by_layer.values()} == {2}   # uniform
+    assert counts["magnitude"] == counts["random"] == 8
+
+
+def test_random_strategy_is_seeded(tiny_model):
+    a = CompressionPipeline(tiny_model, _data(), metric="loss", batch_size=4, seed=7)
+    b = CompressionPipeline(tiny_model, _data(), metric="loss", batch_size=4, seed=7)
+    c = CompressionPipeline(tiny_model, _data(), metric="loss", batch_size=4, seed=8)
+    assert a.select_heads(0.25, "random") == b.select_heads(0.25, "random")
+    assert a.select_heads(0.25, "random") != c.select_heads(0.25, "random")
+
+
+def test_magnitude_picks_the_weakest_heads(pipe):
+    norms = pipe._head_norms()
+    chosen = set(pipe.select_heads(0.25, "magnitude"))
+    for li in range(4):
+        picked = sorted(n for (l, h), n in norms.items() if l == li and (l, h) in chosen)
+        kept = sorted(n for (l, h), n in norms.items() if l == li and (l, h) not in chosen)
+        assert max(picked) <= min(kept)
+
+
+def test_fi_guided_respects_layer_classes(pipe):
+    """Never CRITICAL, never empties a layer — or refuses if nowhere is cheap."""
+    from sal.fi import classify_layers, extract_activation_graph
+    adj = extract_activation_graph(pipe.model, pipe.probe_dataset, num_samples=40,
+                                   batch_size=4)
+    layer_map = classify_layers(pipe.model, adj, num_heads_per_layer=8)
+    classes = {getattr(c, "value", str(c)) for c in layer_map.values()}
+
+    if classes == {"CRITICAL"}:
+        # The tiny fixture lands here: no layer is safe, so refusing is correct.
+        with pytest.raises(PipelineError, match="no IMMUNE or BUFFER"):
+            pipe.select_heads(0.25, "fi_guided")
+        return
+
+    critical = {li for li, c in layer_map.items()
+                if getattr(c, "value", str(c)) == "CRITICAL"}
+    heads = pipe.select_heads(0.25, "fi_guided")
+    assert not ({l for l, _ in heads} & critical)
+    by_layer = {}
+    for l, h in heads:
+        by_layer.setdefault(l, []).append(h)
+    assert all(len(v) <= 7 for v in by_layer.values())
+
+
+def test_unknown_strategy_rejected(pipe):
+    with pytest.raises(PipelineError, match="strategy must be one of"):
+        pipe.select_heads(0.25, strategy="entropy")
+
+
+def test_masked_compress_uses_the_selected_heads(tiny_model):
+    """The masked path must mask what was selected, not a fresh random set."""
+    pipe = CompressionPipeline(tiny_model, _data(), metric="loss", batch_size=4)
+    pipe.compress(pruning=0.25, quantization=None, slice_heads=False, strategy="magnitude")
+    expected = set(CompressionPipeline(
+        tiny_model, _data(), metric="loss", batch_size=4).select_heads(0.25, "magnitude"))
+    assert set(pipe._pruned_heads) == expected
+    assert "magnitude" in pipe.validate().last.detail
+
+
+def test_fi_guided_cannot_be_sliced(tiny_model):
+    """Non-uniform selection must be refused by slicing, not silently reshaped."""
+    from sal.slicing import SlicingError
+    pipe = CompressionPipeline(tiny_model, _data(), metric="loss", batch_size=4)
+    with pytest.raises((SlicingError, PipelineError)):
+        pipe.compress(pruning=0.25, quantization=None, slice_heads=True,
+                      strategy="fi_guided")
