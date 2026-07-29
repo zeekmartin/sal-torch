@@ -16,6 +16,9 @@ from sal.compare import compare
 from sal.guard import StructuralGuard, StructuralGuardCallback
 from sal.drift import DriftMonitor, DriftReport, StructuralSnapshot
 from sal.robustness import RobustnessTest, RobustnessReport, robustness_compare
+from sal.slicing import slice_heads, SlicingError
+from sal.quantize import quantize, quantize_info, QuantizationError
+from sal.pipeline import CompressionPipeline, CompressionReport, PipelineError
 
 import sal.license as _lic
 
@@ -48,4 +51,7 @@ __all__ = ["SALConfig", "SALCallback", "SALTrainer", "HeadMasker",
            "StructuralGuard", "StructuralGuardCallback",
            "DriftMonitor", "DriftReport", "StructuralSnapshot",
            "RobustnessTest", "RobustnessReport", "robustness_compare",
+           "slice_heads", "SlicingError",
+           "quantize", "quantize_info", "QuantizationError",
+           "CompressionPipeline", "CompressionReport", "PipelineError",
            "set_license", "license_info"]

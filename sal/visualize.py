@@ -243,6 +243,48 @@ def draw_robustness_comparison(comparison, ax):
     return ax
 
 
+def draw_compression_waterfall(report, ax):
+    """Size at each pipeline stage, with the accuracy at that stage annotated."""
+    stages = report.stages
+    names = [s.name for s in stages]
+    sizes = [s.size_mb for s in stages]
+    base = sizes[0] if sizes else 1.0
+    # Green once a stage is genuinely smaller than the original, grey while not.
+    colors = [_ELASTIC_COLOR if s < base else "#90a4ae" for s in sizes]
+    bars = ax.bar(range(len(names)), sizes, color=colors, width=0.6)
+    for b, s in zip(bars, stages):
+        label = f"{s.size_mb:.0f}MB"
+        if s.accuracy is not None:
+            label += f"\n{s.accuracy:.3f}"
+        ax.text(b.get_x() + b.get_width() / 2, b.get_height(), label,
+                ha="center", va="bottom", fontsize=7)
+    ax.set_xticks(range(len(names)))
+    ax.set_xticklabels(names, rotation=15, ha="right", fontsize=8)
+    ax.set_ylabel("size (MB)")
+    ax.set_ylim(0, max(sizes) * 1.25 if sizes else 1)
+    ax.set_title(f"Compression waterfall  ({report.size_ratio:.1f}x smaller)")
+    return ax
+
+
+def draw_compression_accuracy(report, ax):
+    """Accuracy across stages, against the original as a dashed reference."""
+    stages = [s for s in report.stages if s.accuracy is not None]
+    names = [s.name for s in stages]
+    accs = [s.accuracy for s in stages]
+    ax.plot(range(len(names)), accs, marker="o", color=_HUB_COLOR, linewidth=2)
+    if accs:
+        ax.axhline(accs[0], color="#90a4ae", linestyle="--", linewidth=1,
+                   label="original")
+        ax.legend(fontsize=8)
+    for i, a in enumerate(accs):
+        ax.text(i, a, f"{a:.3f}", ha="center", va="bottom", fontsize=7)
+    ax.set_xticks(range(len(names)))
+    ax.set_xticklabels(names, rotation=15, ha="right", fontsize=8)
+    ax.set_ylabel(report.metric)
+    ax.set_title("Quality across stages")
+    return ax
+
+
 def draw_comparison_bars(compare_result, ax):
     """Method-vs-score bars, winner highlighted, onto ``ax``."""
     results = compare_result.results
@@ -382,6 +424,26 @@ def render_robustness_comparison_pdf(comparison, path: str):
     png = _fig_to_png(fig)
     lines = [comparison.summary, f"metric={comparison.metric}"] + comparison.table.splitlines()
     _pdf_with_image(FPDF, "SAL - Robustness Comparison", lines, png, path)
+
+
+def render_compression_pdf(report, path: str):
+    """One-page compression report: size waterfall, quality curve, and the table."""
+    plt, FPDF = _require()
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(7, 7))
+    draw_compression_waterfall(report, ax1)
+    draw_compression_accuracy(report, ax2)
+    fig.tight_layout()
+    png = _fig_to_png(fig)
+
+    lines = [report.summary]
+    if report.model_name:
+        lines.insert(0, f"model: {report.model_name}")
+    if report.scan is not None:
+        lines += report.scan.recommendation.splitlines()
+    if report.roundtrip_verified is not None:
+        lines.append(f"export reload verified: {report.roundtrip_verified}")
+    lines += report.table.splitlines()
+    _pdf_with_image(FPDF, "SAL - Compression Report", lines, png, path)
 
 
 def render_comparison_pdf(compare_result, path: str):
