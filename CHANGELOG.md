@@ -11,10 +11,17 @@
   against a standard one, scored against each model's own clean baseline.
 - Robustness bar chart, retention radar, and comparison PDF in `sal.visualize`.
 - New `[quant]` extra (bitsandbytes) for real 4-bit quantization.
-- First validation (DistilBERT/SST-2 on a T4, single seed): SAL roughly halves
-  the damage from head pruning at 33% and 50%, but shows **no measurable
-  advantage under quantization** — every INT8/INT4/dropout margin sits inside
-  the noise floor of the eval set. Documented in `ROADMAP.md` and `README.md`.
+- Validated over four runs (single seed each; see `ROADMAP.md` for the full
+  trail, losses included): **SAL requires full fine-tuning.** Fully fine-tuned,
+  a SAL-trained GPT-2 Medium wins all seven compression variants including
+  INT4, and `SAL/int4` beats the *uncompressed* standard model at a quarter of
+  the size. Under LoRA r=16 the identical setup loses four of six variants and
+  costs 3.1 points of clean accuracy — the adapters are too small to absorb
+  what the head masking removes. LoRA/QLoRA is now documented as not
+  recommended.
+- `HeadMasker` masks follow the model's device and dtype, so SAL works on
+  half-precision models. It previously raised on the first forward pass of any
+  bf16/fp16 model.
 - `StructuralGuard.release()` no longer takes a `model` argument — the gradient
   hooks live on the parameter tensors, so releasing them needs no model
   reference. Call `guard.release()` instead of `guard.release(model)`.
