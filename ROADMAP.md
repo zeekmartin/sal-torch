@@ -79,11 +79,51 @@ we will say so in this document and scope SAL honestly.
 - ✅ **`robustness_compare()`** — the head-to-head: a SAL-trained model versus a
   standard one, across every method, with a winner per row.
 - ✅ **Visual robustness reports** — bar and radar charts, JSON and PDF.
-- ⏳ **Honest publication of the result**, whichever way it lands.
+- ✅ **Honest publication of the result**, whichever way it lands.
 
 INT4 uses bitsandbytes NF4 when `sal-torch[quant]` is installed, and falls back
 to a simulated per-channel INT4 round-trip otherwise, so the row never silently
 vanishes from a report.
+
+### First result — and it is not the one we wanted
+
+DistilBERT on SST-2, trained twice from identical weights (plain vs. SAL at
+`prune_fraction=0.33`), both evaluated dense under every method. One T4, single
+seed, 512 eval examples.
+
+```
+method              base_after  base_deg   sal_after   sal_deg    winner
+------------------------------------------------------------------------
+int8                    0.8359     2.73%      0.8516     2.24%       SAL
+int4                    0.8672    -0.91%      0.8652     0.67%  baseline
+head_pruning_33         0.7656    10.91%      0.8047     7.62%       SAL
+head_pruning_50         0.7363    14.32%      0.8125     6.73%       SAL
+neuron_dropout_10       0.8392     2.35%      0.8464     2.84%  baseline
+neuron_dropout_20       0.8320     3.18%      0.8385     3.74%  baseline
+------------------------------------------------------------------------
+robustness_score  baseline=0.9442  SAL=0.9603
+```
+
+**Head pruning: a large, real win.** At 50% of heads removed the standard model
+gives up 14.3% of its accuracy; the SAL-trained model gives up 6.7% — less than
+half the damage.
+
+**Quantization: no measurable transfer.** Every quantization and dropout margin
+is under one accuracy point, and at 512 eval examples one example is 0.195% —
+these rows are noise. INT4 made the *standard* model look better than fp32,
+which is the giveaway.
+
+So the answer to the question this release was built to ask is, on current
+evidence: **no. SAL's resilience is specific to structural pruning, and we are
+not going to claim otherwise.** Quantization users get a measurement tool from
+v0.4.0, not a benefit.
+
+What would change the answer: more seeds, a full eval split, larger models, and
+higher compression rates where quantization actually hurts (INT4 barely dented
+DistilBERT here). That work is queued — the suite exists so the claim gets
+re-tested rather than assumed, and this section gets rewritten when it is.
+
+First answer: **no** — see the measured result below.
 
 For the 24% on magnitude pruning: `sal.compare()` already covers you today.
 For the 21% on distillation: see v0.5.0.
@@ -132,6 +172,7 @@ licensed for commercial production. Development happens in the open.
 - **Benchmark disagreements welcome.** If SAL underperforms on your workload, an
   issue with a reproduction is the most useful thing you can send us.
 
-Watch the repo to follow the v0.4.0 quantization result — it lands here first.
+The v0.4.0 quantization result is published above — including the part that did
+not go our way. Results land here first, favourable or not.
 
 Built by [Cognitive Engineering](https://cognitive-engineering.dev) in Switzerland.

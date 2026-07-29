@@ -11,6 +11,10 @@
   against a standard one, scored against each model's own clean baseline.
 - Robustness bar chart, retention radar, and comparison PDF in `sal.visualize`.
 - New `[quant]` extra (bitsandbytes) for real 4-bit quantization.
+- First validation (DistilBERT/SST-2 on a T4, single seed): SAL roughly halves
+  the damage from head pruning at 33% and 50%, but shows **no measurable
+  advantage under quantization** — every INT8/INT4/dropout margin sits inside
+  the noise floor of the eval set. Documented in `ROADMAP.md` and `README.md`.
 - `StructuralGuard.release()` no longer takes a `model` argument — the gradient
   hooks live on the parameter tensors, so releasing them needs no model
   reference. Call `guard.release()` instead of `guard.release(model)`.

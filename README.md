@@ -128,12 +128,15 @@ report = test.run(methods=["int8", "int4", "head_pruning_33", "head_pruning_50",
                            "neuron_dropout_10", "neuron_dropout_20"])
 
 print(report.table)
+# real output — DistilBERT fine-tuned on SST-2, no SAL, 512 eval examples
 # method              baseline     after     delta     std  survived
 # ------------------------------------------------------------------
-# int8                  0.9230    0.9180   -0.0050       -        OK
-# int4                  0.9230    0.8910   -0.0320       -        OK
-# head_pruning_33       0.9230    0.8120   -0.1110       -      FAIL
-# neuron_dropout_10     0.9230    0.9190   -0.0040   0.002        OK
+# int8                  0.8594    0.8359   -0.0234       -        OK
+# int4                  0.8594    0.8672   +0.0078       -        OK
+# head_pruning_33       0.8594    0.7656   -0.0938       -      FAIL
+# head_pruning_50       0.8594    0.7363   -0.1230       -      FAIL
+# neuron_dropout_10     0.8594    0.8392   -0.0202   0.015        OK
+# neuron_dropout_20     0.8594    0.8320   -0.0273   0.022        OK
 
 print(report.robustness_score)   # aggregate 0-1: mean quality retained
 print(report.survival_rate)      # fraction of methods survived
@@ -170,19 +173,46 @@ result = robustness_compare(
 )
 
 print(result.table)
-# method            base_after  base_deg   sal_after   sal_deg    winner
-# int8                  0.8910     3.47%      0.9180     0.54%       SAL
-# int4                  0.8410     8.87%      0.8850     4.11%       SAL
-
 print(result.summary)
-# "SAL-trained model is more robust in 2/2 compression methods ..."
-
 result.save("robustness_comparison.pdf")
 ```
 
 Each model is scored against **its own** clean baseline, so the comparison
 measures resilience rather than which model was better to begin with. The row
 winner is whichever model loses proportionally less.
+
+### What we measured
+
+DistilBERT fine-tuned on SST-2 twice from identical weights — once plain, once
+with SAL at `prune_fraction=0.33` — then both evaluated dense under every method
+(`scripts/modal_v040_test.py`, one T4, single seed, 512 eval examples):
+
+```
+method              base_after  base_deg   sal_after   sal_deg    winner
+------------------------------------------------------------------------
+int8                    0.8359     2.73%      0.8516     2.24%       SAL
+int4                    0.8672    -0.91%      0.8652     0.67%  baseline
+head_pruning_33         0.7656    10.91%      0.8047     7.62%       SAL
+head_pruning_50         0.7363    14.32%      0.8125     6.73%       SAL
+neuron_dropout_10       0.8392     2.35%      0.8464     2.84%  baseline
+neuron_dropout_20       0.8320     3.18%      0.8385     3.74%  baseline
+------------------------------------------------------------------------
+robustness_score  baseline=0.9442  SAL=0.9603
+```
+
+Read this honestly:
+
+- **Head pruning: a large, real advantage.** At 50% of heads removed the standard
+  model loses 14.3% of its accuracy and the SAL-trained one loses 6.7% — less
+  than half. This is the regime SAL trains for, and it delivers.
+- **Quantization and neuron dropout: no clear effect.** Every margin there is
+  under 1 accuracy point. At 512 eval examples one example is 0.195%, so those
+  rows are inside the noise floor. INT4 even *improved* the standard model,
+  which is a tell that you are reading sampling noise, not resilience.
+
+So on current evidence **SAL's resilience is specific to structural pruning; we
+cannot claim it transfers to quantization.** The suite exists so that claim gets
+re-tested at larger scale rather than assumed — see [ROADMAP.md](ROADMAP.md).
 
 ## Continual learning without replay buffers
 
