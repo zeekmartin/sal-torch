@@ -562,6 +562,7 @@ class CompressionPipeline:
             from sal.quantize import quantize
             t0 = time.time()
             self.model = quantize(self.model, method=quantization, backend=backend)
+            self._reapply_mask()
             info = getattr(self.model, "_sal_quantization", {})
             self._record(f"quantized ({quantization})",
                          detail=f"backend={info.get('backend', '?')}, "
@@ -570,6 +571,30 @@ class CompressionPipeline:
 
         self._compressed = True
         return self
+
+    def _reapply_mask(self):
+        """Re-install head masking on the current model object.
+
+        Quantization hands back a new module graph: the Conv1D rewrite and the
+        bitsandbytes swap both *replace* the attention projections, so pre-hooks
+        registered on the old modules vanish with them. Whether they survive
+        depends on the architecture — GPT-2 loses them, a plain nn.Linear model
+        keeps them — which makes this exactly the kind of bug that passes on a
+        fixture and silently unmasks a real model. Re-installing is the only
+        thing that holds in both cases; without it every selection strategy
+        measures the same unmasked model and looks identical.
+        """
+        if getattr(self, "_mask_ctx", None) is None:
+            return
+        from sal.compare import _MaskedHeads
+        from sal.fi import _infer_num_heads
+        try:
+            self._mask_ctx.__exit__(None, None, None)
+        except Exception:  # noqa: BLE001 — the old modules may already be gone
+            pass
+        self._mask_ctx = _MaskedHeads(self.model, self._pruned_heads,
+                                      _infer_num_heads(self.model))
+        self._mask_ctx.__enter__()
 
     def _probe_batch(self):
         """One batch from the eval set, for slicing verification."""

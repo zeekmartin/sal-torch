@@ -1,0 +1,60 @@
+{
+  "standard": {
+    "dense": 0.892578125,
+    "cells": {
+      "magnitude": {
+        "accuracy": 0.89453125,
+        "size_mb": 362.336256,
+        "heads_removed": 120,
+        "spill": null,
+        "seconds": 25.5,
+        "error": null
+      },
+      "random": {
+        "accuracy": 0.89453125,
+        "size_mb": 362.336256,
+        "heads_removed": 120,
+        "spill": null,
+        "seconds": 18.1,
+        "error": null
+      },
+      "fi_guided": {
+        "accuracy": 0.89453125,
+        "size_mb": 362.336256,
+        "heads_removed": 120,
+        "spill": 80,
+        "seconds": 21.3,
+        "error": null
+      }
+    }
+  },
+  "SAL": {
+    "dense": 0.896484375,
+    "cells": {
+      "magnitude": {
+        "accuracy": 0.90234375,
+        "size_mb": 362.336256,
+        "heads_removed": 120,
+        "spill": null,
+        "seconds": 19.2,
+        "error": null
+      },
+      "random": {
+        "accuracy": 0.90234375,
+        "size_mb": 362.336256,
+        "heads_removed": 120,
+        "spill": null,
+        "seconds": 19.0,
+        "error": null
+      },
+      "fi_guided": {
+        "accuracy": 0.90234375,
+        "size_mb": 362.336256,
+        "heads_removed": 120,
+        "spill": 64,
+        "seconds": 22.4,
+        "error": null
+      }
+    }
+  }
+}

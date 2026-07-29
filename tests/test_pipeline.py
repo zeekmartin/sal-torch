@@ -253,3 +253,21 @@ def test_fi_guided_cannot_be_sliced(tiny_model):
     with pytest.raises((SlicingError, PipelineError)):
         pipe.compress(pruning=0.25, quantization=None, slice_heads=True,
                       strategy="fi_guided")
+
+
+def test_mask_survives_quantization(tiny_model):
+    """Quantization replaces modules; the mask must be re-installed on the new ones.
+
+    Checked by identity, not by output: whether the old hooks survive a module
+    swap depends on the architecture, so an output check passes on this fixture
+    while a real GPT-2 silently ends up unmasked.
+    """
+    from sal import arch_support
+    pipe = CompressionPipeline(tiny_model, _data(), metric="loss", batch_size=4)
+    pipe.compress(pruning=0.25, quantization="int8", slice_heads=False,
+                  strategy="magnitude")
+    live = arch_support.get_output_projections(pipe.model)
+    assert live, "no output projections found on the quantized model"
+    assert all(len(p._forward_pre_hooks) > 0 for p in live)
+    # The mask context must point at the modules the model is actually using.
+    assert [id(p) for p in pipe._mask_ctx.projs] == [id(p) for p in live]
