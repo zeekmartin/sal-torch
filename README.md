@@ -69,15 +69,25 @@ pipe.report().save("compression_report.pdf")
 *behave* as if it were gone, slicing removes it from the weight matrices. The
 exported model runs with **no hooks and without sal-torch installed**.
 
-One caveat on that run, because it did not go SAL's way: a no-SAL control taken
-through the identical pipeline finished at **0.8633**, above SAL's 0.8398. Dense
-accuracy was a tie (0.8965 vs 0.8926, two eval examples apart), so the gap opened
-under compression — the opposite of the v0.4.0 result. The leading suspect is
-head *selection*: `compress()` removes the lowest-magnitude heads, while the
-v0.4.0 battery removed random ones, and random removal is precisely what SAL
-trains against. Being deliberately resilient to losing any head may leave head
-magnitude a worse guide to which one to drop. Untested either way — see
-[ROADMAP.md](ROADMAP.md).
+**Which heads you remove matters more than SAL does.** `compress()` takes a
+`strategy`, and the choice is worth making deliberately — measured on GPT-2
+Medium, removing the same 120 heads three different ways:
+
+```
+arm           dense    magnitude       random    fi_guided
+standard     0.8926       0.8594       0.8867       0.7520
+SAL          0.8965       0.8398       0.8906       0.7617
+```
+
+`strategy="random"` is the best of the three **for both arms**, and the current
+default (`magnitude`) is 2.7 points worse for a standard model and 5.7 for a
+SAL-trained one. `fi_guided` — spend the budget where the fragility scan says it
+is cheap — is much worse than either, because concentrating removal does more
+damage than spreading it.
+
+Read the SAL row honestly: under `random` the two arms land 0.0039 apart, two
+eval examples, which is a tie rather than a win. On this task the v0.4.0 sweep
+does not reproduce. See [ROADMAP.md](ROADMAP.md) for the full result.
 
 **It refuses LoRA/QLoRA models.** Not a warning — an error, with the reason and
 what to do instead. SAL works by letting the model reorganize around silenced

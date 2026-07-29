@@ -243,12 +243,40 @@ to losing any given head may also be one whose head magnitudes say less about
 which head to drop — so magnitude ranking could be a worse guide on a SAL-trained
 model specifically. That is a hypothesis, not a finding.
 
-Next on this, before v0.5.0 ships:
+**Measured** (`scripts/modal_selection_experiment.py`, 2 arms × 3 strategies, the
+same 120 heads removed in every cell, masked then INT4 so only *which* heads
+varies):
 
-- a selection strategy option on `compress()` (magnitude / random / plasticity),
-  measured against each other on both arms;
-- the same run at more seeds, since single-seed 2.3-point gaps have been
-  overturned once already in this project by a missing gradient clip.
+```
+arm           dense    magnitude       random    fi_guided
+----------------------------------------------------------
+standard     0.8926       0.8594       0.8867       0.7520
+SAL          0.8965       0.8398       0.8906       0.7617
+
+retention vs each arm's own dense model
+standard    100.00%       96.28%       99.34%       84.25%
+SAL         100.00%       93.68%       99.35%       84.97%
+```
+
+Three things fall out of it:
+
+1. **The default was the problem.** `magnitude` is the worst viable strategy for
+   *both* arms — it costs the standard model 2.7 points and the SAL model 5.7.
+   `random` is better for everyone, and that finding has nothing to do with SAL.
+   The v0.5.0 regression was substantially an artifact of the default.
+2. **But SAL still does not win.** Under `random` the two arms are 0.0039 apart
+   — two eval examples, exactly the noise floor. That is a tie, not the 7/7
+   sweep v0.4.0 saw. Fixing the selection removes the regression; it does not
+   restore the win.
+3. **`fi_guided` is bad here, on both arms.** ~84% retention against random's
+   ~99%. Concentrating removal in the layers a fragility scan calls cheap does
+   far more damage than spreading it evenly — at least at a 33% budget on a
+   model where only two layers classify as non-CRITICAL, forcing most of the
+   budget into CRITICAL layers anyway (spill of 64–80 of 120 heads).
+
+Still open: more seeds. Every gap above except `fi_guided`'s is under three
+points on a single seed, and this project has already had one single-seed
+conclusion overturned by a missing gradient clip.
 
 **Also fixed by this run:** `sal_train` was not clipping gradients while
 `SALTrainer` clips by default. Silencing a third of the heads makes gradients
