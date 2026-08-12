@@ -1,0 +1,354 @@
+{
+  "config": {
+    "model": "google/vit-base-patch16-224",
+    "task": "cifar10",
+    "n_train": 2048,
+    "n_eval": 1000,
+    "epochs": 3,
+    "lr": 3e-05,
+    "train_bs": 32,
+    "eval_bs": 64,
+    "prune_fraction": 0.33,
+    "battery_seed_offset": 10000,
+    "smoke": false,
+    "finetune": "full",
+    "seeds": [
+      42,
+      123,
+      456
+    ],
+    "head_selection": "random (shipped default)",
+    "int8_backend": "torch.ao dynamic (CPU)"
+  },
+  "seeds_completed": [
+    42,
+    123,
+    456
+  ],
+  "failures": {},
+  "runs": {
+    "42": {
+      "seed": 42,
+      "model": "google/vit-base-patch16-224",
+      "task": "cifar10",
+      "finetune": "full",
+      "epochs": 3,
+      "lr": 3e-05,
+      "batch_size": 32,
+      "n_train": 2048,
+      "n_eval": 1000,
+      "prune_fraction": 0.33,
+      "battery_seed": 10042,
+      "baseline": {
+        "dense": {
+          "accuracy": 0.969,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 10.5
+        },
+        "prune33": {
+          "accuracy": 0.652,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 10.6
+        },
+        "prune50": {
+          "accuracy": 0.251,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 10.5
+        },
+        "int8": {
+          "accuracy": 0.965,
+          "size_mb": 3.2,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 30.9
+        },
+        "prune33+int8": {
+          "accuracy": 0.526,
+          "size_mb": 3.2,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 31.6
+        }
+      },
+      "SAL": {
+        "dense": {
+          "accuracy": 0.958,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 10.4
+        },
+        "prune33": {
+          "accuracy": 0.84,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 10.5
+        },
+        "prune50": {
+          "accuracy": 0.396,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 10.5
+        },
+        "int8": {
+          "accuracy": 0.956,
+          "size_mb": 3.2,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 30.4
+        },
+        "prune33+int8": {
+          "accuracy": 0.735,
+          "size_mb": 3.2,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 31.3
+        }
+      }
+    },
+    "123": {
+      "seed": 123,
+      "model": "google/vit-base-patch16-224",
+      "task": "cifar10",
+      "finetune": "full",
+      "epochs": 3,
+      "lr": 3e-05,
+      "batch_size": 32,
+      "n_train": 2048,
+      "n_eval": 1000,
+      "prune_fraction": 0.33,
+      "battery_seed": 10123,
+      "baseline": {
+        "dense": {
+          "accuracy": 0.969,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 11.2
+        },
+        "prune33": {
+          "accuracy": 0.746,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 11.3
+        },
+        "prune50": {
+          "accuracy": 0.35,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 11.3
+        },
+        "int8": {
+          "accuracy": 0.957,
+          "size_mb": 3.2,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 84.0
+        },
+        "prune33+int8": {
+          "accuracy": 0.633,
+          "size_mb": 3.2,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 84.4
+        }
+      },
+      "SAL": {
+        "dense": {
+          "accuracy": 0.964,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 10.4
+        },
+        "prune33": {
+          "accuracy": 0.842,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 10.4
+        },
+        "prune50": {
+          "accuracy": 0.604,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 10.4
+        },
+        "int8": {
+          "accuracy": 0.96,
+          "size_mb": 3.2,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 39.6
+        },
+        "prune33+int8": {
+          "accuracy": 0.788,
+          "size_mb": 3.2,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 53.0
+        }
+      }
+    },
+    "456": {
+      "seed": 456,
+      "model": "google/vit-base-patch16-224",
+      "task": "cifar10",
+      "finetune": "full",
+      "epochs": 3,
+      "lr": 3e-05,
+      "batch_size": 32,
+      "n_train": 2048,
+      "n_eval": 1000,
+      "prune_fraction": 0.33,
+      "battery_seed": 10456,
+      "baseline": {
+        "dense": {
+          "accuracy": 0.964,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 10.8
+        },
+        "prune33": {
+          "accuracy": 0.706,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 10.8
+        },
+        "prune50": {
+          "accuracy": 0.342,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 10.7
+        },
+        "int8": {
+          "accuracy": 0.959,
+          "size_mb": 3.2,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 70.0
+        },
+        "prune33+int8": {
+          "accuracy": 0.558,
+          "size_mb": 3.2,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 73.9
+        }
+      },
+      "SAL": {
+        "dense": {
+          "accuracy": 0.949,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 10.5
+        },
+        "prune33": {
+          "accuracy": 0.853,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 10.6
+        },
+        "prune50": {
+          "accuracy": 0.428,
+          "size_mb": 343.2,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 10.5
+        },
+        "int8": {
+          "accuracy": 0.949,
+          "size_mb": 3.2,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 61.3
+        },
+        "prune33+int8": {
+          "accuracy": 0.795,
+          "size_mb": 3.2,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 61.6
+        }
+      }
+    }
+  },
+  "aggregate": {
+    "dense": {
+      "n_seeds": 3,
+      "baseline_mean": 0.9673333333333334,
+      "baseline_std": 0.0028867513459481316,
+      "sal_mean": 0.957,
+      "sal_std": 0.007549834435270757,
+      "delta_mean": -0.010333333333333342,
+      "delta_std": 0.0050332229568471705,
+      "sal_wins": 0,
+      "baseline_wins": 3,
+      "consistent": false
+    },
+    "prune33": {
+      "n_seeds": 3,
+      "baseline_mean": 0.7013333333333334,
+      "baseline_std": 0.047173438854225286,
+      "sal_mean": 0.8450000000000001,
+      "sal_std": 0.007000000000000007,
+      "delta_mean": 0.14366666666666664,
+      "delta_std": 0.04609049070397637,
+      "sal_wins": 3,
+      "baseline_wins": 0,
+      "consistent": true
+    },
+    "prune50": {
+      "n_seeds": 3,
+      "baseline_mean": 0.31433333333333335,
+      "baseline_std": 0.054993939059984905,
+      "sal_mean": 0.476,
+      "sal_std": 0.11199999999999999,
+      "delta_mean": 0.16166666666666665,
+      "delta_std": 0.08523105850177702,
+      "sal_wins": 3,
+      "baseline_wins": 0,
+      "consistent": true
+    },
+    "int8": {
+      "n_seeds": 3,
+      "baseline_mean": 0.9603333333333333,
+      "baseline_std": 0.004163331998932269,
+      "sal_mean": 0.955,
+      "sal_std": 0.005567764362830027,
+      "delta_mean": -0.005333333333333338,
+      "delta_std": 0.007234178138070243,
+      "sal_wins": 1,
+      "baseline_wins": 2,
+      "consistent": false
+    },
+    "prune33+int8": {
+      "n_seeds": 3,
+      "baseline_mean": 0.5723333333333334,
+      "baseline_std": 0.05492115560813821,
+      "sal_mean": 0.7726666666666667,
+      "sal_std": 0.03280751946327755,
+      "delta_mean": 0.20033333333333334,
+      "delta_std": 0.041681330752908204,
+      "sal_wins": 3,
+      "baseline_wins": 0,
+      "consistent": true
+    }
+  }
+}
