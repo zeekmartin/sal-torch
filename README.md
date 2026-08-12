@@ -179,6 +179,53 @@ pmap.save("plasticity.json")     # raw scores
 pmap.save("plasticity.pdf")      # visual report (needs sal-torch[reports])
 ```
 
+### Cross-architecture structural profiles
+
+Both scanners are architecture-agnostic, which is only useful if the numbers
+they return are architecture-*specific*. Four pretrained checkpoints, no
+training, one 256-sample probe each
+(`scripts/modal_plasticity_compare.py`, ~2-7s per model on a T4):
+
+| model | probe | layers | heads | FI | buffer | critical | elastic | saturated | hub |
+|---|---|---|---|---|---|---|---|---|---|
+| `distilbert-base-uncased` | text | 6 | 12 | **0.3086** | 2 | 4 | 1 | 3 | 2 |
+| `gpt2` | text | 12 | 12 | 0.0990 | 1 | 11 | 0 | 2 | **10** |
+| `bert-base-uncased` | text | 12 | 12 | 0.0903 | 3 | 9 | 3 | 7 | 2 |
+| `google/vit-base-patch16-224` | vision | 12 | 12 | 0.0660 | 2 | 10 | 1 | 5 | 6 |
+
+| model | routing | CKA | MI |
+|---|---|---|---|
+| `distilbert-base-uncased` | 0.3141 | 0.9577 | 0.0430 |
+| `gpt2` | 0.1787 | 0.9713 | 0.0610 |
+| `bert-base-uncased` | 0.3161 | 0.9712 | 0.0363 |
+| `google/vit-base-patch16-224` | **0.7110** | 0.9170 | 0.0291 |
+
+- **DistilBERT is the fragile one** — FI 0.309, three times any other model here,
+  and the only distilled checkpoint. Distillation is exactly the process that
+  would strip redundant pathway. (It is also the only 6-layer model, so depth is
+  a live confound.)
+- **GPT-2 and BERT are identical on paper** — 12 × 12, 144 heads — and land 10
+  hub layers against 2. Causal and bidirectional attention build different
+  structures at the same size.
+- **ViT routes far more freely** than any text model (0.711 against 0.18–0.32),
+  with the lowest FI and the lowest intra-layer redundancy. GPT-2 is its
+  opposite on every axis.
+
+Two honest caveats. **No model here has a single IMMUNE layer** — the <1%
+relative-FI threshold looks unreachable on real pretrained checkpoints, so treat
+IMMUNE as theoretical at the current calibration. And the ViT row is probed with
+images while the other three get sentences: the three text models are a
+controlled comparison, ViT is a fourth architecture on its own probe.
+
+**FI ranks structure; it does not predict compression survival.** ViT-base has
+the *lowest* FI in this table and still gives up 27 accuracy points at 33% head
+pruning (see [What we measured](#what-we-measured)). Use `RobustnessTest` for
+survival questions and FI for structural ones.
+
+Load with `attn_implementation="eager"`, or the model returns no attention
+weights, routing entropy comes back NaN, and hub detection quietly reports zero
+hubs — which reads exactly like a finding.
+
 ### sal.compare() — SAL vs. other pruning methods
 
 Benchmark SAL against post-hoc baselines at a matched compression level and see
@@ -205,11 +252,12 @@ We polled practitioners on how they actually compress models. Of 33 responses,
 against head pruning, so the honest question is whether the resilience it trains
 in generalizes to the compression people actually ship.
 
-Short answer, measured across five seeds: **yes, if you fully fine-tune — and
-the win is a pruning win before it is a quantization win.** A SAL-trained GPT-2
-Medium keeps 2.45pp more accuracy under 33% head pruning on 5 of 5 seeds, at no
-cost to clean accuracy. INT4 on its own is a coin flip. Under LoRA the whole
-thing loses. The numbers, including the rows SAL did not win, are in
+Short answer, measured across two architectures and multiple seeds: **yes, if
+you fully fine-tune — and the win is a pruning win before it is a quantization
+win.** A SAL-trained ViT-base keeps **14 to 20 points** more accuracy under head
+pruning on 3 of 3 seeds; GPT-2 Medium keeps 2.45pp more on 5 of 5. Quantization
+alone is a much weaker story, and under LoRA the whole thing loses. The numbers,
+including the rows SAL did not win, are in
 [What we measured](#what-we-measured).
 
 ### RobustnessTest — one model, every degradation
@@ -277,7 +325,39 @@ winner is whichever model loses proportionally less.
 
 ### What we measured
 
-#### Five seeds, full eval split — the headline result
+#### Vision transformers: the largest effect we have measured
+
+ViT-base-patch16-224 on CIFAR-10, **full fine-tuning**, 3 seeds (42/123/456),
+1000 eval images, same battery structure as the GPT-2 study below:
+
+| variant | standard | SAL | delta | SAL ahead on |
+|---|---|---|---|---|
+| dense | 0.9673 ± 0.0029 | 0.9570 ± 0.0075 | **−1.03pp** | 0/3 |
+| int8 | 0.9603 ± 0.0042 | 0.9550 ± 0.0056 | −0.53pp | 1/3 |
+| prune33 | 0.7013 ± 0.0472 | 0.8450 ± 0.0070 | **+14.37pp** | 3/3 |
+| prune50 | 0.3143 ± 0.0550 | 0.4760 ± 0.1120 | **+16.17pp** | 3/3 |
+| prune33+int8 | 0.5723 ± 0.0549 | 0.7727 ± 0.0328 | **+20.03pp** | 3/3 |
+
+**SAL transfers to vision, and here it is an order of magnitude larger** —
++14pp to +20pp against +2.45pp for the best GPT-2 row, unanimous on every
+pruning variant. ViT-base collapses under head pruning (96.7% → 70.1% at 33%,
+→ 31.4% at 50%) and SAL recovers a large share of that.
+
+**It is not free on this model.** SAL costs 1.03pp of clean accuracy and loses
+`dense` on all three seeds, where on GPT-2 it cost nothing. **INT8 does nothing
+either way** — but INT8 barely dents ViT at all (96.7% → 96.0%), so there was no
+damage to recover, which is the same pattern as everywhere else: the size of the
+win tracks how much the compression costs your baseline.
+
+CIFAR-10 is 10-way and SST-2 is 2-way, so raw percentage points are not
+comparable across the two studies. Normalized to headroom above chance, SAL
+takes `prune33` retention from 69.3% to 86.9% and `prune33+int8` from 54.5% to
+78.5%; the same normalization on GPT-2 gives +4.7pp at `prune33`. The gap
+between the two architectures survives the correction.
+
+Three seeds, one task. Reproduce with `scripts/modal_vit_validation.py`.
+
+#### Five seeds, full eval split — GPT-2 Medium
 
 Every number this project published before v0.5.0 was a single seed, which is
 not enough: two GPT-2 baselines trained on identical data differ by about a
@@ -391,9 +471,17 @@ the adaptation cannot.
 - **Scale is still open.** Phi-2 2.7B was LoRA-only, so "LoRA starves it" and
   "SAL stops working above ~350M" remain confounded at that size. Phi-2 under
   full fine-tuning is the experiment that separates them.
-- **One model, one task, at multiple seeds.** The five-seed study covers GPT-2
-  Medium on SST-2. DistilBERT and Phi-2 remain single-seed, and no other
-  architecture has been run more than once.
+- **Why the effect size differs so much by architecture.** ViT gains +14 to
+  +20pp under pruning where GPT-2 Medium gains +2.45pp. The pattern is
+  consistent with "SAL recovers damage in proportion to how much there is" —
+  ViT collapses under head pruning and GPT-2 degrades gently — but that is a
+  post-hoc reading of two data points, not a tested explanation. Do not assume
+  your architecture lands at either end.
+- **Whether SAL costs clean accuracy.** It cost nothing on GPT-2 (+0.57pp on
+  5 seeds) and 1.03pp on ViT (0/3 seeds). Two architectures, two answers.
+- **Two architectures at multiple seeds.** GPT-2 Medium / SST-2 (5 seeds) and
+  ViT-base / CIFAR-10 (3 seeds). DistilBERT and Phi-2 remain single-seed, and
+  nothing else has been run more than once.
 - **Everything under LoRA.** The negative LoRA result is itself single-seed.
   It is consistent with the mechanism, and it agrees across two model sizes,
   but it has not had the same treatment.
@@ -402,8 +490,9 @@ the adaptation cannot.
 
 | your setup | recommendation |
 |---|---|
-| **Full fine-tuning, and you prune heads** | **Yes.** The strongest and best-replicated case: +2.45pp at 33% pruning on 5/5 seeds, +1.58pp for prune+INT4, at no cost to clean accuracy. |
-| **Full fine-tuning, quantization only** | **Measure first.** INT8 gave +0.73pp on 4/5 seeds; INT4 alone was a coin flip (3/5, +0.21pp). Use `RobustnessTest` on your own model before committing. |
+| **Full fine-tuning, and you prune heads** | **Yes.** The strongest and best-replicated case, on both architectures tested: +14 to +20pp on ViT-base (3/3 seeds) and +2.45pp on GPT-2 Medium (5/5). |
+| **Vision transformers** | **Yes, if you prune.** Largest effect measured. Budget about 1pp of clean accuracy for it — unlike GPT-2, SAL was not free here. |
+| **Full fine-tuning, quantization only** | **Measure first.** INT8 gave +0.73pp on GPT-2 (4/5 seeds) and nothing on ViT; INT4 alone was a coin flip (3/5, +0.21pp). Use `RobustnessTest` on your own model before committing. |
 | **LoRA / QLoRA adapters** | **Not recommended.** Measured worse than not using SAL at all, and it costs clean accuracy. The adapters are too small to redistribute what the masking removes. |
 | **Models above ~1B** | **Unvalidated.** No full-fine-tuning result at that scale yet. |
 
