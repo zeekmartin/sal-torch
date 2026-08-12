@@ -1,0 +1,707 @@
+{
+  "config": {
+    "model": "gpt2-medium",
+    "task": "sst2",
+    "n_train": 1024,
+    "n_eval": 872,
+    "epochs": 3,
+    "lr": 2e-05,
+    "train_bs": 8,
+    "grad_accum": 1,
+    "eval_bs": 16,
+    "max_len": 96,
+    "prune_fraction": 0.33,
+    "battery_seed_offset": 10000,
+    "smoke": false,
+    "finetune": "full",
+    "seeds": [
+      42,
+      123,
+      456,
+      789,
+      1337
+    ],
+    "eval_split": "sst2 validation (full)",
+    "head_selection": "random (shipped default)",
+    "int8_backend": "torch.ao dynamic (CPU)",
+    "int4_backend": "bitsandbytes NF4 (CUDA)"
+  },
+  "seeds_completed": [
+    42,
+    123,
+    456,
+    789,
+    1337
+  ],
+  "failures": {},
+  "runs": {
+    "42": {
+      "seed": 42,
+      "model": "gpt2-medium",
+      "task": "sst2",
+      "finetune": "full",
+      "epochs": 3,
+      "lr": 2e-05,
+      "batch_size": 8,
+      "n_train": 1024,
+      "n_eval": 872,
+      "prune_fraction": 0.33,
+      "battery_seed": 10042,
+      "baseline": {
+        "dense": {
+          "accuracy": 0.9036697247706422,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 17.8
+        },
+        "int8": {
+          "accuracy": 0.8956422018348624,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 101.9
+        },
+        "int4": {
+          "accuracy": 0.8990825688073395,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 18.2
+        },
+        "prune33": {
+          "accuracy": 0.8681192660550459,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 17.9
+        },
+        "prune50": {
+          "accuracy": 0.8474770642201835,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 17.9
+        },
+        "prune33+int8": {
+          "accuracy": 0.8314220183486238,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 44.7
+        },
+        "prune33+int4": {
+          "accuracy": 0.8635321100917431,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 15.7
+        }
+      },
+      "SAL": {
+        "dense": {
+          "accuracy": 0.9071100917431193,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 17.6
+        },
+        "int8": {
+          "accuracy": 0.893348623853211,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 66.7
+        },
+        "int4": {
+          "accuracy": 0.9013761467889908,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 15.5
+        },
+        "prune33": {
+          "accuracy": 0.8979357798165137,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 18.0
+        },
+        "prune50": {
+          "accuracy": 0.8520642201834863,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 18.2
+        },
+        "prune33+int8": {
+          "accuracy": 0.875,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 103.7
+        },
+        "prune33+int4": {
+          "accuracy": 0.8795871559633027,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 16.1
+        }
+      }
+    },
+    "123": {
+      "seed": 123,
+      "model": "gpt2-medium",
+      "task": "sst2",
+      "finetune": "full",
+      "epochs": 3,
+      "lr": 2e-05,
+      "batch_size": 8,
+      "n_train": 1024,
+      "n_eval": 872,
+      "prune_fraction": 0.33,
+      "battery_seed": 10123,
+      "baseline": {
+        "dense": {
+          "accuracy": 0.8956422018348624,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 20.3
+        },
+        "int8": {
+          "accuracy": 0.8853211009174312,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 273.5
+        },
+        "int4": {
+          "accuracy": 0.8990825688073395,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 16.1
+        },
+        "prune33": {
+          "accuracy": 0.8807339449541285,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 17.8
+        },
+        "prune50": {
+          "accuracy": 0.7362385321100917,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 17.8
+        },
+        "prune33+int8": {
+          "accuracy": 0.8314220183486238,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 60.0
+        },
+        "prune33+int4": {
+          "accuracy": 0.8830275229357798,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 14.8
+        }
+      },
+      "SAL": {
+        "dense": {
+          "accuracy": 0.9002293577981652,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 18.6
+        },
+        "int8": {
+          "accuracy": 0.8967889908256881,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 44.2
+        },
+        "int4": {
+          "accuracy": 0.8956422018348624,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 14.0
+        },
+        "prune33": {
+          "accuracy": 0.8876146788990825,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 18.0
+        },
+        "prune50": {
+          "accuracy": 0.783256880733945,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 18.2
+        },
+        "prune33+int8": {
+          "accuracy": 0.8612385321100917,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 44.7
+        },
+        "prune33+int4": {
+          "accuracy": 0.8887614678899083,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 14.5
+        }
+      }
+    },
+    "456": {
+      "seed": 456,
+      "model": "gpt2-medium",
+      "task": "sst2",
+      "finetune": "full",
+      "epochs": 3,
+      "lr": 2e-05,
+      "batch_size": 8,
+      "n_train": 1024,
+      "n_eval": 872,
+      "prune_fraction": 0.33,
+      "battery_seed": 10456,
+      "baseline": {
+        "dense": {
+          "accuracy": 0.8853211009174312,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 19.4
+        },
+        "int8": {
+          "accuracy": 0.8727064220183486,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 162.9
+        },
+        "int4": {
+          "accuracy": 0.8830275229357798,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 16.2
+        },
+        "prune33": {
+          "accuracy": 0.8279816513761468,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 18.2
+        },
+        "prune50": {
+          "accuracy": 0.7993119266055045,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 18.0
+        },
+        "prune33+int8": {
+          "accuracy": 0.8245412844036697,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 277.3
+        },
+        "prune33+int4": {
+          "accuracy": 0.8337155963302753,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 15.2
+        }
+      },
+      "SAL": {
+        "dense": {
+          "accuracy": 0.8979357798165137,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 18.5
+        },
+        "int8": {
+          "accuracy": 0.8922018348623854,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 72.8
+        },
+        "int4": {
+          "accuracy": 0.8910550458715596,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 14.0
+        },
+        "prune33": {
+          "accuracy": 0.8715596330275229,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 17.8
+        },
+        "prune50": {
+          "accuracy": 0.7981651376146789,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 18.6
+        },
+        "prune33+int8": {
+          "accuracy": 0.841743119266055,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 88.5
+        },
+        "prune33+int4": {
+          "accuracy": 0.8600917431192661,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 15.2
+        }
+      }
+    },
+    "789": {
+      "seed": 789,
+      "model": "gpt2-medium",
+      "task": "sst2",
+      "finetune": "full",
+      "epochs": 3,
+      "lr": 2e-05,
+      "batch_size": 8,
+      "n_train": 1024,
+      "n_eval": 872,
+      "prune_fraction": 0.33,
+      "battery_seed": 10789,
+      "baseline": {
+        "dense": {
+          "accuracy": 0.9048165137614679,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 18.6
+        },
+        "int8": {
+          "accuracy": 0.8922018348623854,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 49.2
+        },
+        "int4": {
+          "accuracy": 0.9094036697247706,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 16.2
+        },
+        "prune33": {
+          "accuracy": 0.8738532110091743,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 18.0
+        },
+        "prune50": {
+          "accuracy": 0.8463302752293578,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 18.1
+        },
+        "prune33+int8": {
+          "accuracy": 0.8394495412844036,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 73.8
+        },
+        "prune33+int4": {
+          "accuracy": 0.8658256880733946,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 15.3
+        }
+      },
+      "SAL": {
+        "dense": {
+          "accuracy": 0.9185779816513762,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 18.4
+        },
+        "int8": {
+          "accuracy": 0.8979357798165137,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 155.4
+        },
+        "int4": {
+          "accuracy": 0.9128440366972477,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 14.2
+        },
+        "prune33": {
+          "accuracy": 0.8830275229357798,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 18.0
+        },
+        "prune50": {
+          "accuracy": 0.8692660550458715,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 18.1
+        },
+        "prune33+int8": {
+          "accuracy": 0.8440366972477065,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 46.0
+        },
+        "prune33+int4": {
+          "accuracy": 0.8761467889908257,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 14.7
+        }
+      }
+    },
+    "1337": {
+      "seed": 1337,
+      "model": "gpt2-medium",
+      "task": "sst2",
+      "finetune": "full",
+      "epochs": 3,
+      "lr": 2e-05,
+      "batch_size": 8,
+      "n_train": 1024,
+      "n_eval": 872,
+      "prune_fraction": 0.33,
+      "battery_seed": 11337,
+      "baseline": {
+        "dense": {
+          "accuracy": 0.9128440366972477,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 19.1
+        },
+        "int8": {
+          "accuracy": 0.8979357798165137,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 112.5
+        },
+        "int4": {
+          "accuracy": 0.9105504587155964,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 15.9
+        },
+        "prune33": {
+          "accuracy": 0.8348623853211009,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 17.3
+        },
+        "prune50": {
+          "accuracy": 0.8142201834862385,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 17.9
+        },
+        "prune33+int8": {
+          "accuracy": 0.8153669724770642,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 45.5
+        },
+        "prune33+int4": {
+          "accuracy": 0.8371559633027523,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 14.1
+        }
+      },
+      "SAL": {
+        "dense": {
+          "accuracy": 0.9071100917431193,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 18.4
+        },
+        "int8": {
+          "accuracy": 0.9002293577981652,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 66.6
+        },
+        "int4": {
+          "accuracy": 0.9105504587155964,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 13.6
+        },
+        "prune33": {
+          "accuracy": 0.8681192660550459,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 17.3
+        },
+        "prune50": {
+          "accuracy": 0.8440366972477065,
+          "size_mb": 1419.3,
+          "backend": null,
+          "device": "cuda",
+          "seconds": 17.9
+        },
+        "prune33+int8": {
+          "accuracy": 0.8142201834862385,
+          "size_mb": 210.4,
+          "backend": "torch-dynamic-int8",
+          "device": "cpu",
+          "seconds": 101.5
+        },
+        "prune33+int4": {
+          "accuracy": 0.8577981651376146,
+          "size_mb": 361.9,
+          "backend": "bitsandbytes-nf4",
+          "device": "cuda",
+          "seconds": 14.1
+        }
+      }
+    }
+  },
+  "aggregate": {
+    "dense": {
+      "n_seeds": 5,
+      "baseline_mean": 0.9004587155963304,
+      "baseline_std": 0.010428846370999664,
+      "sal_mean": 0.9061926605504587,
+      "sal_std": 0.00804388895263771,
+      "delta_mean": 0.005733944954128445,
+      "delta_std": 0.00790369767895079,
+      "sal_wins": 4,
+      "baseline_wins": 1,
+      "ties": 0,
+      "significant": true
+    },
+    "int8": {
+      "n_seeds": 5,
+      "baseline_mean": 0.8887614678899082,
+      "baseline_std": 0.010160576345567307,
+      "sal_mean": 0.8961009174311927,
+      "sal_std": 0.003303867039194471,
+      "delta_mean": 0.007339449541284404,
+      "delta_std": 0.008450519920614961,
+      "sal_wins": 4,
+      "baseline_wins": 1,
+      "ties": 0,
+      "significant": true
+    },
+    "int4": {
+      "n_seeds": 5,
+      "baseline_mean": 0.9002293577981652,
+      "baseline_std": 0.011059232524074496,
+      "sal_mean": 0.9022935779816514,
+      "sal_std": 0.009365833481236433,
+      "delta_mean": 0.0020642201834862204,
+      "delta_std": 0.0042446686980095695,
+      "sal_wins": 3,
+      "baseline_wins": 1,
+      "ties": 1,
+      "significant": false
+    },
+    "prune33": {
+      "n_seeds": 5,
+      "baseline_mean": 0.8571100917431191,
+      "baseline_std": 0.023995035328040412,
+      "sal_mean": 0.881651376146789,
+      "sal_std": 0.012120208798729668,
+      "delta_mean": 0.024541284403669695,
+      "delta_std": 0.01592344491533012,
+      "sal_wins": 5,
+      "baseline_wins": 0,
+      "ties": 0,
+      "significant": true
+    },
+    "prune50": {
+      "n_seeds": 5,
+      "baseline_mean": 0.8087155963302752,
+      "baseline_std": 0.04552188974462794,
+      "sal_mean": 0.8293577981651377,
+      "sal_std": 0.03681710644056653,
+      "delta_mean": 0.020642201834862407,
+      "delta_std": 0.019478540999384224,
+      "sal_wins": 4,
+      "baseline_wins": 1,
+      "ties": 0,
+      "significant": true
+    },
+    "prune33+int8": {
+      "n_seeds": 5,
+      "baseline_mean": 0.8284403669724771,
+      "baseline_std": 0.009015249544510781,
+      "sal_mean": 0.8472477064220183,
+      "sal_std": 0.02289847884260607,
+      "delta_mean": 0.018807339449541292,
+      "delta_std": 0.01828759920887676,
+      "sal_wins": 4,
+      "baseline_wins": 1,
+      "ties": 0,
+      "significant": true
+    },
+    "prune33+int4": {
+      "n_seeds": 5,
+      "baseline_mean": 0.856651376146789,
+      "baseline_std": 0.020816668418201074,
+      "sal_mean": 0.8724770642201835,
+      "sal_std": 0.013210491516361668,
+      "delta_mean": 0.01582568807339446,
+      "delta_std": 0.00816558858665957,
+      "sal_wins": 5,
+      "baseline_wins": 0,
+      "ties": 0,
+      "significant": true
+    }
+  }
+}
