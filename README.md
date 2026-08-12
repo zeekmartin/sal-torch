@@ -200,16 +200,26 @@ training, one 256-sample probe each
 | `bert-base-uncased` | 0.3161 | 0.9712 | 0.0363 |
 | `google/vit-base-patch16-224` | **0.7110** | 0.9170 | 0.0291 |
 
-- **DistilBERT is the fragile one** — FI 0.309, three times any other model here,
-  and the only distilled checkpoint. Distillation is exactly the process that
-  would strip redundant pathway. (It is also the only 6-layer model, so depth is
-  a live confound.)
-- **GPT-2 and BERT are identical on paper** — 12 × 12, 144 heads — and land 10
-  hub layers against 2. Causal and bidirectional attention build different
+- **DistilBERT is the fragile one — FI 0.3086**, roughly 3× the nearest model
+  (3.1× GPT-2, 3.4× BERT, 4.7× ViT) and the only distilled checkpoint here.
+  Distillation is exactly the process that would strip redundant pathway. It is
+  also the only 6-layer model, so depth is a live confound.
+- **BERT has more room to compress than GPT-2** — 3 elastic layers against
+  **0**, and 2 hub layers against GPT-2's 10. Nearly every GPT-2 layer is doing
+  compensating work, so there is very little the absorption map is willing to
+  call safe.
+- **GPT-2 and BERT are identical on paper** — 12 × 12, 144 heads — and land at
+  opposite ends of that map. Causal and bidirectional attention build different
   structures at the same size.
 - **ViT routes far more freely** than any text model (0.711 against 0.18–0.32),
   with the lowest FI and the lowest intra-layer redundancy. GPT-2 is its
-  opposite on every axis.
+  opposite on every axis. ViT's 6 hub layers sit between BERT's 2 and GPT-2's
+  10 — a distinct profile, but hub-heaviness is not a vision-specific trait.
+
+The practical point: **these four models want four different compression
+strategies**, and the scan that tells you which takes 1.6–6.8s per model on a
+T4 with no training and no labels. Prune BERT's elastic layers; think much
+harder before touching GPT-2.
 
 Two honest caveats. **No model here has a single IMMUNE layer** — the <1%
 relative-FI threshold looks unreachable on real pretrained checkpoints, so treat
@@ -225,6 +235,17 @@ survival questions and FI for structural ones.
 Load with `attn_implementation="eager"`, or the model returns no attention
 weights, routing entropy comes back NaN, and hub detection quietly reports zero
 hubs — which reads exactly like a finding.
+
+**Self-supervised encoders scan too.** I-JEPA ViT-H/14
+(`facebook/ijepa_vith14_1k`, 631M, 32 × 16) loads through `AutoModel` and needs
+no special handling — the architecture registry does not list `ijepa`, but the
+scanners locate its attention projections anyway. Against ViT-base *and* a
+ViT-large depth control on the same probe, most of its profile is a depth trend
+rather than an objective effect: its FI (0.0040) is indistinguishable from
+ViT-large's (0.0041). Two axes are not. Its heads are about twice as correlated
+within a layer as either supervised ViT, and its routing entropy *falls* with
+depth where both supervised models *rise* — broad early, narrow late. See
+`scripts/modal_jepa_scan.py` and `scripts/jepa_scan_results.json`.
 
 ### sal.compare() — SAL vs. other pruning methods
 
@@ -252,12 +273,13 @@ We polled practitioners on how they actually compress models. Of 33 responses,
 against head pruning, so the honest question is whether the resilience it trains
 in generalizes to the compression people actually ship.
 
-Short answer, measured across two architectures and multiple seeds: **yes, if
-you fully fine-tune — and the win is a pruning win before it is a quantization
-win.** A SAL-trained ViT-base keeps **14 to 20 points** more accuracy under head
-pruning on 3 of 3 seeds; GPT-2 Medium keeps 2.45pp more on 5 of 5. Quantization
-alone is a much weaker story, and under LoRA the whole thing loses. The numbers,
-including the rows SAL did not win, are in
+Short answer: **yes, if you fully fine-tune — and the win is a pruning win
+before it is a quantization win.** On the primary evidence, five seeds of GPT-2
+Medium, a SAL-trained model keeps 2.45pp more accuracy under 33% head pruning on
+5 of 5 seeds at no cost to clean accuracy; INT4 alone is a coin flip, and under
+LoRA the whole thing loses. A preliminary three-seed vision study points the
+same way and much larger — cross-modal validation is under investigation, not
+established. The numbers, including the rows SAL did not win, are in
 [What we measured](#what-we-measured).
 
 ### RobustnessTest — one model, every degradation
@@ -325,39 +347,11 @@ winner is whichever model loses proportionally less.
 
 ### What we measured
 
-#### Vision transformers: the largest effect we have measured
+The primary evidence is GPT-2 Medium at five seeds. A three-seed vision study
+follows it as **secondary, preliminary** evidence — promising, and not yet
+enough to call SAL cross-modally validated.
 
-ViT-base-patch16-224 on CIFAR-10, **full fine-tuning**, 3 seeds (42/123/456),
-1000 eval images, same battery structure as the GPT-2 study below:
-
-| variant | standard | SAL | delta | SAL ahead on |
-|---|---|---|---|---|
-| dense | 0.9673 ± 0.0029 | 0.9570 ± 0.0075 | **−1.03pp** | 0/3 |
-| int8 | 0.9603 ± 0.0042 | 0.9550 ± 0.0056 | −0.53pp | 1/3 |
-| prune33 | 0.7013 ± 0.0472 | 0.8450 ± 0.0070 | **+14.37pp** | 3/3 |
-| prune50 | 0.3143 ± 0.0550 | 0.4760 ± 0.1120 | **+16.17pp** | 3/3 |
-| prune33+int8 | 0.5723 ± 0.0549 | 0.7727 ± 0.0328 | **+20.03pp** | 3/3 |
-
-**SAL transfers to vision, and here it is an order of magnitude larger** —
-+14pp to +20pp against +2.45pp for the best GPT-2 row, unanimous on every
-pruning variant. ViT-base collapses under head pruning (96.7% → 70.1% at 33%,
-→ 31.4% at 50%) and SAL recovers a large share of that.
-
-**It is not free on this model.** SAL costs 1.03pp of clean accuracy and loses
-`dense` on all three seeds, where on GPT-2 it cost nothing. **INT8 does nothing
-either way** — but INT8 barely dents ViT at all (96.7% → 96.0%), so there was no
-damage to recover, which is the same pattern as everywhere else: the size of the
-win tracks how much the compression costs your baseline.
-
-CIFAR-10 is 10-way and SST-2 is 2-way, so raw percentage points are not
-comparable across the two studies. Normalized to headroom above chance, SAL
-takes `prune33` retention from 69.3% to 86.9% and `prune33+int8` from 54.5% to
-78.5%; the same normalization on GPT-2 gives +4.7pp at `prune33`. The gap
-between the two architectures survives the correction.
-
-Three seeds, one task. Reproduce with `scripts/modal_vit_validation.py`.
-
-#### Five seeds, full eval split — GPT-2 Medium
+#### Five seeds, full eval split — GPT-2 Medium (primary evidence)
 
 Every number this project published before v0.5.0 was a single seed, which is
 not enough: two GPT-2 baselines trained on identical data differ by about a
@@ -415,6 +409,46 @@ raw per-seed numbers in `scripts/multiseed_results.json`.
 > The INT8 rows are therefore a different measurement, not a replication of the
 > earlier ones. INT4 is bitsandbytes NF4 in both.
 
+#### Vision transformers — secondary, preliminary
+
+**Cross-modal validation is under investigation, not established.** What follows
+is three seeds on one architecture and one task. It is the beginning of an
+answer, not the answer.
+
+ViT-base-patch16-224 on CIFAR-10, full fine-tuning, seeds 42/123/456, 1000 eval
+images, same battery structure as above (`scripts/modal_vit_validation.py`):
+
+| variant | standard | SAL | delta | SAL ahead on |
+|---|---|---|---|---|
+| dense | 0.9673 ± 0.0029 | 0.9570 ± 0.0075 | −1.03pp | 0/3 |
+| int8 | 0.9603 ± 0.0042 | 0.9550 ± 0.0056 | −0.53pp | 1/3 |
+| prune33 | 0.7013 ± 0.0472 | 0.8450 ± 0.0070 | **+14.37pp** | 3/3 |
+| prune50 | 0.3143 ± 0.0550 | 0.4760 ± 0.1120 | **+16.17pp** | 3/3 |
+| prune33+int8 | 0.5723 ± 0.0549 | 0.7727 ± 0.0328 | **+20.03pp** | 3/3 |
+
+The pruning gains are large and unanimous. Read them with four things attached:
+
+- **SAL costs clean accuracy here.** −1.03pp on `dense`, losing all three seeds,
+  where on GPT-2 it cost nothing. Two architectures, two answers.
+- **Quantization-only does nothing**, as on GPT-2. INT8 barely dents ViT at all
+  (96.7% → 96.0%), so there was no damage to recover.
+- **The two studies are not on a common scale.** CIFAR-10 is 10-way, SST-2 is
+  2-way, so raw percentage points do not transfer. Normalized to headroom above
+  chance, SAL moves `prune33` retention from 69.3% to 86.9% here, against
+  +4.7pp on GPT-2. The gap narrows under the correction but does not close.
+- **Three seeds is thin**, and "ahead on 3/3" is unanimity, not significance.
+
+**What we do not yet know is why the gap is this large.** The consistent pattern
+across every run since v0.4.0 is that SAL recovers damage in proportion to how
+much damage there is — ViT-base collapses under head pruning (96.7% → 70.1% at
+33%) where GPT-2 Medium degrades gently, so there is far more to recover. That
+reading fits, but it is a post-hoc fit to two data points. Note that it is *not*
+a model-size story: the +20pp came from the **smaller** model (ViT-base, 86M)
+and the +2.45pp from the larger one (GPT-2 Medium, 355M). Size, modality,
+architecture and task-difficulty are all confounded across these two studies,
+and nothing here separates them. Do not assume your model lands at either end —
+measure it with `RobustnessTest`.
+
 #### The earlier single-seed runs
 
 The four runs below are what motivated the multi-seed study. They stay here
@@ -471,17 +505,19 @@ the adaptation cannot.
 - **Scale is still open.** Phi-2 2.7B was LoRA-only, so "LoRA starves it" and
   "SAL stops working above ~350M" remain confounded at that size. Phi-2 under
   full fine-tuning is the experiment that separates them.
-- **Why the effect size differs so much by architecture.** ViT gains +14 to
-  +20pp under pruning where GPT-2 Medium gains +2.45pp. The pattern is
-  consistent with "SAL recovers damage in proportion to how much there is" —
-  ViT collapses under head pruning and GPT-2 degrades gently — but that is a
-  post-hoc reading of two data points, not a tested explanation. Do not assume
-  your architecture lands at either end.
+- **Cross-modal validation.** Under investigation. One vision architecture on
+  one task at three seeds is a preliminary result, not a validated claim, and
+  the README should not be read as making one.
+- **Why the effect size differs so much between the two studies.** ViT gained
+  +14 to +20pp under pruning where GPT-2 Medium gained +2.45pp. The pattern fits
+  "SAL recovers damage in proportion to how much there is", but that is a
+  post-hoc reading of two points. It is *not* a size story — the larger gain
+  came from the smaller model — and size, modality, architecture and task
+  difficulty are confounded across the two runs.
 - **Whether SAL costs clean accuracy.** It cost nothing on GPT-2 (+0.57pp on
   5 seeds) and 1.03pp on ViT (0/3 seeds). Two architectures, two answers.
-- **Two architectures at multiple seeds.** GPT-2 Medium / SST-2 (5 seeds) and
-  ViT-base / CIFAR-10 (3 seeds). DistilBERT and Phi-2 remain single-seed, and
-  nothing else has been run more than once.
+- **Everything else is single-seed.** DistilBERT and Phi-2 have one run each,
+  and nothing above 355M has been fully fine-tuned at all.
 - **Everything under LoRA.** The negative LoRA result is itself single-seed.
   It is consistent with the mechanism, and it agrees across two model sizes,
   but it has not had the same treatment.
@@ -490,8 +526,8 @@ the adaptation cannot.
 
 | your setup | recommendation |
 |---|---|
-| **Full fine-tuning, and you prune heads** | **Yes.** The strongest and best-replicated case, on both architectures tested: +14 to +20pp on ViT-base (3/3 seeds) and +2.45pp on GPT-2 Medium (5/5). |
-| **Vision transformers** | **Yes, if you prune.** Largest effect measured. Budget about 1pp of clean accuracy for it — unlike GPT-2, SAL was not free here. |
+| **Full fine-tuning, and you prune heads** | **Yes.** The strongest and best-replicated case: +2.45pp at 33% pruning on 5/5 seeds of GPT-2 Medium, at no cost to clean accuracy. |
+| **Vision transformers** | **Promising, preliminary.** Three seeds on ViT-base/CIFAR-10 gave +14 to +20pp under pruning, unanimously — but it cost 1.03pp of clean accuracy, and one architecture on one task is not cross-modal validation. Measure yours. |
 | **Full fine-tuning, quantization only** | **Measure first.** INT8 gave +0.73pp on GPT-2 (4/5 seeds) and nothing on ViT; INT4 alone was a coin flip (3/5, +0.21pp). Use `RobustnessTest` on your own model before committing. |
 | **LoRA / QLoRA adapters** | **Not recommended.** Measured worse than not using SAL at all, and it costs clean accuracy. The adapters are too small to redistribute what the masking removes. |
 | **Models above ~1B** | **Unvalidated.** No full-fine-tuning result at that scale yet. |
