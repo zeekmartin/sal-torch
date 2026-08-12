@@ -86,9 +86,10 @@ head the model can spare. `fi_guided` — spend the budget where the fragility s
 says it is cheap — is much worse than either, because concentrating removal does
 more damage than spreading it.
 
-Read the SAL row honestly: under `random` the two arms land 0.0039 apart, two
-eval examples, which is a tie rather than a win. On this task the v0.4.0 sweep
-does not reproduce. See [ROADMAP.md](ROADMAP.md) for the full result.
+That grid was one seed, and under `random` its two arms landed 0.0039 apart —
+a tie. The five-seed run in [What we measured](#what-we-measured) settles it
+properly: with `random` selection, SAL leads head pruning by 2.45pp on 5 of 5
+seeds. See [ROADMAP.md](ROADMAP.md) for the full trail.
 
 **It refuses LoRA/QLoRA models.** Not a warning — an error, with the reason and
 what to do instead. SAL works by letting the model reorganize around silenced
@@ -204,10 +205,12 @@ We polled practitioners on how they actually compress models. Of 33 responses,
 against head pruning, so the honest question is whether the resilience it trains
 in generalizes to the compression people actually ship.
 
-Short answer, measured over four runs: **yes, if you fully fine-tune.** A
-SAL-trained GPT-2 Medium at INT4 scores *higher than the uncompressed standard
-model at a quarter of the size*. Under LoRA the same setup loses. The numbers,
-including the runs SAL lost, are in [What we measured](#what-we-measured).
+Short answer, measured across five seeds: **yes, if you fully fine-tune — and
+the win is a pruning win before it is a quantization win.** A SAL-trained GPT-2
+Medium keeps 2.45pp more accuracy under 33% head pruning on 5 of 5 seeds, at no
+cost to clean accuracy. INT4 on its own is a coin flip. Under LoRA the whole
+thing loses. The numbers, including the rows SAL did not win, are in
+[What we measured](#what-we-measured).
 
 ### RobustnessTest — one model, every degradation
 
@@ -274,13 +277,72 @@ winner is whichever model loses proportionally less.
 
 ### What we measured
 
-Every run below trains the same model twice from identical weights — once plain,
-once with SAL at `prune_fraction=0.33` — then evaluates both **dense** under the
-full battery. Scripts are in `scripts/`; results in
-`scripts/robustness_scale_results.json`. Single seed each.
+#### Five seeds, full eval split — the headline result
 
-**SAL wins per category, by absolute accuracy** (which model scores higher — the
-deployment question):
+Every number this project published before v0.5.0 was a single seed, which is
+not enough: two GPT-2 baselines trained on identical data differ by about a
+point, and one single-seed conclusion here has already been overturned. So the
+v0.4.0 protocol was re-run five times.
+
+GPT-2 Medium / SST-2, **full fine-tuning**, seeds 42/123/456/789/1337, scored on
+the **complete 872-example validation split**. Each seed trains the same
+checkpoint twice — plain, and with SAL at `prune_fraction=0.33` — then puts both
+through the same battery, with both arms losing the same heads.
+
+| variant | standard | SAL | delta | SAL ahead on | consistent? |
+|---|---|---|---|---|---|
+| dense | 0.9005 ± 0.0104 | 0.9062 ± 0.0080 | **+0.57pp** | 4/5 | yes |
+| int8 | 0.8888 ± 0.0102 | 0.8961 ± 0.0033 | **+0.73pp** | 4/5 | yes |
+| int4 | 0.9002 ± 0.0111 | 0.9023 ± 0.0094 | +0.21pp | 3/5 | **no** |
+| prune33 | 0.8571 ± 0.0240 | 0.8817 ± 0.0121 | **+2.45pp** | 5/5 | yes |
+| prune50 | 0.8087 ± 0.0455 | 0.8294 ± 0.0368 | **+2.06pp** | 4/5 | yes |
+| prune33+int8 | 0.8284 ± 0.0090 | 0.8472 ± 0.0229 | **+1.88pp** | 4/5 | yes |
+| prune33+int4 | 0.8567 ± 0.0208 | 0.8725 ± 0.0132 | **+1.58pp** | 5/5 | yes |
+
+Mean ± sample std across seeds. "Consistent" means SAL led on **4 or more of the
+5 seeds** — a sign test on the direction, which is the question a single seed
+cannot answer, not a t-test on the magnitude.
+
+**What holds.** SAL wins 5 of 6 compressed variants, and it costs nothing on the
+clean model (+0.57pp — SAL is not buying resilience with accuracy). The effect
+is largest and most reliable exactly where SAL was designed to work: **head
+pruning**, +2.45pp at 33% on every seed and +2.06pp at 50%. Both combined
+recipes hold too.
+
+**What does not.** *`int4` on its own does not replicate.* Three seeds of five
+and +0.21pp — smaller than the run-to-run spread, i.e. a coin flip. The v0.4.0
+claim that SAL won *all seven* variants including INT4 was one seed; across
+five, quantization-only gains are small, and the INT4 row is the weakest in the
+table. Where SAL helps under INT4 is in combination with pruning
+(`prune33+int4`, +1.58pp on 5/5) — which is the pruning effect carrying the row.
+
+**About the Pareto claim.** v0.4.0 reported `SAL/int4` beating the *uncompressed*
+standard model. Across five seeds it averages 0.9023 at 361.9MB against the
+standard model's 0.9005 at 1419.3MB. That +0.18pp is inside the spread, so the
+honest statement is **equal accuracy at a quarter of the size**, not higher. It
+is still the deployment recommendation; it is not a free accuracy gain.
+
+**One observation, offered as such.** The SAL arm has the *smaller* standard
+deviation on 6 of the 7 variants — most sharply on `prune33` (0.0121 vs 0.0240).
+Five seeds is too few to call this a property, but SAL-trained models were more
+predictable under compression here, not merely better on average.
+
+Reproduce with `scripts/modal_multiseed_validation.py` (5× Modal T4, ~10 min);
+raw per-seed numbers in `scripts/multiseed_results.json`.
+
+> **One caveat on the `int8` rows.** This run quantizes INT8 with `torch.ao`
+> dynamic quantization (CPU), where v0.4.0 used bitsandbytes LLM.int8() on CUDA.
+> The INT8 rows are therefore a different measurement, not a replication of the
+> earlier ones. INT4 is bitsandbytes NF4 in both.
+
+#### The earlier single-seed runs
+
+The four runs below are what motivated the multi-seed study. They stay here
+because the two SAL *lost* are what established the LoRA finding. Each trains
+one model twice from identical weights, then evaluates both dense under the
+battery. Scripts in `scripts/`; results in
+`scripts/robustness_scale_results.json`. **Single seed each — read them as
+signals, not benchmarks.**
 
 | run | model / task | training | clean cost | quantization | pruning | combined |
 |---|---|---|---|---|---|---|
@@ -295,34 +357,6 @@ noise floor. The scale runs do not test dropout, so it has no column here.
 
 The two GPT-2 rows are a controlled comparison: identical model, task, data,
 seed and battery. The only thing that changes is whether LoRA is in the way.
-
-#### Full fine-tuning: SAL wins every variant
-
-GPT-2 Medium, SST-2, 354.8M/354.8M trainable, 512 eval examples:
-
-```
-variant           baseline       SAL     delta  base_size  sal_size    winner
------------------------------------------------------------------------------
-dense               0.8848    0.8887   +0.0039     1419.3    1419.3       SAL
-int8                0.8828    0.8887   +0.0059      513.3     513.3       SAL
-int4                0.8750    0.8926   +0.0176      361.9     361.9       SAL
-prune33             0.8359    0.8555   +0.0195     1419.3    1419.3       SAL
-prune50             0.8145    0.8379   +0.0234     1419.3    1419.3       SAL
-prune33+int8        0.8398    0.8555   +0.0156      513.3     513.3       SAL
-prune33+int4        0.8340    0.8613   +0.0273      361.9     361.9       SAL
-```
-
-Seven for seven, and SAL costs nothing on the clean model (+0.39pp). One eval
-example is 0.195pp here, so `int4`, both pruning rows and both combined rows are
-clear of the noise floor; `dense` and `int8` individually are not. All seven
-point the same way.
-
-#### The Pareto result
-
-**`SAL/int4` scores 0.8926 at 361.9MB.** That beats the *uncompressed* baseline
-(0.8848 at 1419.3MB) — higher accuracy at a quarter of the size — and it is the
-only point on the accuracy-vs-size frontier. Nothing in the standard arm comes
-close at any size.
 
 #### Under LoRA, the same setup fails
 
@@ -350,26 +384,28 @@ the adaptation cannot.
 
 #### What is not established
 
-- **Full fine-tuning is necessary, not automatically sufficient.** The v0.4.0
-  DistilBERT run was also full fine-tuning and still showed no quantization
-  effect — but its INT4 barely dented the baseline at all (it *improved* it, i.e.
-  noise), so there was no headroom to win. Where quantization costs the standard
-  model something, SAL has recovered it; where it costs nothing, there is nothing
-  to recover.
+- **Quantization-only resilience.** Five seeds put `int4` at +0.21pp on 3/5 —
+  no consistent effect. `int8` is consistent but small (+0.73pp), and measured
+  on a different backend than v0.4.0's. If you never prune, do not assume SAL
+  buys you anything at INT4; measure it on your model.
 - **Scale is still open.** Phi-2 2.7B was LoRA-only, so "LoRA starves it" and
   "SAL stops working above ~350M" remain confounded at that size. Phi-2 under
   full fine-tuning is the experiment that separates them.
-- **Single seed everywhere.** Two GPT-2 baselines trained on identical data
-  differ by 0.58pp, which is the run-to-run floor.
+- **One model, one task, at multiple seeds.** The five-seed study covers GPT-2
+  Medium on SST-2. DistilBERT and Phi-2 remain single-seed, and no other
+  architecture has been run more than once.
+- **Everything under LoRA.** The negative LoRA result is itself single-seed.
+  It is consistent with the mechanism, and it agrees across two model sizes,
+  but it has not had the same treatment.
 
 ### When to use SAL
 
 | your setup | recommendation |
 |---|---|
-| **Full fine-tuning** | **Yes.** Validated across quantization, head pruning, and combined compression on GPT-2 Medium; validated for head pruning on DistilBERT. |
+| **Full fine-tuning, and you prune heads** | **Yes.** The strongest and best-replicated case: +2.45pp at 33% pruning on 5/5 seeds, +1.58pp for prune+INT4, at no cost to clean accuracy. |
+| **Full fine-tuning, quantization only** | **Measure first.** INT8 gave +0.73pp on 4/5 seeds; INT4 alone was a coin flip (3/5, +0.21pp). Use `RobustnessTest` on your own model before committing. |
 | **LoRA / QLoRA adapters** | **Not recommended.** Measured worse than not using SAL at all, and it costs clean accuracy. The adapters are too small to redistribute what the masking removes. |
 | **Models above ~1B** | **Unvalidated.** No full-fine-tuning result at that scale yet. |
-| **You only quantize, never prune** | Worth testing on your model with `RobustnessTest` before committing — the size of the win tracks how much quantization costs your baseline. |
 
 If you are on LoRA and want compression resilience, the honest answer today is
 that SAL is not the tool; use `RobustnessTest` to measure what your compression
@@ -461,10 +497,10 @@ New here? Start with [docs/getting_started.md](docs/getting_started.md).
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for what's shipped, what's next, and how to request
-features — including the full four-run evidence trail behind the v0.4.0
-robustness claims, losses included. Next up is `CompressionPipeline` (v0.5.0),
-which turns the validated SAL + INT4 recipe into a single call and refuses to
-run silently on LoRA.
+features — including the full evidence trail behind the robustness claims,
+losses included. v0.5.0 shipped `CompressionPipeline`, `slice_heads()`,
+`quantize()`, and the five-seed validation above. Next up is topology-guided
+distillation (v0.6.0), for the 21% who distill.
 
 ## License
 

@@ -47,11 +47,11 @@ The mechanism and the diagnostic.
   guarded or not: a forgetting score, per-layer retention, and which layers
   changed class.
 
----
+### v0.4.0 — the Robustness Suite · 2026-07-29
 
-## Next: v0.4.0 — the Robustness Suite
-
-**In development — API shipped on `main`, validated across four runs (below).**
+**Shipped. Validated across four single-seed runs (below), then re-validated
+across five seeds in v0.5.0 — which confirmed most of it and corrected one
+claim.**
 
 We asked practitioners how they actually compress models. 33 people answered:
 
@@ -157,17 +157,21 @@ cost of SAL and none of the benefit — that is not a subtle effect, it is
 **Under full fine-tuning, the benefit extends past pruning to quantization.**
 Which answers the question this release was built to ask, for the 39%.
 
-### The Pareto result
+### The Pareto result — as it looked on one seed
 
 `SAL/int4` scores **0.8926 at 361.9MB**. The *uncompressed* standard model
 scores 0.8848 at 1419.3MB.
 
-Higher accuracy, one quarter the size. It is the only point on the
-accuracy-vs-size frontier; no variant of the standard model reaches it at any
-size. This is the first result in the project that is a deployment
-recommendation rather than a measurement.
+Higher accuracy, one quarter the size, and the only point on the
+accuracy-vs-size frontier.
 
-### What is still open
+**This is the claim the five-seed run corrected.** Across seeds `SAL/int4`
+averages 0.9023 against the uncompressed standard model's 0.9005 — a 0.18pp gap
+inside a ±1pp spread. The deployment recommendation survives, but as *equal
+accuracy at a quarter of the size* rather than higher accuracy. See the v0.5.0
+section below.
+
+### What was still open after run 4
 
 - **Full fine-tuning is necessary, not automatically sufficient.** Run 1 was
   full fine-tuning too and showed no quantization effect — but its INT4 cost the
@@ -177,10 +181,8 @@ recommendation rather than a measurement.
 - **Scale.** Run 3 was LoRA-only, so at 2.7B the two explanations are still
   confounded. Phi-2 under full fine-tuning separates them; it needs roughly 44GB
   for weights, gradients and optimizer state.
-- **Single seed everywhere.** Two GPT-2 baselines on identical data differ by
-  0.58pp — that is the run-to-run floor, and no margin below it means anything.
-- **More seeds and full eval splits** before any of this is a benchmark rather
-  than a signal.
+- ~~**Single seed everywhere.**~~ **Closed in v0.5.0** — five seeds on the full
+  eval split, below.
 
 Reproduce: `scripts/modal_v040_test.py` (run 1) and
 `scripts/modal_robustness_scale.py` (runs 2-4, via `SAL_TIERS`). Raw numbers in
@@ -191,20 +193,16 @@ For the 21% on distillation: see v0.6.0.
 For the 15% not compressing yet: the docs are getting a real getting-started
 path, because "should I compress at all?" is a legitimate answer.
 
----
+### v0.5.0 — `CompressionPipeline`, and five seeds instead of one · 2026-08-12
 
-## Planned
+The v0.4.0 evidence pointed at one specific recipe: **fully fine-tune with SAL,
+then compress.** Getting there by hand means wiring `SALConfig` → `HeadMasker` →
+your training loop → head selection → a quantization backend → `RobustnessTest`,
+and getting the training method wrong silently costs 3 points of accuracy. This
+release makes that path the default — and then runs it five times to find out
+how much of the v0.4.0 result was the seed.
 
-### v0.5.0 — `CompressionPipeline` · in development
-
-The v0.4.0 evidence points at one specific recipe: **fully fine-tune with SAL,
-then quantize to INT4.** On GPT-2 Medium that beat the uncompressed standard
-model at a quarter of the size. Getting there by hand means wiring `SALConfig` →
-`HeadMasker` → your training loop → head selection → a quantization backend →
-`RobustnessTest`, and getting the training method wrong silently costs 3 points
-of accuracy.
-
-Shipped on `main`:
+Shipped:
 
 - ✅ **`slice_heads()`** — the missing piece. Everything before v0.5.0 *masked*
   heads, so the model behaved as if smaller while staying exactly as large.
@@ -219,6 +217,8 @@ Shipped on `main`:
   assuming the round trip held.
 - ✅ End-to-end validation on GPT-2 Medium — the pipeline runs, and the export
   reloads at exactly the accuracy that was measured.
+- ✅ **Five-seed validation on the full eval split** — the outstanding item from
+  v0.4.0, closed. See "Five seeds" below.
 
 **The validation run, honestly.** GPT-2 Medium / SST-2 on one T4, both arms
 through the identical pipeline (`scripts/modal_v050_test.py`):
@@ -264,27 +264,89 @@ Three things fall out of it:
    *both* arms — it costs the standard model 2.7 points and the SAL model 5.7.
    `random` is better for everyone, and that finding has nothing to do with SAL.
    The v0.5.0 regression was substantially an artifact of the default.
-2. **But SAL still does not win.** Under `random` the two arms are 0.0039 apart
-   — two eval examples, exactly the noise floor. That is a tie, not the 7/7
-   sweep v0.4.0 saw. Fixing the selection removes the regression; it does not
-   restore the win.
+2. **On this seed, SAL still did not win.** Under `random` the two arms were
+   0.0039 apart — two eval examples, exactly the noise floor. Fixing the
+   selection removed the regression; it did not, on one seed, restore the win.
+   The five-seed run below is what actually answered that.
 3. **`fi_guided` is bad here, on both arms.** ~84% retention against random's
    ~99%. Concentrating removal in the layers a fragility scan calls cheap does
    far more damage than spreading it evenly — at least at a 33% budget on a
    model where only two layers classify as non-CRITICAL, forcing most of the
    budget into CRITICAL layers anyway (spill of 64–80 of 120 heads).
 
-Still open: more seeds. Every gap above except `fi_guided`'s is under three
-points on a single seed, and this project has already had one single-seed
-conclusion overturned by a missing gradient clip.
-
 **Also fixed by this run:** `sal_train` was not clipping gradients while
 `SALTrainer` clips by default. Silencing a third of the heads makes gradients
 spikier, and the unclipped run scored 0.7676 against the clipped run's 0.8965 —
 a 13-point artifact that would have been reported as "SAL does not work".
 
-Also queued for this window: **more seeds and full eval splits** on the four
-runs above, so the v0.4.0 section can stop calling itself a signal.
+### Five seeds — the item this project has owed since v0.4.0
+
+Every SAL-vs-standard number above is one seed. That has been the standing
+caveat since v0.4.0, and it is not a small one: two GPT-2 baselines on identical
+data differ by about a point, one conclusion here was already overturned by a
+missing gradient clip, and the pipeline run above reversed v0.4.0 outright on
+the same model and task. So the v0.4.0 protocol was run five times.
+
+GPT-2 Medium / SST-2, **full fine-tuning**, seeds 42/123/456/789/1337, scored on
+the **complete 872-example validation split** rather than a 512 subset. Each
+seed trains the same checkpoint twice and runs both arms through the same
+battery, with both arms losing the same heads
+(`scripts/modal_multiseed_validation.py`, one T4 per seed):
+
+```
+variant        standard            SAL                 delta    ahead  consistent
+----------------------------------------------------------------------------------
+dense          0.9005 +- 0.0104    0.9062 +- 0.0080   +0.0057    4/5      yes
+int8           0.8888 +- 0.0102    0.8961 +- 0.0033   +0.0073    4/5      yes
+int4           0.9002 +- 0.0111    0.9023 +- 0.0094   +0.0021    3/5      NO
+prune33        0.8571 +- 0.0240    0.8817 +- 0.0121   +0.0245    5/5      yes
+prune50        0.8087 +- 0.0455    0.8294 +- 0.0368   +0.0206    4/5      yes
+prune33+int8   0.8284 +- 0.0090    0.8472 +- 0.0229   +0.0188    4/5      yes
+prune33+int4   0.8567 +- 0.0208    0.8725 +- 0.0132   +0.0158    5/5      yes
+```
+
+"Consistent" is a sign test — SAL ahead on 4 or more of the 5 seeds. It asks
+whether the *direction* holds, which is precisely what a single seed cannot say.
+
+**What replicates.** SAL wins 5 of the 6 compressed variants, at no cost to
+clean accuracy (+0.57pp — it is not buying resilience with accuracy). The effect
+is largest and most reliable where SAL was designed to work: **head pruning**,
++2.45pp at 33% on *every* seed and +2.06pp at 50%. Both combined recipes hold.
+That is the core v0.4.0 claim, confirmed.
+
+**What does not.** *INT4 on its own does not replicate.* Three seeds of five and
++0.21pp — inside the run-to-run spread, i.e. a coin flip. The v0.4.0 headline
+that SAL won *all seven* variants including INT4 was one seed. Across five,
+quantization-only gains are small, and INT4 is the weakest row in the table.
+Where SAL helps at INT4 is alongside pruning (`prune33+int4`, +1.58pp on 5/5),
+which is the pruning effect carrying the row.
+
+**And the Pareto claim softens.** `SAL/int4` averages 0.9023 at 361.9MB against
+the uncompressed standard model's 0.9005 at 1419.3MB. A 0.18pp gap inside a ±1pp
+spread is not "higher accuracy at a quarter of the size" — it is **equal
+accuracy at a quarter of the size**. Still the deployment recommendation. Not a
+free accuracy gain, and the README has been corrected to say so.
+
+**One observation, not a claim.** The SAL arm has the smaller standard deviation
+on 6 of the 7 variants, most sharply on `prune33` (0.0121 vs 0.0240). Five seeds
+is far too few to call that a property, but compression outcomes were more
+*predictable* here, not merely better on average. Worth a proper test later.
+
+Two protocol notes, both recorded in `scripts/multiseed_results.json`. INT8 here
+is `torch.ao` dynamic quantization on CPU where v0.4.0 used bitsandbytes
+LLM.int8() on CUDA, so those rows are a different measurement rather than a
+replication; INT4 is bitsandbytes NF4 in both. And the eval-time head choice is
+seeded independently of the training seed, so SAL is never scored on the exact
+heads it trained against.
+
+**What is still open after this.** The five seeds cover one model on one task.
+DistilBERT and Phi-2 are still single-seed, the LoRA result is single-seed, and
+nothing above 355M has been fully fine-tuned at all. Multi-seed is now the bar
+for new claims, not something to retrofit again later.
+
+---
+
+## Planned
 
 ### v0.6.0 — Topology-guided distillation and wider architectures
 
@@ -322,8 +384,9 @@ licensed for commercial production. Development happens in the open.
 - **Benchmark disagreements welcome.** If SAL underperforms on your workload, an
   issue with a reproduction is the most useful thing you can send us.
 
-The v0.4.0 quantization result is published above — including the two runs where
-SAL lost, and the LoRA configuration we now advise against. Results land here
-first, favourable or not.
+The full evidence trail is published above — the two runs where SAL lost, the
+LoRA configuration we now advise against, and the v0.4.0 INT4 claim the
+five-seed run failed to reproduce. Results land here first, favourable or not,
+and corrections stay next to what they correct.
 
 Built by [Cognitive Engineering](https://cognitive-engineering.dev) in Switzerland.

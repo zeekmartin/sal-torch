@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.5.0.dev0 — CompressionPipeline (in development)
+## 0.5.0 (2026-08-12) — CompressionPipeline, and five seeds instead of one
 
-Turns the v0.4.0 recipe into one object, and makes the savings real.
+Turns the v0.4.0 recipe into one object, makes the savings real, and finally
+puts a number on how much of the v0.4.0 result was the seed.
 
 - **`slice_heads()`** — physically removes attention heads from the weights.
   Masking makes a head *behave* as if it were gone; slicing makes the model
@@ -33,9 +34,47 @@ Turns the v0.4.0 recipe into one object, and makes the savings real.
   fine-tuning; unclipped, GPT-2 Medium scored 0.7676 where clipped it scores
   0.8965.
 - Validated end to end on GPT-2 Medium / SST-2: 1419MB → 347MB (4.1x), export
-  reloads at exactly the measured accuracy. **A no-SAL control finished ahead
-  under compression** (0.8633 vs 0.8398) — see `ROADMAP.md`; head-selection
-  strategy is the leading suspect and is being measured next.
+  reloads at exactly the measured accuracy.
+- **Five-seed validation** (`scripts/modal_multiseed_validation.py`, results in
+  `scripts/multiseed_results.json`). GPT-2 Medium / SST-2, full fine-tuning,
+  seeds 42/123/456/789/1337, scored on the complete 872-example validation
+  split instead of a 512 subset. Every prior SAL-vs-standard number in this
+  project was a single seed; this replaces them.
+
+  ```
+  variant        standard            SAL                 delta    ahead  consistent
+  ----------------------------------------------------------------------------------
+  dense          0.9005 +- 0.0104    0.9062 +- 0.0080   +0.0057    4/5      yes
+  int8           0.8888 +- 0.0102    0.8961 +- 0.0033   +0.0073    4/5      yes
+  int4           0.9002 +- 0.0111    0.9023 +- 0.0094   +0.0021    3/5      NO
+  prune33        0.8571 +- 0.0240    0.8817 +- 0.0121   +0.0245    5/5      yes
+  prune50        0.8087 +- 0.0455    0.8294 +- 0.0368   +0.0206    4/5      yes
+  prune33+int8   0.8284 +- 0.0090    0.8472 +- 0.0229   +0.0188    4/5      yes
+  prune33+int4   0.8567 +- 0.0208    0.8725 +- 0.0132   +0.0158    5/5      yes
+  ```
+
+  **Holds:** SAL wins 5 of 6 compressed variants at no cost to clean accuracy
+  (+0.57pp), and the effect is largest and most reliable under **head pruning**
+  — +2.45pp at 33% on every seed, +2.06pp at 50%. Both combined recipes hold.
+
+  **Does not hold:** *`int4` alone does not replicate* — 3/5 seeds and +0.21pp,
+  inside the run-to-run spread. The v0.4.0 "wins all seven variants including
+  INT4" was one seed. The Pareto claim softens with it: `SAL/int4` averages
+  0.9023 at 361.9MB against the uncompressed standard model's 0.9005 at
+  1419.3MB, which is **equal accuracy at a quarter of the size**, not higher.
+  Both README and ROADMAP have been corrected.
+
+  Caveat on the `int8` rows: this run uses `torch.ao` dynamic INT8 (CPU) where
+  v0.4.0 used bitsandbytes LLM.int8() on CUDA, so those rows are a different
+  measurement rather than a replication. INT4 is bitsandbytes NF4 in both. The
+  eval-time head choice is seeded independently of the training seed, so SAL is
+  not scored on the heads it trained against; both arms of a seed lose the same
+  heads.
+
+  Offered as an observation, not a claim: the SAL arm has the smaller standard
+  deviation on 6 of the 7 variants.
+- 157 unit tests pass on CPU (was 110), plus 8 integration tests skipped by
+  default.
 
 ## 0.4.0 (2026-07-29) — Robustness suite, full fine-tuning validation
 
@@ -74,6 +113,12 @@ combined recipes — at no cost to clean accuracy (+0.39pp). `SAL/int4` scores
 0.8926 at 361.9MB against the *uncompressed* standard model's 0.8848 at
 1419.3MB: higher accuracy at a quarter of the size, and the only point on the
 accuracy-vs-size frontier.
+
+> **Partly superseded by v0.5.0.** The five-seed run reproduces the pruning and
+> combined wins and the zero clean-accuracy cost, but **not** the INT4-alone
+> win (3/5 seeds, +0.21pp) and not the Pareto claim as stated — across seeds
+> `SAL/int4` matches rather than beats the uncompressed standard model. The
+> paragraph above is left as written because it is what one seed showed.
 
 **Known limitation.** Under LoRA/QLoRA the identical setup loses. SAL works by
 letting the model reorganize around silenced heads, and adapters freeze the
