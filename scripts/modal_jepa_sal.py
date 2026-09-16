@@ -17,8 +17,16 @@ The protocol, on ImageNet-100:
 
 **Model.** ``facebook/ijepa_vith14_1k`` — 632M parameters, 32 layers x 16 heads.
 Meta never released an I-JEPA ViT-B/16; H/14 and g/16 are the whole catalogue,
-and H/14 is the smaller. Full fine-tuning it needs roughly 40GB with AdamW, so
-this is an A100, not an A10G.
+and H/14 is the smaller.
+
+Currently set to **A10G (24GB)**, which is a deliberate experiment rather than a
+settled sizing. The weights are small in bf16, but that is not what dominates:
+the optimizer runs in fp32 (autocast casts activations, not parameters), so
+AdamW holds roughly 2.5GB of params + 2.5GB of grads + 5GB of moments, and the
+run keeps *both* arms resident at once so the SAL and control models are scored
+against the same probe. Add eager attention's stored attention matrices on top.
+If the smoke test OOMs, the levers in order are ``gradient_checkpointing_enable()``,
+``BATCH_SIZE = 1``, freeing each arm between phases, and then A100-40GB.
 
 **Objective.** I-JEPA-*shaped*, not I-JEPA. Real I-JEPA has a separate predictor
 network and an EMA target encoder; reproducing that needs the pretraining
@@ -260,7 +268,7 @@ def _prune(model, ratio, method, seed=0):
 
 
 # ----------------------------------------------------------------- the run
-@app.function(image=image, gpu="A100-40GB", timeout=4 * 60 * 60,
+@app.function(image=image, gpu="A10G", timeout=4 * 60 * 60,
               volumes={"/cache": cache})
 def run(smoke: bool = False, seed: int = 42) -> dict:
     import torch
