@@ -610,12 +610,90 @@ drift.save("drift_report.pdf")       # visual before/after comparison
 Snapshots are keyed, so you can track drift across many sequential tasks and
 compare any pair.
 
+## Self-supervised models (v0.5.1)
+
+`SALTrainer` no longer assumes your loss is cross-entropy. Pass `train_step=`
+and you own the step; SAL keeps owning the prune schedule.
+
+```python
+def my_train_step(model, batch, optimizer, mask_module):
+    loss = my_custom_loss(model, batch)
+    loss.backward()
+    optimizer.step()
+    optimizer.zero_grad()
+    return loss.item()
+
+trainer = SALTrainer(model, config, optimizer, dataloader,
+                     train_step=my_train_step)
+trainer.train(num_epochs=5)
+```
+
+The masker is already installed and already masking when your callback is
+entered, so a callback that ignores `mask_module` entirely is still SAL-trained.
+You get it as the fourth argument for the case that needs it — reading an
+*unperturbed* target mid-step:
+
+```python
+with torch.no_grad(), mask_module.unmasked():
+    target = model(pixel_values=pixels).last_hidden_state   # no heads masked
+predicted = model(pixel_values=visible).last_hidden_state   # heads masked
+```
+
+Use `unmasked()` (or `remove_mask()` / `apply_mask()`) rather than
+`deactivate()`. The first pair *suspends* masking; `deactivate()` resets the
+pruned set to empty and silently undoes the schedule's accumulated damage.
+
+`train_step=None` keeps the v0.5.0 cross-entropy loop exactly as it was.
+
+### Scoring a model that has no accuracy
+
+A self-supervised encoder has no head, so "did compression hurt?" has to be
+asked about the representations. `sal.evaluation`:
+
+```python
+from sal import linear_probe, knn_accuracy, cka_similarity, measure_latency
+
+probe = linear_probe(model, train_loader, val_loader)     # frozen encoder + linear head
+knn   = knn_accuracy(model, train_loader, val_loader, k=20)
+cka   = cka_similarity(original, compressed, loader)      # 1.0 = identical, no labels needed
+ms    = measure_latency(compressed, device="cuda")        # median, not mean
+```
+
+`cka_similarity` is the one to reach for first: it is label-free and invariant
+to an invertible linear map, so a model whose heads have been physically sliced
+out is still comparable to the original despite the width change.
+
+`compression_report()` bundles all of it, and reports any metric it could not
+compute as `None` *with the reason* under `"skipped"` — an unexplained `None`
+in a benchmark table is indistinguishable from a measured zero.
+
+### Seeing what changed
+
+```python
+from sal.visualization import compare_feature_maps
+compare_feature_maps(original, compressed, image, save_path="before_after.png")
+```
+
+Both rows share one colour scale, deliberately. Per-panel normalization rescales
+a model whose activations collapsed toward zero back up to full range, so it
+renders as identical to the original — hiding the exact failure the figure
+exists to show.
+
+Architectures: `ijepa` and `dinov2` join the auto-detected list.
+
+**Status: unvalidated.** The plumbing is tested (247 CPU tests); the benchmark
+behind it has not been run. See [`examples/jepa_sal.py`](examples/jepa_sal.py)
+and [`scripts/modal_jepa_sal.py`](scripts/modal_jepa_sal.py), and read the
+caveats in both — in particular, Meta never released an I-JEPA ViT-B/16, and
+the training objective those scripts use is I-JEPA-*shaped*, not I-JEPA.
+
 ## Examples
 
 - [`examples/quickstart.py`](examples/quickstart.py) — 3-line SAL training on DistilBERT
 - [`examples/standalone_fi.py`](examples/standalone_fi.py) — Fragility Index scan, no training
 - [`examples/full_control.py`](examples/full_control.py) — manual config + standalone trainer
 - [`examples/compare_with_without_sal.py`](examples/compare_with_without_sal.py) — SAL vs. baseline under compression
+- [`examples/jepa_sal.py`](examples/jepa_sal.py) — SAL on a self-supervised vision encoder, with a custom training step (`--smoke` runs on CPU)
 
 New here? Start with [docs/getting_started.md](docs/getting_started.md).
 

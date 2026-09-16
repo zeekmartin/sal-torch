@@ -348,6 +348,31 @@ for new claims, not something to retrofit again later.
 
 ## Planned
 
+### v0.5.1 — SAL for self-supervised models · in development
+
+`SALTrainer` was wired to cross-entropy, which meant SAL only applied to models
+with a task head. It now takes a `train_step=` callback, so the objective lives
+wherever the caller wants it and SAL keeps only the prune schedule. That opens
+I-JEPA, V-JEPA, MAE and DINO.
+
+Because those models have no accuracy to report, v0.5.1 also ships the metrics
+that replace it — linear probe, kNN, CKA, latency — and the figures that make a
+compression loss visible rather than merely numeric.
+
+**Shipped in the branch, unvalidated.** The code is tested (247 CPU tests); the
+benchmark is written and has not been run. The target is I-JEPA ViT-H/14 on
+ImageNet-100, SAL-trained vs a control trained identically minus head masking,
+both pruned at 33% and 50%. What would falsify it: the two arms landing within
+noise of each other on kNN and CKA. Nothing here gets tagged, published or
+quoted until the run happens on more than one seed — the v0.5.0 five-seed
+exercise is the reason that sentence exists.
+
+Two things the scoping got wrong, recorded so they are not rediscovered:
+Meta never released an I-JEPA ViT-B/16 (H/14 and g/16 are the catalogue), and a
+"predict your own clean representation" objective has a loss of exactly zero for
+any arm that is not being perturbed.
+
+
 ### v0.6.0 — Topology-guided distillation and wider architectures
 
 Distillation currently throws away the teacher's structure and hopes the student

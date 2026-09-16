@@ -1,5 +1,57 @@
 # Changelog
 
+## [Unreleased] — v0.5.1-dev
+
+SAL stops being supervised-only. Not tagged and not published: the plumbing is
+tested, the benchmark behind it has not been run.
+
+### Added
+- **`SALTrainer(train_step=...)`** — a custom training step callback, signature
+  `(model, batch, optimizer, mask_module) -> loss`. The loop keeps the prune
+  schedule (it calls `masker.step()` before every callback and leaves masking
+  on); the callback owns forward, loss, backward, clipping, optimizer and
+  scheduler. `gradient_accumulation_steps` and `max_grad_norm` are deliberately
+  not applied in custom mode — a custom objective may accumulate differently.
+- **`HeadMasker.apply_mask()` / `remove_mask()` / `unmasked()`** — suspend and
+  resume, as distinct from the existing `activate()` / `deactivate()`.
+  `deactivate()` refills the masks with ones and discards the accumulated pruned
+  set, which is exactly wrong for a callback that needs one unperturbed forward
+  pass mid-step.
+- **`sal.evaluation`** — `linear_probe`, `knn_accuracy`, `cka_similarity`,
+  `representation_similarity`, `measure_latency`, `count_params`,
+  `extract_features`, `compression_report`. torch + numpy only.
+- **`sal.visualization`** — attention and per-head feature maps, original vs
+  compressed side by side, and grouped bars across benchmark arms. matplotlib
+  only.
+- **Architecture support for `ijepa` and `dinov2`.** Module finding already
+  worked through the fallback patterns, but `SALConfig.auto()` goes through
+  `detect_architecture()`, which refused both.
+- **`examples/jepa_sal.py`** and **`scripts/modal_jepa_sal.py`** — the I-JEPA
+  compression benchmark. `--smoke` runs the example end to end on CPU.
+
+### Fixed
+- **`SALTrainer` reported nonsense in `masker_stats`.** It read `.stats` after
+  `masker.remove()`, which clears the mask tensors — so every run reported zero
+  active heads, i.e. "100% of heads pruned", whatever `prune_fraction` was.
+  Present in the supervised path since v0.5.0. Stats are now snapshotted before
+  the hooks come off.
+- **`get_qkv_projections()` missed DINOv2's Q/K/V**, which sit one level deeper
+  than either searched path, so head-level weight slicing could not see them.
+
+### Notes on the benchmark, before anyone quotes it
+- **There is no I-JEPA ViT-B/16.** Meta released I-JEPA at ViT-H/14 and ViT-g/16
+  only. The scripts default to `facebook/ijepa_vith14_1k` (632M), which needs an
+  A100 rather than the A10G originally scoped.
+- **The training objective is I-JEPA-shaped, not I-JEPA** — no predictor
+  network, no EMA target encoder. It predicts the clean-image representation
+  from a patch-masked image. The first draft used the clean image on *both*
+  sides, which makes the loss identically zero whenever head masking is off: the
+  no-SAL control arm would have run its optimizer on a constant while logging as
+  though it were training.
+- **One seed will not settle this.** The v0.5.0 five-seed run watched the int4
+  gain evaporate. Treat a sub-1pp gap here as "not shown".
+
+
 ## 0.5.0 (2026-08-12) — CompressionPipeline, and five seeds instead of one
 
 Turns the v0.4.0 recipe into one object, makes the savings real, and finally
