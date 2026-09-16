@@ -28,6 +28,15 @@ tested, the benchmark behind it has not been run.
   `detect_architecture()`, which refused both.
 - **`examples/jepa_sal.py`** and **`scripts/modal_jepa_sal.py`** — the I-JEPA
   compression benchmark. `--smoke` runs the example end to end on CPU.
+- **`scripts/run_jepa_sal.py`** — the same experiment with no cloud SDK, for any
+  GPU box over SSH. Auto-detects VRAM to pick a batch size, turns on gradient
+  checkpointing below 48GB, checkpoints every epoch and resumes from one, and
+  drops every artefact (metrics, scans, figures, safetensors weights) into one
+  directory to `scp` back. `--control` trains the no-SAL arm.
+- **`scripts/setup_runpod.sh`** — prepares a fresh machine and verifies GPU,
+  sal-torch, the I-JEPA checkpoint and the dataset *before* the paid run starts.
+  It does not install torch: cloud images ship a build matched to their CUDA
+  driver, and replacing it is how a working machine stops working.
 
 ### Fixed
 - **`SALTrainer` reported nonsense in `masker_stats`.** It read `.stats` after

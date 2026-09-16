@@ -681,11 +681,15 @@ exists to show.
 
 Architectures: `ijepa` and `dinov2` join the auto-detected list.
 
-**Status: unvalidated.** The plumbing is tested (247 CPU tests); the benchmark
-behind it has not been run. See [`examples/jepa_sal.py`](examples/jepa_sal.py)
-and [`scripts/modal_jepa_sal.py`](scripts/modal_jepa_sal.py), and read the
-caveats in both — in particular, Meta never released an I-JEPA ViT-B/16, and
-the training objective those scripts use is I-JEPA-*shaped*, not I-JEPA.
+**Status: unvalidated.** The plumbing is tested (264 CPU tests); the benchmark
+behind it has not been run. See [`examples/jepa_sal.py`](examples/jepa_sal.py),
+[`scripts/run_jepa_sal.py`](scripts/run_jepa_sal.py) (standalone — any GPU box
+over SSH, `bash scripts/setup_runpod.sh` to prepare one) and
+[`scripts/modal_jepa_sal.py`](scripts/modal_jepa_sal.py) (Modal). Read the
+caveats in all of them — in particular, Meta never released an I-JEPA ViT-B/16,
+the training objective is I-JEPA-*shaped* rather than I-JEPA, and the default
+table compares head *selection* rather than SAL training (`--control` adds the
+arm that tests SAL training itself).
 
 ## Examples
 
