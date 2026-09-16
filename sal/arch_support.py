@@ -39,9 +39,11 @@ _REGISTRY = {
     "bert": "encoder.layer.{}.attention",
     "roberta": "encoder.layer.{}.attention",
     "distilbert": "transformer.layer.{}.attention",
+    # ViT / I-JEPA move between "layers.{}.attention" (transformers 5.x) and
+    # "encoder.layer.{}.attention" (4.x). The entry below is the 5.x spelling and
+    # detect_architecture() verifies it against the actual model, so either
+    # library version resolves correctly. See _resolve_pattern.
     "vit": "layers.{}.attention",
-    # I-JEPA is a ViT encoder trained self-supervised; same module layout, and
-    # its attention exposes o_proj/q_proj/k_proj/v_proj directly.
     "ijepa": "layers.{}.attention",
     "dinov2": "encoder.layer.{}.attention",
     "phi": "layers.{}.self_attn",
@@ -78,6 +80,34 @@ def _standard_arch(model_type, config, pattern):
                     hidden_size=hs, attention_pattern=pattern)
 
 
+def _resolve_pattern(model, model_type: str, pattern: str, expected_layers) -> str:
+    """Return a pattern that actually resolves against *this* model.
+
+    The registry holds one path per architecture, but a path is only valid for
+    the library version that produced the module tree. transformers 5.x lays ViT
+    and I-JEPA out as ``layers.{}.attention``; 4.x uses
+    ``encoder.layer.{}.attention``. A registry entry written against one of them
+    silently resolves to nothing on the other, and ``get_attention_modules``
+    quietly falls back — so everything keeps working while ``ArchInfo`` reports a
+    pattern that finds zero modules. Anything trusting that string (a caller
+    passing it back in, an error message, a bug report) is then working from a
+    fiction.
+
+    So the registry entry is treated as a first guess and verified. If it does
+    not resolve, the fallbacks are probed and the one that matches is returned.
+    """
+    found = _find_by_pattern(model, pattern)
+    if found and (expected_layers is None or len(found) == expected_layers):
+        return pattern
+    for candidate in _FALLBACK_PATTERNS:
+        if candidate == pattern:
+            continue
+        mods = _find_by_pattern(model, candidate)
+        if mods and (expected_layers is None or len(mods) == expected_layers):
+            return candidate
+    return pattern      # nothing matched; keep the registry's answer for the error
+
+
 def detect_architecture(model) -> ArchInfo:
     config = getattr(model, 'config', None)
     if config is None:
@@ -89,7 +119,9 @@ def detect_architecture(model) -> ArchInfo:
     if pattern is None:
         raise SALArchitectureError(
             f"'{model_type}' not supported. Supported: {sorted(_REGISTRY.keys())}")
-    return _standard_arch(model_type, config, pattern)
+    info = _standard_arch(model_type, config, pattern)
+    info.attention_pattern = _resolve_pattern(model, model_type, pattern, info.num_layers)
+    return info
 
 
 def supported_architectures() -> list[str]:

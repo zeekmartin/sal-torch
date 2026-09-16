@@ -107,3 +107,27 @@ def test_fi_scan_runs(model_type, build):
     assert 0.0 <= res.fi_score <= 1.0
     assert res.num_layers == NL
     assert res.num_heads_per_layer == NH
+
+
+def test_detect_architecture_verifies_its_pattern(monkeypatch):
+    """A registry pattern that finds nothing must be replaced, not reported.
+
+    transformers 4.x lays I-JEPA out as ``encoder.layer.{}.attention`` while 5.x
+    uses ``layers.{}.attention``. Whichever spelling the registry holds, the
+    pattern handed back has to resolve against the model in front of it —
+    ``get_attention_modules`` would otherwise fall back silently and everything
+    would keep working while ArchInfo advertised a pattern matching zero modules.
+    """
+    model = _ijepa()
+    monkeypatch.setitem(arch_support._REGISTRY, "ijepa", "nonsense.{}.path")
+
+    info = arch_support.detect_architecture(model)
+    assert info.attention_pattern != "nonsense.{}.path"
+    assert len(arch_support._find_by_pattern(model, info.attention_pattern)) == NL
+
+
+def test_detect_architecture_keeps_a_working_pattern(monkeypatch):
+    """When the registry is right, it is returned untouched."""
+    model = _ijepa()
+    info = arch_support.detect_architecture(model)
+    assert len(arch_support._find_by_pattern(model, info.attention_pattern)) == NL

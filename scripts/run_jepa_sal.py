@@ -51,6 +51,22 @@ pruned-head count across a window and only hits the target once training passes
 ``prune_end_ratio``. Three optimizer steps never get there, so `--smoke` reports
 fewer pruned heads than ``--mask-ratio`` asks for. That is the schedule working.
 
+**The FI column is not comparable across pruned rows.** Measured on the real
+ViT-H/14: FI 0.0060 dense, 0.0000 once a third of the heads are masked. That is
+an artefact, not a robustness gain. A masked head emits an identically-zero
+signature, which correlates with nothing and so carries *no* edges; the graph's
+fixed edge budget then redistributes onto the surviving heads, and a denser
+subgraph over fewer nodes is more triangulated by construction. Compare FI
+between a dense model and a `slice_heads()`-shrunk one, where the node count
+matches reality -- never between dense and masked.
+
+**The latency columns show no speedup, and should not.** Pruning here *masks*
+heads, so every variant keeps all 631M parameters and does all the same
+arithmetic. Measured: 28.8ms dense against 32.0ms pruned -- the pruned rows are
+*slower*, by the cost of the masking hooks. Real latency wins come from
+`sal.slice_heads()`, which removes the weights. The latency columns are here to
+confirm the size is unchanged, not to advertise a gain.
+
 **One seed settles nothing.** The v0.5.0 five-seed run watched an apparent int4
 gain evaporate. Treat a sub-1pp gap as "not shown".
 """
@@ -329,17 +345,90 @@ def prune(model, ratio: float, method: str, seed: int = 0):
 
 
 # -------------------------------------------------------------- checkpoints
-def save_checkpoint(path: Path, model, optimizer, epoch: int, losses, masks, args):
-    torch.save({
+def save_checkpoint(path: Path, model, optimizer, epoch: int, losses, masks, args,
+                    with_optimizer: bool = True):
+    """Write the checkpoint atomically, or not at all.
+
+    ``torch.save`` straight to the destination leaves a truncated file behind if
+    it runs out of space mid-write — and a truncated checkpoint is worse than no
+    checkpoint, because ``--resume`` will pick it up and fail somewhere less
+    obvious. Writing to a sibling temp file and renaming means the destination
+    only ever holds a complete checkpoint; a failed write leaves the previous
+    epoch's intact.
+
+    ViT-H/14 is ~2.5GB of fp32 weights and AdamW carries two more moments on top,
+    so a full checkpoint is ~7.6GB per epoch. ``with_optimizer=False`` drops it to
+    2.5GB, at the cost of resuming with a cold optimizer.
+    """
+    payload = {
         "epoch": epoch,
-        "model_state": model.state_dict(),
-        "optimizer_state": optimizer.state_dict() if optimizer else None,
+        "model_state": {k: v.detach().cpu() for k, v in model.state_dict().items()},
+        "optimizer_state": (optimizer.state_dict()
+                            if (optimizer and with_optimizer) else None),
         "losses": losses,
         "masks": {str(k): v.detach().cpu() for k, v in masks.items()},
         "args": vars(args),
         "model_id": MODEL_ID,
-    }, path)
-    log(f"    checkpoint -> {path} (epoch {epoch})")
+    }
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        torch.save(payload, tmp)
+        os.replace(tmp, path)
+    except OSError as e:
+        tmp.unlink(missing_ok=True)
+        size = _free_gb(path.parent)
+        raise RuntimeError(
+            f"Could not write the checkpoint to {path} ({e}). "
+            f"{size:.1f}GB free on that filesystem; a full checkpoint needs about "
+            f"{_checkpoint_gb(model, with_optimizer):.1f}GB. Point --output at a "
+            "filesystem with room (a network volume's quota is often far smaller "
+            "than its reported free space)."
+        ) from e
+    log(f"    checkpoint -> {path} (epoch {epoch}, "
+        f"{path.stat().st_size / 1e9:.1f}GB)")
+
+
+def _free_gb(directory: Path) -> float:
+    try:
+        st = os.statvfs(directory)
+        return st.f_bavail * st.f_frsize / 1e9
+    except (OSError, AttributeError):
+        return float("nan")
+
+
+def _checkpoint_gb(model, with_optimizer: bool = True) -> float:
+    n = sum(p.numel() for p in model.parameters())
+    return n * (12 if with_optimizer else 4) / 1e9
+
+
+def check_output_space(outdir: Path, model, with_optimizer: bool = True):
+    """Fail before training rather than after it.
+
+    A quota is not visible in ``df``: a RunPod network volume reports hundreds of
+    terabytes free while refusing to write a single gigabyte. So this actually
+    writes a probe file of the size a checkpoint will need.
+    """
+    need = _checkpoint_gb(model, with_optimizer) + 2.5    # + save_pretrained
+    free = _free_gb(outdir)
+    log(f"  output space: {free:.1f}GB reported free, ~{need:.1f}GB needed")
+
+    probe = outdir / ".space_probe"
+    chunk, written = bytes(64 * 1024 * 1024), 0
+    try:
+        with open(probe, "wb") as f:
+            for _ in range(int(need * 1e9) // len(chunk) + 1):
+                f.write(chunk)
+                written += len(chunk)
+        log("  space probe: OK")
+    except OSError as e:
+        raise RuntimeError(
+            f"Cannot reserve {need:.1f}GB under {outdir} - wrote "
+            f"{written / 1e9:.1f}GB then hit: {e}. df reports {free:.1f}GB free, "
+            "so this is a quota, not a full disk. Use --output on a filesystem "
+            "with real room."
+        ) from e
+    finally:
+        probe.unlink(missing_ok=True)
 
 
 def load_checkpoint(path: Path):
@@ -548,6 +637,8 @@ def parse_args(argv=None):
     p.add_argument("--control", action="store_true",
                    help="also train a no-SAL arm — the comparison that actually "
                         "tests SAL training rather than head selection")
+    p.add_argument("--no-space-check", action="store_true",
+                   help="skip the pre-training probe that reserves checkpoint space")
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args(argv)
 
@@ -619,6 +710,8 @@ def main(argv=None):
 
     # 5 -------------------------------------------------------- SAL training
     rule(f"SAL training ({epochs} epochs, mask_ratio={args.mask_ratio})")
+    if not args.no_space_check:
+        check_output_space(outdir, model)
     from sal import SALConfig
     from sal.trainer import SALTrainer
 
@@ -742,6 +835,14 @@ def main(argv=None):
         "patch_mask_ratio": PATCH_MASK_RATIO, "batch_size": batch_size,
         "gradient_checkpointing": grad_ckpt, "vram_gb": round(vram, 1),
         "device": str(device),
+        "fi_caveat": "FI is comparable only between models with the same head "
+                     "count. Masked heads emit zero signatures, carry no edges, "
+                     "and push the fixed edge budget onto survivors, which lowers "
+                     "FI by construction. Use slice_heads() to compare sizes.",
+        "latency_caveat": "Pruning here masks rather than slices, so parameter "
+                          "count and FLOPs are unchanged; pruned rows are "
+                          "marginally SLOWER from hook overhead. slice_heads() "
+                          "is what makes a model actually faster.",
         "objective": "I-JEPA-shaped: predict the clean-image representation from "
                      "a patch-masked image. No predictor network, no EMA target "
                      "encoder — NOT I-JEPA pretraining.",
