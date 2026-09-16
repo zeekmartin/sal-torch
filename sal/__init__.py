@@ -19,6 +19,9 @@ from sal.robustness import RobustnessTest, RobustnessReport, robustness_compare
 from sal.slicing import slice_heads, SlicingError
 from sal.quantize import quantize, quantize_info, QuantizationError
 from sal.pipeline import CompressionPipeline, CompressionReport, PipelineError
+from sal.evaluation import (linear_probe, knn_accuracy, cka_similarity,
+                            representation_similarity, measure_latency,
+                            count_params, extract_features, compression_report)
 
 import sal.license as _lic
 
@@ -54,4 +57,7 @@ __all__ = ["SALConfig", "SALCallback", "SALTrainer", "HeadMasker",
            "slice_heads", "SlicingError",
            "quantize", "quantize_info", "QuantizationError",
            "CompressionPipeline", "CompressionReport", "PipelineError",
+           "linear_probe", "knn_accuracy", "cka_similarity",
+           "representation_similarity", "measure_latency", "count_params",
+           "extract_features", "compression_report",
            "set_license", "license_info"]
