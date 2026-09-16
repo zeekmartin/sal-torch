@@ -1,0 +1,150 @@
+{
+  "model": "facebook/ijepa_vith14_1k",
+  "dataset": "clane9/imagenet-100",
+  "smoke": false,
+  "seed": 42,
+  "epochs": 5,
+  "mask_ratio": 0.3,
+  "patch_mask_ratio": 0.4,
+  "batch_size": 32,
+  "gradient_checkpointing": false,
+  "vram_gb": 85.1,
+  "device": "cuda",
+  "fi_caveat": "FI is comparable only between models with the same head count. Masked heads emit zero signatures, carry no edges, and push the fixed edge budget onto survivors, which lowers FI by construction. Use slice_heads() to compare sizes.",
+  "latency_caveat": "Pruning here masks rather than slices, so parameter count and FLOPs are unchanged; pruned rows are marginally SLOWER from hook overhead. slice_heads() is what makes a model actually faster.",
+  "objective": "I-JEPA-shaped: predict the clean-image representation from a patch-masked image. No predictor network, no EMA target encoder \u2014 NOT I-JEPA pretraining.",
+  "comparison": "SAL-training vs no-SAL control (--control)",
+  "num_classes": 100,
+  "fi_before": 0.005580186515823269,
+  "fi_after": 0.00565662742699893,
+  "sal_losses": [
+    0.6575099451001734,
+    0.6413248705212027,
+    0.6510628031101078,
+    0.69178023096174,
+    0.6889741078484803
+  ],
+  "masker_stats": {
+    "active": true,
+    "total_heads": 512,
+    "active_heads": 359,
+    "pruned_heads": 153,
+    "prune_events": 153,
+    "prune_fraction": 0.3
+  },
+  "control_losses": [
+    0.6514433692209423,
+    0.6066687060520053,
+    0.5684037881437689,
+    0.533134357072413,
+    0.502265332150273
+  ],
+  "results": {
+    "original": {
+      "linear_probe": 0.8203999996185303,
+      "knn_accuracy": 0.7736,
+      "cka_similarity": 1.0,
+      "params": 630762240,
+      "latency_gpu_ms": 28.755408944562078,
+      "latency_cpu_ms": 2497.68899200717,
+      "fi_score": 0.005580186515823269
+    },
+    "sal-trained": {
+      "linear_probe": 0.8276000022888184,
+      "knn_accuracy": 0.7968,
+      "cka_similarity": 0.9821791189363336,
+      "params": 630762240,
+      "latency_gpu_ms": 28.745244489982724,
+      "latency_cpu_ms": 2591.852826473769,
+      "fi_score": 0.00565662742699893
+    },
+    "sal+random-33%": {
+      "linear_probe": 0.7735999822616577,
+      "knn_accuracy": 0.736,
+      "cka_similarity": 0.8362097928669213,
+      "params": 630762240,
+      "latency_gpu_ms": 31.535571499262005,
+      "latency_cpu_ms": 2403.864360996522,
+      "fi_score": 0.0003822045558783061
+    },
+    "sal+magnitude-33%": {
+      "linear_probe": 0.7851999998092651,
+      "knn_accuracy": 0.7096,
+      "cka_similarity": 0.8653772693349372,
+      "params": 630762240,
+      "latency_gpu_ms": 31.828132923692465,
+      "latency_cpu_ms": 2486.0589095042087,
+      "fi_score": 0.00015288182235132243
+    },
+    "sal+random-50%": {
+      "linear_probe": 0.635200023651123,
+      "knn_accuracy": 0.4816,
+      "cka_similarity": 0.6575462812681341,
+      "params": 630762240,
+      "latency_gpu_ms": 31.495604023803025,
+      "latency_cpu_ms": 2493.3174990001135,
+      "fi_score": 0.0
+    },
+    "sal+magnitude-50%": {
+      "linear_probe": 0.6507999897003174,
+      "knn_accuracy": 0.4556,
+      "cka_similarity": 0.6605348853461931,
+      "params": 630762240,
+      "latency_gpu_ms": 32.1076670079492,
+      "latency_cpu_ms": 2849.9539580079727,
+      "fi_score": 0.0
+    },
+    "control-trained": {
+      "linear_probe": 0.8307999968528748,
+      "knn_accuracy": 0.794,
+      "cka_similarity": 0.9821004980473409,
+      "params": 630762240,
+      "latency_gpu_ms": 28.806101996451616,
+      "latency_cpu_ms": 2595.0413580285385,
+      "fi_score": 0.0052744228711206235
+    },
+    "ctrl+random-33%": {
+      "linear_probe": 0.769599974155426,
+      "knn_accuracy": 0.7276,
+      "cka_similarity": 0.8301900206988898,
+      "params": 630762240,
+      "latency_gpu_ms": 31.611452985089272,
+      "latency_cpu_ms": 2506.974687508773,
+      "fi_score": 0.00022932273352698363
+    },
+    "ctrl+magnitude-33%": {
+      "linear_probe": 0.7799999713897705,
+      "knn_accuracy": 0.7,
+      "cka_similarity": 0.8613785780881761,
+      "params": 630762240,
+      "latency_gpu_ms": 31.710323004517704,
+      "latency_cpu_ms": 2612.1634215232916,
+      "fi_score": 0.0
+    },
+    "ctrl+random-50%": {
+      "linear_probe": 0.6215999722480774,
+      "knn_accuracy": 0.4708,
+      "cka_similarity": 0.654487053986227,
+      "params": 630762240,
+      "latency_gpu_ms": 31.525361991953105,
+      "latency_cpu_ms": 2750.368751003407,
+      "fi_score": 0.0
+    },
+    "ctrl+magnitude-50%": {
+      "linear_probe": 0.6535999774932861,
+      "knn_accuracy": 0.454,
+      "cka_similarity": 0.652974168139654,
+      "params": 630762240,
+      "latency_gpu_ms": 31.536611553747207,
+      "latency_cpu_ms": 2599.36818346614,
+      "fi_score": 0.0
+    }
+  },
+  "figures": [
+    "feature_maps_comparison.png",
+    "compression_table.png",
+    "fi_before_after.png",
+    "latency_comparison.png"
+  ],
+  "wall_clock_s": 6840.3
+}
