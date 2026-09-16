@@ -11,7 +11,7 @@ What it does::
     1. structural scan of the pretrained encoder (FI + plasticity)
     2. SAL training with a self-supervised objective, via SALTrainer(train_step=)
     3. structural scan again
-    4. prune at 33% and 50%, SAL-trained vs standard, and score both on
+    4. prune at 33% and 50%, SAL-trained vs pretrained, and score both on
        linear probe / kNN / CKA / latency / parameters
 
 Two things this file is honest about, because both affect how the numbers read:
@@ -23,15 +23,20 @@ HF vision encoder if you want a smaller stand-in, but a ViT-B/16 loaded from
 somewhere else is a different model trained a different way, and calling its
 result an I-JEPA result would be wrong.
 
-**The training objective is self-distillation, not I-JEPA's.** Real I-JEPA has
-a separate predictor network and a target encoder updated by EMA, and it
-predicts *masked patch* representations from visible context. Reproducing that
-needs the pretraining apparatus. What runs here is the simplification the
-benchmark asks for: the unmasked model's representation is the target, the
-SAL-perturbed model's is the prediction, MSE between them. That is a legitimate
-self-supervised objective and it exercises exactly what v0.5.1 added — a loss
-computed outside the model, with SAL masking around it — but it is not I-JEPA
-pretraining and the results should not be described as such.
+**The training objective is I-JEPA-shaped, not I-JEPA.** Real I-JEPA has a
+separate predictor network and a target encoder updated by EMA. Reproducing that
+needs the pretraining apparatus. What runs here keeps the part that matters —
+predict the representation of the whole image from a partially visible one — and
+drops the predictor and the EMA: target is the clean image through the
+unperturbed model, prediction is a patch-masked image through the SAL-perturbed
+model, MSE between them. It is a real self-supervised objective and it exercises
+exactly what v0.5.1 added — a loss computed outside the model, with SAL masking
+around it — but it is not I-JEPA pretraining and no result here should be
+described as such.
+
+The input-patch masking matters for more than fidelity. Feed the *clean* image to
+both sides and the loss is identically zero whenever head masking happens to be
+off — an objective that silently stops training instead of failing loudly.
 
 Usage::
 
@@ -86,32 +91,45 @@ def load_tiny_stand_in(device="cpu"):
 
 
 # ----------------------------------------------------------------- the objective
-def jepa_train_step(model, batch, optimizer, mask_module):
-    """Self-supervised step: predict the unmasked model's own representations.
+def mask_patches(pixels, patch_size: int, ratio: float):
+    """Zero a random ``ratio`` of non-overlapping patches, independently per image."""
+    b, c, h, w = pixels.shape
+    gh, gw = h // patch_size, w // patch_size
+    keep = torch.rand(b, gh * gw, device=pixels.device) >= ratio
+    mask = keep.view(b, 1, gh, 1, gw, 1).to(pixels.dtype)
+    return (pixels.view(b, c, gh, patch_size, gw, patch_size) * mask).view(b, c, h, w)
 
-    The target comes from the model with SAL masking **suspended**, under
-    ``no_grad``; the prediction comes from the same weights with the pruned
-    heads zeroed. Minimizing the gap is what forces the surviving heads to take
-    over the removed ones' function.
 
-    ``mask_module.unmasked()`` rather than ``remove_mask()`` / ``apply_mask()``
-    because it restores the previous state even if the forward pass raises, and
-    — the part that matters — it does not disturb the accumulated pruned set.
+def make_jepa_train_step(patch_size: int, patch_mask_ratio: float = 0.4):
+    """Build the training step: predict the whole image from a partial view.
+
+    The target comes from the clean image with SAL masking **suspended**, under
+    ``no_grad``; the prediction comes from the same weights, fed a patch-masked
+    image, with the pruned heads zeroed. Closing that gap is what forces the
+    surviving heads to take over the removed ones' function.
+
+    ``mask_module.unmasked()`` rather than ``remove_mask()`` / ``apply_mask()``:
+    it restores the previous state even if the forward pass raises, and — the
+    part that matters — it leaves the accumulated pruned set alone.
     ``deactivate()`` would reset it and quietly undo the schedule.
     """
-    pixels = batch[0] if isinstance(batch, (list, tuple)) else batch
+    def jepa_train_step(model, batch, optimizer, mask_module):
+        pixels = batch[0] if isinstance(batch, (list, tuple)) else batch
+        visible = mask_patches(pixels, patch_size, patch_mask_ratio)
 
-    with torch.no_grad(), mask_module.unmasked():
-        target = model(pixel_values=pixels).last_hidden_state
+        with torch.no_grad(), mask_module.unmasked():
+            target = model(pixel_values=pixels).last_hidden_state
 
-    predicted = model(pixel_values=pixels).last_hidden_state
-    loss = torch.nn.functional.mse_loss(predicted, target.detach())
+        predicted = model(pixel_values=visible).last_hidden_state
+        loss = torch.nn.functional.mse_loss(predicted, target.detach())
 
-    loss.backward()
-    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-    optimizer.step()
-    optimizer.zero_grad()
-    return loss.item()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+        optimizer.zero_grad()
+        return loss.item()
+
+    return jepa_train_step
 
 
 # -------------------------------------------------------------------- pruning
@@ -126,7 +144,7 @@ def prune_heads(model, ratio: float, method: str = "random", seed: int = 0):
     count and the comparison isolates function from size. ``sal.slice_heads()``
     is what makes the saving real once a ratio has been chosen.
     """
-    import random as _random
+
 
     from sal import arch_support
     from sal.masker import HeadMasker
@@ -229,11 +247,13 @@ def main():
     if args.smoke:
         model = load_tiny_stand_in(device)
         epochs, image_size = 1, 32
+        patch_size = model.config.patch_size
         log.info("SMOKE: 2-layer random-weight I-JEPA, CPU. Numbers mean nothing.")
     else:
         model = load_jepa(args.model, device)
         epochs = args.epochs
         image_size = model.config.image_size
+        patch_size = model.config.patch_size
 
     train_loader, val_loader = synthetic_loaders(image_size, bs=args.batch_size)
     probe_loader, _ = synthetic_loaders(image_size, n_train=32, bs=args.batch_size)
@@ -248,7 +268,9 @@ def main():
     log.info("%s", fi_before.summary)
     log.info("absorption: %s", plasticity_before.absorption_map)
 
-    # Keep an untouched copy: the standard arm, and the CKA reference.
+    # Keep an untouched copy. This is the *pretrained* reference, not a
+    # separately-trained control arm — see scripts/modal_jepa_sal.py for the run
+    # that trains both arms on the same objective and step count.
     baseline = copy.deepcopy(model)
 
     # 2 ------------------------------------------------------- SAL training
@@ -256,7 +278,8 @@ def main():
     cfg = SALConfig.auto(model, prune_fraction=args.mask_ratio)
     trainer = SALTrainer(
         model, cfg, AdamW(model.parameters(), lr=args.lr), train_loader,
-        seed=42, train_step=jepa_train_step,          # <- the v0.5.1 hook
+        seed=42,
+        train_step=make_jepa_train_step(patch_size),   # <- the v0.5.1 hook
     )
     history = trainer.train(num_epochs=epochs)
     log.info("losses: %s", [f"{x:.5f}" for x in history["losses"]])
@@ -274,7 +297,7 @@ def main():
                                          probe_loader, arm="sal",
                                          image_shape=image_shape))
     results.update(benchmark_compression(baseline, train_loader, val_loader,
-                                         probe_loader, arm="standard",
+                                         probe_loader, arm="pretrained",
                                          image_shape=image_shape))
 
     log.info("\n%-26s %8s %8s %8s", "arm", "probe", "knn", "cka")
