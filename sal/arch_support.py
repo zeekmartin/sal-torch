@@ -40,6 +40,10 @@ _REGISTRY = {
     "roberta": "encoder.layer.{}.attention",
     "distilbert": "transformer.layer.{}.attention",
     "vit": "layers.{}.attention",
+    # I-JEPA is a ViT encoder trained self-supervised; same module layout, and
+    # its attention exposes o_proj/q_proj/k_proj/v_proj directly.
+    "ijepa": "layers.{}.attention",
+    "dinov2": "encoder.layer.{}.attention",
     "phi": "layers.{}.self_attn",
     "phi3": "layers.{}.self_attn",
     "gemma": "layers.{}.self_attn",
@@ -176,12 +180,14 @@ def get_qkv_projections(attn_module):
       * ``{"mode": "fused", "qkv": mod, "name": str}`` — one module holding Q|K|V, or
       * ``None`` if nothing recognizable is found.
 
-    BERT/ViT keep Q/K/V one level down in ``.self``; both levels are searched.
+    BERT/ViT keep Q/K/V one level down in ``.self``, DINOv2 one level down in
+    ``.attention``; the container and both sublevels are searched.
     """
     candidates = [attn_module]
-    sub = getattr(attn_module, "self", None)
-    if sub is not None:
-        candidates.append(sub)
+    for name in ("self", "attention"):
+        sub = getattr(attn_module, name, None)
+        if sub is not None and sub is not attn_module:
+            candidates.append(sub)
 
     for c in candidates:
         for qn, kn, vn in _QKV_TRIPLES:

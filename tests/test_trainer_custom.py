@@ -303,3 +303,25 @@ def test_custom_step_with_tuple_batch(tiny_model, cfg):
 
     _make(tiny_model, cfg, dl, step).train(num_epochs=1)
     assert seen and all(t is torch.Tensor for t in seen)
+
+
+# ------------------------------------------------------------- reported stats
+@pytest.mark.parametrize("custom", [False, True], ids=["supervised", "custom"])
+def test_reported_stats_are_the_trained_ones(tiny_model, cfg, loader, custom):
+    """masker_stats is snapshotted before the hooks come off, not after.
+
+    HeadMasker.remove() clears the mask tensors, so reading .stats afterwards
+    reports zero active heads — i.e. "every head pruned" — whatever actually
+    happened during training.
+    """
+    def step(model, batch, optimizer, mask_module):
+        loss = model(**batch).loss
+        loss.backward(); optimizer.step(); optimizer.zero_grad()
+        return loss.item()
+
+    hist = _make(tiny_model, cfg, loader, step if custom else None).train(num_epochs=2)
+    stats = hist["masker_stats"]
+
+    assert stats["pruned_heads"] == cfg.num_heads_to_prune       # 10 of 32
+    assert stats["pruned_heads"] < stats["total_heads"]
+    assert stats["active_heads"] == stats["total_heads"] - stats["pruned_heads"]

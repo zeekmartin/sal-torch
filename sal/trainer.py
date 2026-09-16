@@ -93,9 +93,10 @@ class SALTrainer:
                         self.optimizer.zero_grad()
                         global_step += 1
                 losses.append(epoch_loss / max(steps, 1))
+            stats = self.masker.stats
         finally:
             self.masker.remove()
-        return {"losses": losses, "total_steps": global_step, "masker_stats": self.masker.stats}
+        return {"losses": losses, "total_steps": global_step, "masker_stats": stats}
 
     # ----------------------------------------------------------------- custom
     def _train_custom(self, num_epochs: int) -> dict:
@@ -121,9 +122,10 @@ class SALTrainer:
                     if self.scheduler: self.scheduler.step()
                     global_step += 1
                 losses.append(epoch_loss / max(steps, 1))
+            stats = self.masker.stats
         finally:
             self.masker.remove()
-        return {"losses": losses, "total_steps": global_step, "masker_stats": self.masker.stats}
+        return {"losses": losses, "total_steps": global_step, "masker_stats": stats}
 
     # -------------------------------------------------------------- internals
     def _to_device(self, batch):
