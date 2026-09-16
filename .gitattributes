@@ -1,0 +1,5 @@
+# Shell scripts must keep LF endings. scripts/setup_runpod.sh is written on
+# Windows and run on a fresh Linux GPU box; a CRLF shebang there fails with
+# "bad interpreter: /usr/bin/env bash^M", which reads like a missing bash
+# rather than a line-ending problem.
+*.sh text eol=lf
