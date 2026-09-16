@@ -27,6 +27,7 @@ selection method).
 """
 from __future__ import annotations
 import logging, random
+from contextlib import contextmanager
 from typing import Optional
 import torch, torch.nn as nn
 from sal.config import SALConfig
@@ -96,6 +97,52 @@ class HeadMasker:
         self._active = False
         for m in self._masks.values():
             m.fill_(1.0)
+
+    # ------------------------------------------------- suspend / resume (custom)
+    # `activate`/`deactivate` are the *schedule's* controls: deactivate() clears
+    # the pruned set back to all-ones. A custom training step often needs to turn
+    # masking off for a moment (to read an unperturbed target, say) and back on
+    # again **without losing the heads pruned so far**. These two do exactly that:
+    # they flip the switch and leave the accumulated pruned set intact.
+
+    def apply_mask(self):
+        """Resume masking with the currently pruned set.
+
+        Does not prune anything new — the pruned set is grown by ``step()``
+        according to the schedule. Safe to call repeatedly.
+        """
+        if not self._hooks:
+            raise RuntimeError("Not installed")
+        self._active = True
+
+    def remove_mask(self):
+        """Suspend masking, preserving the pruned set.
+
+        The next ``apply_mask()`` (or the trainer's next ``step()``) restores
+        exactly the same heads. Use this around a forward pass that must see the
+        unperturbed model.
+        """
+        self._active = False
+
+    @contextmanager
+    def unmasked(self):
+        """Context manager: run a block with masking suspended, then restore it.
+
+        ``with masker.unmasked(): ...`` is the safe form of
+        ``remove_mask() / apply_mask()`` — it restores the previous state even if
+        the block raises, and does not switch masking *on* if it was off.
+        """
+        was_active = self._active
+        self._active = False
+        try:
+            yield self
+        finally:
+            self._active = was_active
+
+    @property
+    def masking(self) -> bool:
+        """True when the hooks are currently zeroing heads."""
+        return self._active
 
     def step(self, global_step: int, total_steps: int):
         self._step_count = global_step
