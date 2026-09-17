@@ -89,6 +89,11 @@ sal/
   scanner.py       FIScanner, FIMonitor
   plasticity.py    PlasticityScanner (routing/CKA/MI), PlasticityMap, Recommendation
   compare.py       sal.compare() — SAL vs magnitude/random post-hoc baselines
+  slicing.py       slice_heads() — physically remove heads (uniform per layer, MHA only)
+  quantize.py      quantize(), quantize_info() — bitsandbytes NF4/LLM.int8, torch.ao INT8
+  pipeline.py      CompressionPipeline — scan → sal_train → compress → validate → export
+  evaluation.py    linear_probe, knn_accuracy, cka_similarity, measure_latency, compression_report
+  visualization.py feature maps, compression-impact charts, attention maps (matplotlib)
   robustness.py    RobustnessTest, RobustnessReport, robustness_compare — compression survival
   guard.py         StructuralGuard, StructuralGuardCallback — head-level continual learning
   drift.py         DriftMonitor, DriftReport, StructuralSnapshot — structural forgetting
@@ -123,7 +128,7 @@ the three shipped, `ExpertMasker`.
   internals**. 83 unit tests pass on CPU; validated guarded-vs-unguarded on Modal
   T4 (DistilBERT SST-2 → MNLI). `arch_support.get_qkv_projections()` added for
   head-level Q/K/V/O weight slicing.
-- **v0.4.0 (Robustness suite): IN DEVELOPMENT.** `RobustnessTest` scores a model
+- **v0.4.0 (Robustness suite): RELEASED (2026-07-29).** `RobustnessTest` scores a model
   under INT8, INT4, head pruning, and inference-time FFN neuron dropout;
   `robustness_compare()` puts a SAL-trained model head-to-head with a standard
   one, each scored against its own clean baseline. INT4 prefers bitsandbytes NF4
@@ -132,13 +137,24 @@ the three shipped, `ExpertMasker`.
   targets FFN *expansion* projections (out_features > in_features) with a fixed
   fault pattern per trial. 108 unit tests pass on CPU. Motivated by a community
   poll (33 votes): 39% quantize, 24% magnitude-prune, 21% distill.
-- Next: Phase 5 (license signing + compliance reports); v0.5.0 topology-guided
-  distillation. See `ROADMAP.md` (public).
+- **v0.5.0 (CompressionPipeline): RELEASED (2026-08-12).** `slice_heads()`,
+  `quantize()`, `CompressionPipeline`; five-seed GPT-2 Medium validation (SAL
+  +2.45pp at 33% head pruning on 5/5 seeds; INT4 alone does not replicate).
+- **v0.5.1 (Self-supervised models): RELEASED (2026-09-17).** Loss-agnostic
+  `SALTrainer(train_step=...)`, `sal.evaluation` / `sal.visualization`,
+  `ijepa`/`dinov2` support, `slice_heads()` fixed for ViT-family encoders,
+  `scripts/run_jepa_sal.py` (`--control --slice --prune-ratios --model`).
+  I-JEPA ViT-H/14: SAL wins 35/36 over 3 seeds at 33/50% (+0.4 to +1.9pp); no
+  effect at 70%. DINOv2 ViT-L/14 (1 seed): 13/18. Slicing 50% of heads: 1.1x GPU /
+  1.2x CPU (attention is ~1/3 of a ViT block). 271 unit tests pass on CPU.
+- Next: v0.6.0 SAL + QAT and MLP pruning (target 2x real speedup); v0.7.0
+  topology-guided distillation; Phase 5 (license signing + compliance reports).
+  See `ROADMAP.md` (public).
 
 ## Integration tests
 
-The CPU unit suite must stay all-green (**83 passed** as of v0.3.0, plus the
-6 integration tests skipped); integration tests are marked
+The CPU unit suite must stay all-green (**271 passed** as of v0.5.1, plus the
+8 integration tests skipped); integration tests are marked
 `@pytest.mark.integration` and **skipped by default** (need network + model
 downloads):
 ```
@@ -164,7 +180,9 @@ projection directly.
 ## Testing
 
 ```
-python -m pytest -q       # CPU only, ~30s, must be all-green
+python -m pytest -q       # CPU only, ~6-8 min, must be all-green
 ```
 Fixtures in `tests/conftest.py`: `tiny_model` (custom 4×8×64 GPT-2-like),
-`tiny_config`, `probe_data`.
+`tiny_config`, `probe_data`. Run the suite with `CUDA_VISIBLE_DEVICES=` on a GPU
+box: `tests/test_run_jepa_script.py` fakes a CPU model and fails under CUDA
+autocast otherwise.
