@@ -1,0 +1,93 @@
+
+=== Environment =========================================================
+  GPU:   NVIDIA A100-SXM4-80GB
+  VRAM:  85.1 GB
+  batch: 32
+  gradient checkpointing: off  (auto: on below 48GB)
+  output: /workspace/results_70pct
+  mode:   full | epochs=5 | mask_ratio=0.3
+
+=== Assets ==============================================================
+  model:   facebook/ijepa_vith14_1k
+  dataset: clane9/imagenet-100
+  (cached under ~/.cache/huggingface — re-runs do not re-download)
+  loaded:  631M params, 32 layers x 16 heads, patch 14
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+  dataset: 126689 train / 5000 val available
+
+
+
+  classes: 100
+
+=== Pre-SAL structural scan =============================================
+  FI=0.0056 | 1 immune, 9 buffer, 22 critical
+  absorption: 10 elastic, 21 saturated, 1 hub  |  mean routing=0.851, mean MI=0.041
+  saved /workspace/results_70pct/pre_sal_scan.json
+
+=== SAL training (5 epochs, mask_ratio=0.3) =============================
+  output space: 155407.5GB reported free, ~10.1GB needed
+  space probe: OK
+  resuming from /workspace/results_exp1_slice/checkpoint.pt: epoch 5, 32 layers of mask state
+  0 epochs left; prune window remapped to [0.000, 0.010]
+  checkpoint is already complete — skipping training.
+
+=== Post-SAL structural scan ============================================
+  FI 0.0056 -> 0.0057 (+0.0001)
+  FI=0.0057 | 2 immune, 8 buffer, 22 critical
+  saved /workspace/results_70pct/post_sal_scan.json
+
+=== Control arm (5 epochs, no head masking) =============================
+
+    epoch 1 mean loss 0.651964
+
+    epoch 2 mean loss 0.607572
+
+    epoch 3 mean loss 0.567521
+
+    epoch 4 mean loss 0.533200
+
+    epoch 5 mean loss 0.501665
+
+=== Compression benchmark ===============================================
+  scoring original ...
+  scoring sal-trained ...
+  scoring sal+random-70% ...
+  scoring sal+magnitude-70% ...
+  scoring sal+random-uniform-70%-sliced ...
+  scoring sal+magnitude-70%-sliced ...
+  scoring control-trained ...
+  scoring ctrl+random-70% ...
+  scoring ctrl+magnitude-70% ...
+  scoring ctrl+random-uniform-70%-sliced ...
+  scoring ctrl+magnitude-70%-sliced ...
+
+=== Saving ==============================================================
+  model -> /workspace/results_70pct/model (config.json + model.safetensors)
+    feature_maps_comparison.png
+    compression_table.png
+    fi_before_after.png
+    latency_comparison.png
+  metrics -> /workspace/results_70pct/jepa_sal_benchmark.json
+
+=== Summary =============================================================
+┌─────────────────────────────────┬────────┬───────────┬───────────┬───────────┬──────────┬──────────┐
+│ Variant                         │ Params │ Lin.Probe │ kNN       │ CKA       │ GPU ms   │ CPU ms   │
+├─────────────────────────────────┼────────┼───────────┼───────────┼───────────┼──────────┼──────────┤
+│ original                        │ 631M   │ 82.0%     │ 77.4%     │ 1.000     │ 29ms     │ 594ms    │
+│ sal-trained                     │ 631M   │ 82.8%     │ 79.7%     │ 0.982     │ 29ms     │ 587ms    │
+│ sal+random-70%                  │ 631M   │ 38.4%     │ 20.4%     │ 0.459     │ 32ms     │ 597ms    │
+│ sal+magnitude-70%               │ 631M   │ 48.5%     │ 25.5%     │ 0.540     │ 31ms     │ 595ms    │
+│ sal+random-uniform-70%-sliced   │ 486M   │ 31.1%     │ 17.3%     │ 0.425     │ 25ms     │ 463ms    │
+│ sal+magnitude-70%-sliced        │ 486M   │ 48.5%     │ 25.5%     │ 0.540     │ 25ms     │ 474ms    │
+│ control-trained                 │ 631M   │ 83.4%     │ 79.4%     │ 0.982     │ 29ms     │ 596ms    │
+│ ctrl+random-70%                 │ 631M   │ 37.9%     │ 20.1%     │ 0.460     │ 31ms     │ 578ms    │
+│ ctrl+magnitude-70%              │ 631M   │ 48.2%     │ 26.0%     │ 0.538     │ 32ms     │ 611ms    │
+│ ctrl+random-uniform-70%-sliced  │ 486M   │ 30.7%     │ 17.8%     │ 0.422     │ 25ms     │ 447ms    │
+│ ctrl+magnitude-70%-sliced       │ 486M   │ 48.2%     │ 26.0%     │ 0.538     │ 25ms     │ 456ms    │
+└─────────────────────────────────┴────────┴───────────┴───────────┴───────────┴──────────┴──────────┘
+
+FI: 0.0056 -> 0.0057 (+0.0001)
+wall clock: 67.6 min
+
+CKA is measured against each arm's own unpruned model.
+Everything is in /workspace/results_70pct — scp that directory back.
