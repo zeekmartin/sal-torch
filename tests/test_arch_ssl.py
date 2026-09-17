@@ -131,3 +131,24 @@ def test_detect_architecture_keeps_a_working_pattern(monkeypatch):
     model = _ijepa()
     info = arch_support.detect_architecture(model)
     assert len(arch_support._find_by_pattern(model, info.attention_pattern)) == NL
+
+
+@pytest.mark.parametrize("model_type,build", MODELS, ids=[m[0] for m in MODELS])
+def test_slicing_matches_masking_and_shrinks(model_type, build):
+    """slice_heads on an encoder without a head: bookkeeping lives in `.attention`
+    under transformers 4.x, and outputs are hidden states, not logits."""
+    from sal.slicing import slice_heads
+
+    torch.manual_seed(0)
+    model = build().eval()
+    pixels = {"pixel_values": torch.randn(2, 3, IMG, IMG)}
+    remove = [(layer, head) for layer in range(NL) for head in (0, 2)]
+
+    # verify_input raises if the sliced model disagrees with the masked one
+    sliced = slice_heads(model, remove, verify_input=pixels)
+    assert sliced.config.num_attention_heads == NH - 2
+    assert (sum(p.numel() for p in sliced.parameters())
+            < sum(p.numel() for p in model.parameters()))
+    with torch.no_grad():
+        assert sliced(**pixels).last_hidden_state.shape == \
+            model(**pixels).last_hidden_state.shape

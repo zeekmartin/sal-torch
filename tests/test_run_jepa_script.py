@@ -185,6 +185,31 @@ def test_smoke_run_end_to_end(patched, tmp_path, control):
         "SAL-training" if control else "head SELECTION")
 
 
+def test_slice_rows_are_smaller_and_match_masking(patched, tmp_path):
+    """--slice adds physically smaller rows, verified against their masked twins."""
+    payload = patched.main(["--smoke", "--output", str(tmp_path / "s"), "--seed", "1",
+                            "--control", "--slice", "--prune-ratios", "0.5", "0.7"])
+    res = payload["results"]
+    assert payload["prune_ratios"] == [0.5, 0.7]
+    assert not payload["slicing_errors"]
+    for prefix in ("sal", "ctrl"):
+        for label in ("random-uniform", "magnitude"):
+            for pct, removed in (("50%", 2), ("70%", 3)):      # round(ratio * 4 heads)
+                name = f"{prefix}+{label}-{pct}-sliced"
+                info = payload["slicing"][name]
+                assert info["heads_removed_per_layer"] == removed
+                assert res[name]["params"] < res["original"]["params"]
+                assert info["relative_diff_vs_masked"] < 1e-3
+    assert "sal+magnitude-70%" in res and "sal+random-33%" not in res
+
+
+def test_model_flag_is_recorded(patched, tmp_path):
+    payload = patched.main(["--smoke", "--output", str(tmp_path / "m"), "--seed", "1",
+                            "--model", "facebook/dinov2-large"])
+    assert payload["model"] == "facebook/dinov2-large"
+    patched.MODEL_ID = "facebook/ijepa_vith14_1k"      # module global: restore
+
+
 def test_smoke_run_prunes_but_does_not_finish_the_ramp(patched, tmp_path):
     """A 3-step smoke run cannot reach the full prune fraction, by design.
 

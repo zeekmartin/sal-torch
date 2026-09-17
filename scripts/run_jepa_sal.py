@@ -344,6 +344,62 @@ def prune(model, ratio: float, method: str, seed: int = 0):
     return pruned
 
 
+def uniform_heads(model, ratio: float, method: str, seed: int = 0) -> list:
+    """``(layer, head)`` pairs removing the same number of heads from every layer.
+
+    Slicing needs a uniform count per layer (see ``sal.slicing``), which the
+    masker's ``random`` selection does not give: it samples across the whole
+    model, so layers lose different numbers of heads. ``random`` here therefore
+    samples *within* each layer. ``magnitude`` already drops ``round(ratio *
+    heads)`` per layer, so its sliced selection is exactly the masked one.
+    """
+    import random
+
+    from sal import arch_support
+
+    info = arch_support.detect_architecture(model)
+    k = int(round(ratio * info.num_heads))
+    rng = random.Random(seed)
+    projs = arch_support.get_output_projections(model, info.attention_pattern)
+    pairs = []
+    for layer_idx, proj in enumerate(projs):
+        if method == "random":
+            heads = rng.sample(range(info.num_heads), k)
+        elif method == "magnitude":
+            w = proj.weight.detach()
+            per_head = w.view(w.shape[0], info.num_heads, -1).norm(dim=(0, 2))
+            heads = torch.argsort(per_head)[:k].tolist()
+        else:
+            raise ValueError(f"method must be 'random' or 'magnitude', got {method!r}")
+        pairs.extend((layer_idx, h) for h in heads)
+    return pairs
+
+
+def slice_variant(model, ratio: float, method: str, seed: int, verify_batch):
+    """A physically smaller copy of ``model``, checked against its masked twin.
+
+    Returns ``(sliced, info)``. The check runs the unsliced model with the same
+    heads zeroed by hook and compares final hidden states; the relative gap is
+    recorded rather than trusted.
+    """
+    from sal.slicing import SlicingError, slice_heads, verify_slicing
+
+    pairs = uniform_heads(model, ratio, method, seed=seed)
+    sliced = slice_heads(model, pairs).eval()
+    diff = verify_slicing(model, sliced, pairs, verify_batch)
+    with torch.no_grad():
+        scale = model.eval()(**verify_batch).last_hidden_state.abs().max().item()
+    rel = diff / max(scale, 1e-12)
+    if rel > 1e-3:
+        raise SlicingError(f"sliced model diverges from the masked model: max abs diff "
+                           f"{diff:.3g} on outputs of scale {scale:.3g} ({rel:.2g} relative)")
+    nl = model.config.num_hidden_layers
+    return sliced, {"heads_removed_per_layer": len(pairs) // nl,
+                    "heads_per_layer_after": sliced.config.num_attention_heads,
+                    "fraction_removed": len(pairs) / (nl * model.config.num_attention_heads),
+                    "max_abs_diff_vs_masked": diff, "relative_diff_vs_masked": rel}
+
+
 # -------------------------------------------------------------- checkpoints
 def save_checkpoint(path: Path, model, optimizer, epoch: int, losses, masks, args,
                     with_optimizer: bool = True):
@@ -589,8 +645,8 @@ def summary_table(results: dict, order: list) -> str:
     # Width fits the longest label the script generates ("ctrl+magnitude-33%"
     # plus padding); a narrower column overflows and breaks every border below it.
     width = max(17, max((len(n) for n in order), default=0) + 3)
-    cols = [("Variant", width), ("Lin.Probe", 11), ("kNN", 11), ("CKA", 11),
-            ("GPU ms", 10), ("CPU ms", 10)]
+    cols = [("Variant", width), ("Params", 8), ("Lin.Probe", 11), ("kNN", 11),
+            ("CKA", 11), ("GPU ms", 10), ("CPU ms", 10)]
     b = _box_chars()
     top = b["tl"] + b["tt"].join(b["h"] * w for _, w in cols) + b["tr"]
     mid = b["lt"] + b["x"].join(b["h"] * w for _, w in cols) + b["rt"]
@@ -611,7 +667,9 @@ def summary_table(results: dict, order: list) -> str:
         r = results.get(name)
         if not r:
             continue
-        lines.append(row([name, pct(r["linear_probe"]), pct(r["knn_accuracy"]),
+        params = r.get("params")
+        lines.append(row([name, "n/a" if params is None else f"{params / 1e6:.0f}M",
+                          pct(r["linear_probe"]), pct(r["knn_accuracy"]),
                           f"{r['cka_similarity']:.3f}",
                           ms(r.get("latency_gpu_ms")), ms(r.get("latency_cpu_ms"))]))
     lines.append(bot)
@@ -640,11 +698,23 @@ def parse_args(argv=None):
     p.add_argument("--no-space-check", action="store_true",
                    help="skip the pre-training probe that reserves checkpoint space")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--model", default=MODEL_ID,
+                   help=f"Hub id of a ViT-family encoder (default: {MODEL_ID}); "
+                        "e.g. facebook/dinov2-large")
+    p.add_argument("--prune-ratios", type=float, nargs="+", default=list(PRUNE_RATIOS),
+                   help="post-training pruning ratios to benchmark (default: 0.33 0.5)")
+    p.add_argument("--slice", action="store_true",
+                   help="also physically remove the heads with slice_heads() and "
+                        "score the smaller models — the rows with real latency")
     return p.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
+    # load_model/build_data read the module-level id, so they keep their
+    # signatures (the tests replace them) while following --model.
+    global MODEL_ID
+    MODEL_ID = args.model
     started = time.time()
     torch.manual_seed(args.seed)
 
@@ -678,7 +748,6 @@ def main(argv=None):
     log("  (cached under ~/.cache/huggingface — re-runs do not re-download)")
     model = load_model(device, grad_ckpt)
     patch_size = model.config.patch_size
-    image_size = model.config.image_size
     from sal import count_params
     log(f"  loaded:  {count_params(model) / 1e6:.0f}M params, "
         f"{model.config.num_hidden_layers} layers x "
@@ -687,6 +756,9 @@ def main(argv=None):
     loaders, fi_batches, num_classes = build_data(sizes, batch_size, args.seed)
     fi_batches = [{k: v.to(device) for k, v in b.items()} for b in fi_batches]
     log(f"  classes: {num_classes}")
+    # Read the size off the processed images, not the config: DINOv2's config
+    # says 518 (its pretraining resolution) while its processor crops to 224.
+    image_size = next(iter(loaders["cka"]))[0].shape[-1]
 
     # 4 ------------------------------------------------------- pre-SAL scan
     rule("Pre-SAL structural scan")
@@ -801,25 +873,51 @@ def main(argv=None):
                               lat_runs, device, image_size=image_size)
         order.append(name)
 
-    add("original", original, original)
-    add("sal-trained", model, original)
-    for ratio in PRUNE_RATIOS:
-        for method in SELECTION_METHODS:
-            pruned = prune(model, ratio, method, seed=args.seed)
-            add(f"sal+{method}-{int(ratio * 100)}%", pruned, model)
-            del pruned
-            if device.type == "cuda":
-                torch.cuda.empty_cache()
+    slicing, slicing_errors = {}, {}
+    verify_batch = fi_batches[0]
 
-    if control_model is not None:
-        add("control-trained", control_model, original)
-        for ratio in PRUNE_RATIOS:
+    def pruned_arm(prefix, trained):
+        for ratio in args.prune_ratios:
             for method in SELECTION_METHODS:
-                pruned = prune(control_model, ratio, method, seed=args.seed)
-                add(f"ctrl+{method}-{int(ratio * 100)}%", pruned, control_model)
+                pruned = prune(trained, ratio, method, seed=args.seed)
+                add(f"{prefix}+{method}-{int(round(ratio * 100))}%", pruned, trained)
                 del pruned
                 if device.type == "cuda":
                     torch.cuda.empty_cache()
+            if not args.slice:
+                continue
+            for method in SELECTION_METHODS:
+                label = "random-uniform" if method == "random" else method
+                name = f"{prefix}+{label}-{int(round(ratio * 100))}%-sliced"
+                try:
+                    sliced, info = slice_variant(trained, ratio, method, args.seed,
+                                                 verify_batch)
+                except Exception as e:
+                    slicing_errors[name] = f"{type(e).__name__}: {e}"
+                    log(f"  SLICING FAILED for {name}: {slicing_errors[name]}")
+                    continue
+                add(name, sliced, trained)
+                slicing[name] = info
+                del sliced
+                if device.type == "cuda":
+                    torch.cuda.empty_cache()
+
+    add("original", original, original)
+    add("sal-trained", model, original)
+    pruned_arm("sal", model)
+
+    if control_model is not None:
+        add("control-trained", control_model, original)
+        pruned_arm("ctrl", control_model)
+
+    base = results["original"]
+    for name, info in slicing.items():
+        r = results[name]
+        info["params"] = r["params"]
+        info["param_fraction"] = r["params"] / base["params"]
+        for dev in ("gpu", "cpu"):
+            ms, ref = r.get(f"latency_{dev}_ms"), base.get(f"latency_{dev}_ms")
+            info[f"speedup_{dev}"] = (ref / ms) if (ms and ref) else None
 
     # 8 -------------------------------------------------------------- save
     rule("Saving")
@@ -839,13 +937,25 @@ def main(argv=None):
                      "count. Masked heads emit zero signatures, carry no edges, "
                      "and push the fixed edge budget onto survivors, which lowers "
                      "FI by construction. Use slice_heads() to compare sizes.",
-        "latency_caveat": "Pruning here masks rather than slices, so parameter "
-                          "count and FLOPs are unchanged; pruned rows are "
-                          "marginally SLOWER from hook overhead. slice_heads() "
-                          "is what makes a model actually faster.",
+        "latency_caveat": "Rows without '-sliced' mask rather than slice, so "
+                          "parameter count and FLOPs are unchanged and they are "
+                          "marginally SLOWER from hook overhead. '-sliced' rows "
+                          "physically remove the heads (slice_heads()); only they "
+                          "show real size and latency. Latency is batch-1 median.",
+        "prune_ratios": args.prune_ratios,
+        "slice_caveat": ("'-sliced' rows remove round(ratio * heads) heads from EVERY "
+                         "layer. 'magnitude' selects exactly as its masked row; "
+                         "'random-uniform' samples within each layer, unlike the "
+                         "masked 'random' row, which samples across the whole model. "
+                         "Each sliced model is checked against the same heads masked "
+                         "by hook (relative_diff_vs_masked)."
+                         if args.slice else None),
+        "slicing": slicing, "slicing_errors": slicing_errors,
         "objective": "I-JEPA-shaped: predict the clean-image representation from "
                      "a patch-masked image. No predictor network, no EMA target "
-                     "encoder — NOT I-JEPA pretraining.",
+                     "encoder — NOT I-JEPA pretraining, and for DINOv2 NOT its "
+                     "self-distillation objective: the same masked-prediction "
+                     "objective is applied to every --model so arms stay comparable.",
         "comparison": ("SAL-training vs no-SAL control (--control)" if args.control
                        else "head SELECTION only (random vs magnitude) on one "
                             "SAL-trained model — pass --control to compare "

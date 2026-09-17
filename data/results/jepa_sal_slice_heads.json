@@ -1,0 +1,189 @@
+{
+  "model": "facebook/ijepa_vith14_1k",
+  "dataset": "clane9/imagenet-100",
+  "smoke": false,
+  "seed": 42,
+  "epochs": 5,
+  "mask_ratio": 0.3,
+  "patch_mask_ratio": 0.4,
+  "batch_size": 32,
+  "gradient_checkpointing": false,
+  "vram_gb": 85.1,
+  "device": "cuda",
+  "fi_caveat": "FI is comparable only between models with the same head count. Masked heads emit zero signatures, carry no edges, and push the fixed edge budget onto survivors, which lowers FI by construction. Use slice_heads() to compare sizes.",
+  "latency_caveat": "Rows without '-sliced' mask rather than slice, so parameter count and FLOPs are unchanged and they are marginally SLOWER from hook overhead. '-sliced' rows physically remove the heads (slice_heads()); only they show real size and latency. Latency is batch-1 median.",
+  "prune_ratios": [
+    0.33,
+    0.5
+  ],
+  "slice_caveat": "'-sliced' rows remove round(ratio * heads) heads from EVERY layer. 'magnitude' selects exactly as its masked row; 'random-uniform' samples within each layer, unlike the masked 'random' row, which samples across the whole model. Each sliced model is checked against the same heads masked by hook (relative_diff_vs_masked).",
+  "slicing": {
+    "sal+random-uniform-33%-sliced": {
+      "heads_removed_per_layer": 5,
+      "heads_per_layer_after": 11,
+      "fraction_removed": 0.3125,
+      "max_abs_diff_vs_masked": 0.0,
+      "relative_diff_vs_masked": 0.0,
+      "params": 565187840,
+      "param_fraction": 0.8960394331784984,
+      "speedup_gpu": 1.035414388586577,
+      "speedup_cpu": 1.1111625048433238
+    },
+    "sal+magnitude-33%-sliced": {
+      "heads_removed_per_layer": 5,
+      "heads_per_layer_after": 11,
+      "fraction_removed": 0.3125,
+      "max_abs_diff_vs_masked": 0.0,
+      "relative_diff_vs_masked": 0.0,
+      "params": 565187840,
+      "param_fraction": 0.8960394331784984,
+      "speedup_gpu": 1.034611597581884,
+      "speedup_cpu": 1.1238900959109834
+    },
+    "sal+random-uniform-50%-sliced": {
+      "heads_removed_per_layer": 8,
+      "heads_per_layer_after": 8,
+      "fraction_removed": 0.5,
+      "max_abs_diff_vs_masked": 0.0,
+      "relative_diff_vs_masked": 0.0,
+      "params": 525843200,
+      "param_fraction": 0.8336630930855975,
+      "speedup_gpu": 1.101297884862256,
+      "speedup_cpu": 1.1922883505036355
+    },
+    "sal+magnitude-50%-sliced": {
+      "heads_removed_per_layer": 8,
+      "heads_per_layer_after": 8,
+      "fraction_removed": 0.5,
+      "max_abs_diff_vs_masked": 0.0,
+      "relative_diff_vs_masked": 0.0,
+      "params": 525843200,
+      "param_fraction": 0.8336630930855975,
+      "speedup_gpu": 1.0991310130845113,
+      "speedup_cpu": 1.195690261284565
+    }
+  },
+  "slicing_errors": {},
+  "objective": "I-JEPA-shaped: predict the clean-image representation from a patch-masked image. No predictor network, no EMA target encoder \u2014 NOT I-JEPA pretraining.",
+  "comparison": "head SELECTION only (random vs magnitude) on one SAL-trained model \u2014 pass --control to compare SAL training against a no-SAL arm",
+  "num_classes": 100,
+  "fi_before": 0.005580186515823269,
+  "fi_after": 0.00565662742699893,
+  "sal_losses": [
+    0.6575099451001734,
+    0.6413248705212027,
+    0.6510628031101078,
+    0.69178023096174,
+    0.6889741078484803
+  ],
+  "masker_stats": {
+    "active": true,
+    "total_heads": 512,
+    "active_heads": 359,
+    "pruned_heads": 153,
+    "prune_events": 153,
+    "prune_fraction": 0.3
+  },
+  "control_losses": null,
+  "results": {
+    "original": {
+      "linear_probe": 0.8203999996185303,
+      "knn_accuracy": 0.7736,
+      "cka_similarity": 1.0,
+      "params": 630762240,
+      "latency_gpu_ms": 28.727766126394272,
+      "latency_cpu_ms": 582.1420829743147,
+      "fi_score": 0.005580186515823269
+    },
+    "sal-trained": {
+      "linear_probe": 0.8276000022888184,
+      "knn_accuracy": 0.7968,
+      "cka_similarity": 0.9821791189363336,
+      "params": 630762240,
+      "latency_gpu_ms": 28.74782681465149,
+      "latency_cpu_ms": 578.3067177981138,
+      "fi_score": 0.00565662742699893
+    },
+    "sal+random-33%": {
+      "linear_probe": 0.7735999822616577,
+      "knn_accuracy": 0.736,
+      "cka_similarity": 0.8362097928669213,
+      "params": 630762240,
+      "latency_gpu_ms": 31.530847772955894,
+      "latency_cpu_ms": 585.9110169112682,
+      "fi_score": 0.0003822045558783061
+    },
+    "sal+magnitude-33%": {
+      "linear_probe": 0.7851999998092651,
+      "knn_accuracy": 0.7096,
+      "cka_similarity": 0.8653772693349372,
+      "params": 630762240,
+      "latency_gpu_ms": 31.412862241268158,
+      "latency_cpu_ms": 585.335673764348,
+      "fi_score": 0.00015288182235132243
+    },
+    "sal+random-uniform-33%-sliced": {
+      "linear_probe": 0.7644000053405762,
+      "knn_accuracy": 0.7048,
+      "cka_similarity": 0.8387877145998984,
+      "params": 565187840,
+      "latency_gpu_ms": 27.745187282562256,
+      "latency_cpu_ms": 523.9036418497562,
+      "fi_score": 0.014567821301392036
+    },
+    "sal+magnitude-33%-sliced": {
+      "linear_probe": 0.7851999998092651,
+      "knn_accuracy": 0.7096,
+      "cka_similarity": 0.8653772693349372,
+      "params": 565187840,
+      "latency_gpu_ms": 27.766715735197067,
+      "latency_cpu_ms": 517.9706495255232,
+      "fi_score": 0.01165425704111363
+    },
+    "sal+random-50%": {
+      "linear_probe": 0.635200023651123,
+      "knn_accuracy": 0.4816,
+      "cka_similarity": 0.6575462812681341,
+      "params": 630762240,
+      "latency_gpu_ms": 31.521528959274292,
+      "latency_cpu_ms": 591.234352439642,
+      "fi_score": 0.0
+    },
+    "sal+magnitude-50%": {
+      "linear_probe": 0.6507999897003174,
+      "knn_accuracy": 0.4556,
+      "cka_similarity": 0.6605348853461931,
+      "params": 630762240,
+      "latency_gpu_ms": 31.434526666998863,
+      "latency_cpu_ms": 575.5227319896221,
+      "fi_score": 0.0
+    },
+    "sal+random-uniform-50%-sliced": {
+      "linear_probe": 0.5368000268936157,
+      "knn_accuracy": 0.3544,
+      "cka_similarity": 0.6119033830881714,
+      "params": 525843200,
+      "latency_gpu_ms": 26.085373014211655,
+      "latency_cpu_ms": 488.2561191916466,
+      "fi_score": 0.030330882352941176
+    },
+    "sal+magnitude-50%-sliced": {
+      "linear_probe": 0.6507999897003174,
+      "knn_accuracy": 0.4556,
+      "cka_similarity": 0.6605348853461931,
+      "params": 525843200,
+      "latency_gpu_ms": 26.136798784136772,
+      "latency_cpu_ms": 486.8669603019953,
+      "fi_score": 0.035845588235294115
+    }
+  },
+  "figures": [
+    "feature_maps_comparison.png",
+    "compression_table.png",
+    "fi_before_after.png",
+    "latency_comparison.png"
+  ],
+  "wall_clock_s": 3938.1,
+  "environment_note": "A100-SXM4-80GB, torch 2.4.1+cu124, transformers 4.51.3, OMP_NUM_THREADS=12 (CPU latency is therefore not comparable to the 2.5s CPU figures in jepa_sal_benchmark.json, which ran with 128 threads on a ~13.6-core cgroup quota). SAL model retrained at seed 42; masked rows reproduce the earlier seed-42 run to 4 decimals.",
+  "speedup_note": "Removing heads shrinks only Q/K/V/O. In ViT-H/14 attention is ~1/3 of each block's parameters (6.6M vs 13.1M MLP) and the residual width is unchanged, so 50% of heads = -17% params and ~1.1x GPU / ~1.2x CPU at batch 1, 224px. Larger speedups need MLP/width reduction as well."
+}

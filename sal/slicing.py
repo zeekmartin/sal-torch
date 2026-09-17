@@ -249,9 +249,12 @@ def slice_heads(model: nn.Module, heads_to_remove, verify_input=None,
             _slice_out(fused, keep_idx)
 
         _retarget(attn, old_n, new_n, hd)
-        sub = getattr(attn, "self", None)
-        if sub is not None:
-            _retarget(sub, old_n, new_n, hd)
+        # BERT/ViT keep the bookkeeping one level down in `.self`; ViT-family
+        # models such as I-JEPA and DINOv2 in `.attention`.
+        for name in ("self", "attention"):
+            sub = getattr(attn, name, None)
+            if isinstance(sub, nn.Module) and sub is not attn:
+                _retarget(sub, old_n, new_n, hd)
 
     # The *target's* config, not the source's — writing to `cfg` here would mutate
     # the caller's model even with inplace=False, and leave the copy unchanged.
@@ -306,7 +309,12 @@ def _forward_logits(model, batch):
     try:
         with torch.no_grad():
             out = model(**batch) if isinstance(batch, dict) else model(batch)
-        return out.logits if hasattr(out, "logits") else out
+        if hasattr(out, "logits"):
+            return out.logits
+        # Encoders without a head (I-JEPA, DINOv2) expose hidden states only.
+        if hasattr(out, "last_hidden_state"):
+            return out.last_hidden_state
+        return out
     finally:
         model.train(was_training)
 
