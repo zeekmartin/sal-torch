@@ -1,11 +1,19 @@
 # Changelog
 
-## [Unreleased] — v0.5.1-dev
+## [0.5.1] — 2026-09-17
 
-SAL stops being supervised-only. Not tagged and not published: the plumbing is
-tested, the benchmark behind it has not been run.
+SAL stops being supervised-only, and the self-supervised benchmark behind it has
+now been run: I-JEPA ViT-H/14 at three seeds, DINOv2 ViT-L/14 at one.
 
 ### Added
+- **Loss-agnostic `SALTrainer`** — see `train_step=` below. Backward
+  compatible: `train_step=None` keeps the existing cross-entropy loop.
+- **`run_jepa_sal.py` flags**: `--slice` (score physically sliced models next to
+  the masked ones, each checked against its masked twin), `--prune-ratios`,
+  `--model` (any ViT-family encoder, e.g. `facebook/dinov2-large`), alongside the
+  existing `--smoke`, `--control`, `--seed`, `--resume`.
+- **`scripts/aggregate_jepa_multiseed.py`** — mean ± sample std and paired
+  SAL-vs-control wins across seeds.
 - **`SALTrainer(train_step=...)`** — a custom training step callback, signature
   `(model, batch, optimizer, mask_module) -> loss`. The loop keeps the prune
   schedule (it calls `masker.step()` before every callback and leaves masking
@@ -46,6 +54,56 @@ tested, the benchmark behind it has not been run.
   the hooks come off.
 - **`get_qkv_projections()` missed DINOv2's Q/K/V**, which sit one level deeper
   than either searched path, so head-level weight slicing could not see them.
+- **`slice_heads()` on ViT-family encoders** (I-JEPA, DINOv2 under transformers
+  4.x). Head bookkeeping under `.attention` was not retargeted, and
+  `verify_input` failed on models that return `last_hidden_state` instead of
+  `logits`. Sliced I-JEPA outputs now match the masked model exactly.
+
+### Benchmark results — I-JEPA ViT-H/14 (631M), ImageNet-100
+Five epochs per arm on one A100; SAL trained at `mask_ratio=0.3` against a
+control trained identically without head masking. Results in `data/results/`.
+
+**Three seeds (42/123/456): SAL wins 35 of 36 paired comparisons.**
+
+| setting | SAL | control | delta | SAL ahead |
+|---|---|---|---|---|
+| random-33% probe | 76.8% | 76.4% | +0.4pp | 3/3 |
+| random-33% kNN | 71.2% | 70.0% | +1.2pp | 3/3 |
+| random-50% probe | 64.3% | 62.9% | +1.4pp | 3/3 |
+| random-50% kNN | 47.5% | 45.6% | +1.9pp | 3/3 |
+| magnitude-50% probe | 65.8% | 64.8% | +0.9pp | 2/3 |
+
+The gains are small — several are sub-1pp — and consistent in direction rather
+than large. The cross-seed std is often wider than the gap, because a seed
+changes the data subset and pruning draw for both arms alike; the paired win
+count is the relevant test. No cost on the unpruned model (probe 83.2% vs
+83.1%). Summary: `jepa_sal_multiseed_summary.json`.
+
+**`slice_heads()` real speedup** (seed 42, batch 1, 224px, A100 / 12 CPU threads):
+
+| heads removed | params | GPU | CPU |
+|---|---|---|---|
+| 0% | 631M | 28.7ms | 582ms |
+| 31% (5/16 per layer) | 565M | 27.8ms (1.03×) | 518ms (1.12×) |
+| 50% (8/16) | 526M | 26.1ms (1.10×) | 487ms (1.20×) |
+| 69% (11/16) | 486M | 25.0ms (1.15×) | ~460ms (~1.3×)¹ |
+
+¹ Separate run, against its own 594ms baseline.
+
+Modest by construction: head removal shrinks only Q/K/V/O, attention is about a
+third of a ViT-H block's parameters, and the residual width is unchanged.
+Magnitude-sliced quality equals magnitude-masked quality exactly.
+
+**70% pruning: no effect.** SAL ≈ control within ±1.6pp with mixed signs, both
+when SAL trained at `mask_ratio=0.3` and at `0.7`. The measured range for SAL on
+I-JEPA is 33–50% head pruning.
+
+**Cross-architecture — DINOv2 ViT-L/14 (304M), seed 42 only:** SAL wins 13 of
+18. DINOv2 is far more fragile to head removal than I-JEPA — at 50% both arms
+collapse and SAL does not help. Where the pruned model survives, the gains are
+larger: 33% per-layer-random sliced, +3.0pp probe (84.0% vs 81.0%) and +6.9pp
+kNN (75.4% vs 68.5%). Magnitude selection is a poor choice on DINOv2 (33%:
+probe 36%). Single seed; not a validated claim.
 
 ### Notes on the benchmark, before anyone quotes it
 - **There is no I-JEPA ViT-B/16.** Meta released I-JEPA at ViT-H/14 and ViT-g/16
@@ -57,8 +115,14 @@ tested, the benchmark behind it has not been run.
   sides, which makes the loss identically zero whenever head masking is off: the
   no-SAL control arm would have run its optimizer on a constant while logging as
   though it were training.
-- **One seed will not settle this.** The v0.5.0 five-seed run watched the int4
-  gain evaporate. Treat a sub-1pp gap here as "not shown".
+- **Selection differs between masked and sliced `random` rows.** The masker's
+  `random` samples across the whole model; slicing needs the same count per
+  layer, so sliced rows sample within each layer (`random-uniform`).
+- **Post-hoc random heads are not the heads SAL trained without.** Their overlap
+  with the training-time pruned set is at chance level, so SAL is not scored on
+  heads it already learned to do without.
+- **Seed coverage is uneven.** I-JEPA at 33/50% has three seeds; the slicing,
+  70% and DINOv2 results are one seed each.
 
 
 ## 0.5.0 (2026-08-12) — CompressionPipeline, and five seeds instead of one

@@ -189,7 +189,7 @@ Reproduce: `scripts/modal_v040_test.py` (run 1) and
 `scripts/robustness_scale_results.json`.
 
 For the 24% on magnitude pruning: `sal.compare()` already covers you today.
-For the 21% on distillation: see v0.6.0.
+For the 21% on distillation: see v0.7.0.
 For the 15% not compressing yet: the docs are getting a real getting-started
 path, because "should I compress at all?" is a legitimate answer.
 
@@ -346,34 +346,56 @@ for new claims, not something to retrofit again later.
 
 ---
 
-## Planned
-
-### v0.5.1 — SAL for self-supervised models · in development
+### v0.5.1 — SAL for self-supervised models · 2026-09-17
 
 `SALTrainer` was wired to cross-entropy, which meant SAL only applied to models
 with a task head. It now takes a `train_step=` callback, so the objective lives
-wherever the caller wants it and SAL keeps only the prune schedule. That opens
-I-JEPA, V-JEPA, MAE and DINO.
+wherever the caller wants it and SAL keeps only the prune schedule. Shipped with
+the metrics that replace accuracy for encoders (linear probe, kNN, CKA,
+latency), `ijepa`/`dinov2` architecture support, and `slice_heads()` working on
+ViT-family encoders.
 
-Because those models have no accuracy to report, v0.5.1 also ships the metrics
-that replace it — linear probe, kNN, CKA, latency — and the figures that make a
-compression loss visible rather than merely numeric.
+**The falsification test was run.** I-JEPA ViT-H/14 on ImageNet-100, SAL-trained
+vs a control trained identically minus head masking, three seeds. The direction
+is not noise: **SAL wins 35 of 36 paired comparisons** at 33% and 50% pruning.
+The size is small — +0.4 to +1.9pp — so the honest reading is a reliable but
+modest effect, not a large one.
 
-**Shipped in the branch, unvalidated.** The code is tested (247 CPU tests); the
-benchmark is written and has not been run. The target is I-JEPA ViT-H/14 on
-ImageNet-100, SAL-trained vs a control trained identically minus head masking,
-both pruned at 33% and 50%. What would falsify it: the two arms landing within
-noise of each other on kNN and CKA. Nothing here gets tagged, published or
-quoted until the run happens on more than one seed — the v0.5.0 five-seed
-exercise is the reason that sentence exists.
+What else the runs showed:
+
+- **70% pruning is outside SAL's range.** SAL ≈ control within ±1.6pp, both
+  when trained at 30% masking and at 70%.
+- **DINOv2 ViT-L/14** (one seed): 13/18 wins, larger where the pruned model
+  survives (+3.0pp probe, +6.9pp kNN at 33% sliced), and both arms collapse at
+  50%. Consistent with "SAL recovers damage in proportion to how much there is",
+  still a post-hoc reading.
+- **Slicing is real but modest.** 50% of I-JEPA's heads: 631M → 526M, 1.10× GPU
+  and 1.20× CPU. Attention is a third of a ViT block; heads alone cannot reach 2×.
 
 Two things the scoping got wrong, recorded so they are not rediscovered:
 Meta never released an I-JEPA ViT-B/16 (H/14 and g/16 are the catalogue), and a
 "predict your own clean representation" objective has a loss of exactly zero for
 any arm that is not being perturbed.
 
+---
 
-### v0.6.0 — Topology-guided distillation and wider architectures
+## Planned
+
+### v0.6.0 — SAL + quantization-aware training, and MLP pruning
+
+v0.5.1 measured the ceiling of head removal: 1.2× on CPU at 50% of heads,
+because attention is only a third of a ViT block's parameters. A 2× real speedup
+needs the rest of the block.
+
+- **SAL + QAT** — combine training-time head pruning with INT4/INT8
+  quantization-aware training, so the model adapts to both at once rather than
+  meeting quantization after the fact.
+- **MLP pruning** — extend structural sparsification to the feed-forward
+  expansion, which holds two thirds of each block.
+- **Target: 2× real speedup**, measured on sliced, quantized models — not 1.2×.
+- Requires a EuroHPC GPU allocation.
+
+### v0.7.0 — Topology-guided distillation and wider architectures
 
 Distillation currently throws away the teacher's structure and hopes the student
 rediscovers it. If we know which of the teacher's heads are structurally

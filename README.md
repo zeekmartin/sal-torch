@@ -529,6 +529,7 @@ the adaptation cannot.
 | **Full fine-tuning, and you prune heads** | **Yes.** The strongest and best-replicated case: +2.45pp at 33% pruning on 5/5 seeds of GPT-2 Medium, at no cost to clean accuracy. |
 | **Vision transformers** | **Promising, preliminary.** Three seeds on ViT-base/CIFAR-10 gave +14 to +20pp under pruning, unanimously — but it cost 1.03pp of clean accuracy, and one architecture on one task is not cross-modal validation. Measure yours. |
 | **Full fine-tuning, quantization only** | **Measure first.** INT8 gave +0.73pp on GPT-2 (4/5 seeds) and nothing on ViT; INT4 alone was a coin flip (3/5, +0.21pp). Use `RobustnessTest` on your own model before committing. |
+| **Self-supervised vision encoders** | **Yes, at 33–50% head pruning, with modest expectations.** I-JEPA ViT-H/14: +0.4 to +1.9pp, 35/36 wins over 3 seeds. No effect at 70%. DINOv2 is single-seed. |
 | **LoRA / QLoRA adapters** | **Not recommended.** Measured worse than not using SAL at all, and it costs clean accuracy. The adapters are too small to redistribute what the masking removes. |
 | **Models above ~1B** | **Unvalidated.** No full-fine-tuning result at that scale yet. |
 
@@ -681,8 +682,46 @@ exists to show.
 
 Architectures: `ijepa` and `dinov2` join the auto-detected list.
 
-**Status: unvalidated.** The plumbing is tested (264 CPU tests); the benchmark
-behind it has not been run. See [`examples/jepa_sal.py`](examples/jepa_sal.py),
+### Self-supervised vision results (v0.5.1)
+
+ImageNet-100, five epochs per arm on one A100. The SAL arm trains with
+`mask_ratio=0.3`; the control trains identically without head masking. Both are
+then pruned post hoc and scored on frozen representations.
+
+**I-JEPA ViT-H/14 (631M)** — SAL wins **35 of 36** paired comparisons across
+three seeds:
+
+| pruning | metric | SAL | control | delta | SAL ahead |
+|---|---|---|---|---|---|
+| 33% random | linear probe | 76.8% | 76.4% | +0.4pp | 3/3 |
+| 33% random | kNN | 71.2% | 70.0% | +1.2pp | 3/3 |
+| 50% random | linear probe | 64.3% | 62.9% | +1.4pp | 3/3 |
+| 50% random | kNN | 47.5% | 45.6% | +1.9pp | 3/3 |
+
+Consistent, and small: read these as "SAL does not hurt and reliably helps a
+little", not as the +2.45pp GPT-2 or +14pp ViT-base effect. No cost on the
+unpruned model (83.2% vs 83.1% probe). At **70%** pruning SAL and control are
+indistinguishable, whether SAL trains at 30% or 70% masking.
+
+**DINOv2 ViT-L/14 (304M)** — one seed, SAL wins 13 of 18. DINOv2 is much more
+fragile to head removal: at 50% both arms collapse. Where it survives, the gap is
+larger:
+
+| pruning | metric | SAL | control | delta |
+|---|---|---|---|---|
+| 33% sliced (random per layer) | linear probe | 84.0% | 81.0% | +3.0pp |
+| 33% sliced (random per layer) | kNN | 75.4% | 68.5% | +6.9pp |
+
+**What slicing buys.** `slice_heads()` on I-JEPA at 50% of heads: 631M → 526M
+parameters, 1.10× GPU and 1.20× CPU latency at batch 1. Head removal only
+narrows attention, which is a third of a ViT block, so expect ~1.1–1.3× from
+heads alone, not 2×.
+
+Caveats: the training objective is I-JEPA-*shaped* masked prediction, applied to
+DINOv2 as well (not its self-distillation objective); DINOv2, slicing and 70%
+are single-seed. Raw numbers in `data/results/`.
+
+See [`examples/jepa_sal.py`](examples/jepa_sal.py),
 [`scripts/run_jepa_sal.py`](scripts/run_jepa_sal.py) (standalone — any GPU box
 over SSH, `bash scripts/setup_runpod.sh` to prepare one) and
 [`scripts/modal_jepa_sal.py`](scripts/modal_jepa_sal.py) (Modal). Read the
@@ -706,8 +745,9 @@ New here? Start with [docs/getting_started.md](docs/getting_started.md).
 See [ROADMAP.md](ROADMAP.md) for what's shipped, what's next, and how to request
 features — including the full evidence trail behind the robustness claims,
 losses included. v0.5.0 shipped `CompressionPipeline`, `slice_heads()`,
-`quantize()`, and the five-seed validation above. Next up is topology-guided
-distillation (v0.6.0), for the 21% who distill.
+`quantize()`, and the five-seed validation above. v0.5.1 opened SAL to
+self-supervised encoders. Next up is SAL + quantization-aware training and MLP
+pruning (v0.6.0), aiming for a real 2× speedup.
 
 ## License
 
