@@ -1,0 +1,268 @@
+{
+  "model": "facebook/ijepa_vith14_1k",
+  "dataset": "clane9/imagenet-100",
+  "smoke": false,
+  "seed": 42,
+  "epochs": 5,
+  "mask_ratio": 0.7,
+  "patch_mask_ratio": 0.4,
+  "batch_size": 32,
+  "gradient_checkpointing": false,
+  "vram_gb": 85.1,
+  "device": "cuda",
+  "fi_caveat": "FI is comparable only between models with the same head count. Masked heads emit zero signatures, carry no edges, and push the fixed edge budget onto survivors, which lowers FI by construction. Use slice_heads() to compare sizes.",
+  "latency_caveat": "Rows without '-sliced' mask rather than slice, so parameter count and FLOPs are unchanged and they are marginally SLOWER from hook overhead. '-sliced' rows physically remove the heads (slice_heads()); only they show real size and latency. Latency is batch-1 median.",
+  "prune_ratios": [
+    0.7
+  ],
+  "slice_caveat": "'-sliced' rows remove round(ratio * heads) heads from EVERY layer. 'magnitude' selects exactly as its masked row; 'random-uniform' samples within each layer, unlike the masked 'random' row, which samples across the whole model. Each sliced model is checked against the same heads masked by hook (relative_diff_vs_masked).",
+  "slicing": {
+    "sal+random-uniform-70%-sliced": {
+      "heads_removed_per_layer": 11,
+      "heads_per_layer_after": 5,
+      "fraction_removed": 0.6875,
+      "max_abs_diff_vs_masked": 0.0,
+      "relative_diff_vs_masked": 0.0,
+      "params": 486498560,
+      "param_fraction": 0.7712867529926966,
+      "speedup_gpu": 1.1510782171673721,
+      "speedup_cpu": 1.2260221917053382
+    },
+    "sal+magnitude-70%-sliced": {
+      "heads_removed_per_layer": 11,
+      "heads_per_layer_after": 5,
+      "fraction_removed": 0.6875,
+      "max_abs_diff_vs_masked": 0.0,
+      "relative_diff_vs_masked": 0.0,
+      "params": 486498560,
+      "param_fraction": 0.7712867529926966,
+      "speedup_gpu": 1.1513404773936675,
+      "speedup_cpu": 1.2711078672272336
+    },
+    "ctrl+random-uniform-70%-sliced": {
+      "heads_removed_per_layer": 11,
+      "heads_per_layer_after": 5,
+      "fraction_removed": 0.6875,
+      "max_abs_diff_vs_masked": 0.0,
+      "relative_diff_vs_masked": 0.0,
+      "params": 486498560,
+      "param_fraction": 0.7712867529926966,
+      "speedup_gpu": 1.1513957729860507,
+      "speedup_cpu": 1.2407679778051266
+    },
+    "ctrl+magnitude-70%-sliced": {
+      "heads_removed_per_layer": 11,
+      "heads_per_layer_after": 5,
+      "fraction_removed": 0.6875,
+      "max_abs_diff_vs_masked": 0.0,
+      "relative_diff_vs_masked": 0.0,
+      "params": 486498560,
+      "param_fraction": 0.7712867529926966,
+      "speedup_gpu": 1.151457847544251,
+      "speedup_cpu": 1.2423691184946146
+    }
+  },
+  "slicing_errors": {},
+  "objective": "I-JEPA-shaped: predict the clean-image representation from a patch-masked image. No predictor network, no EMA target encoder \u2014 NOT I-JEPA pretraining, and for DINOv2 NOT its self-distillation objective: the same masked-prediction objective is applied to every --model so arms stay comparable.",
+  "comparison": "SAL-training vs no-SAL control (--control)",
+  "num_classes": 100,
+  "fi_before": 0.005580186515823269,
+  "fi_after": 0.005197981959944963,
+  "sal_losses": [
+    0.6605823361314833,
+    0.7223214549012482,
+    0.9099920331500471,
+    1.0937802514526993,
+    1.0501228624489158
+  ],
+  "masker_stats": {
+    "active": true,
+    "total_heads": 512,
+    "active_heads": 154,
+    "pruned_heads": 358,
+    "prune_events": 358,
+    "prune_fraction": 0.7
+  },
+  "control_losses": [
+    0.6514617470093071,
+    0.6073019050527364,
+    0.5692261182703078,
+    0.5330181235913187,
+    0.5032755134161562
+  ],
+  "results": {
+    "original": {
+      "linear_probe": 0.8203999996185303,
+      "knn_accuracy": 0.7736,
+      "cka_similarity": 1.0,
+      "params": 630762240,
+      "latency_gpu_ms": 28.802337124943733,
+      "latency_cpu_ms": 583.8172156363726,
+      "fi_score": 0.005580186515823269
+    },
+    "sal-trained": {
+      "linear_probe": 0.8256000280380249,
+      "knn_accuracy": 0.7932,
+      "cka_similarity": 0.987762431671586,
+      "params": 630762240,
+      "latency_gpu_ms": 28.797438368201256,
+      "latency_cpu_ms": 591.8470993638039,
+      "fi_score": 0.005197981959944963
+    },
+    "sal+random-70%": {
+      "linear_probe": 0.3776000142097473,
+      "knn_accuracy": 0.2112,
+      "cka_similarity": 0.4665787753029457,
+      "params": 630762240,
+      "latency_gpu_ms": 31.542833894491196,
+      "latency_cpu_ms": 585.0964728742838,
+      "fi_score": 0.0
+    },
+    "sal+magnitude-70%": {
+      "linear_probe": 0.4819999933242798,
+      "knn_accuracy": 0.2576,
+      "cka_similarity": 0.5477188381382504,
+      "params": 630762240,
+      "latency_gpu_ms": 31.5062515437603,
+      "latency_cpu_ms": 608.1806402653456,
+      "fi_score": 0.0
+    },
+    "sal+random-uniform-70%-sliced": {
+      "linear_probe": 0.3052000105381012,
+      "knn_accuracy": 0.1744,
+      "cka_similarity": 0.42356475317980813,
+      "params": 486498560,
+      "latency_gpu_ms": 25.022050365805626,
+      "latency_cpu_ms": 476.18813067674637,
+      "fi_score": 0.125
+    },
+    "sal+magnitude-70%-sliced": {
+      "linear_probe": 0.4819999933242798,
+      "knn_accuracy": 0.2576,
+      "cka_similarity": 0.5477188381382504,
+      "params": 486498560,
+      "latency_gpu_ms": 25.01635067164898,
+      "latency_cpu_ms": 459.29793268442154,
+      "fi_score": 0.09984276729559749
+    },
+    "control-trained": {
+      "linear_probe": 0.8339999914169312,
+      "knn_accuracy": 0.7936,
+      "cka_similarity": 0.9820899105635819,
+      "params": 630762240,
+      "latency_gpu_ms": 28.810009360313416,
+      "latency_cpu_ms": 590.9134838730097,
+      "fi_score": 0.004739336492890996
+    },
+    "ctrl+random-70%": {
+      "linear_probe": 0.3799999952316284,
+      "knn_accuracy": 0.1952,
+      "cka_similarity": 0.4598927588607989,
+      "params": 630762240,
+      "latency_gpu_ms": 31.560642644762993,
+      "latency_cpu_ms": 584.5830757170916,
+      "fi_score": 0.0
+    },
+    "ctrl+magnitude-70%": {
+      "linear_probe": 0.4819999933242798,
+      "knn_accuracy": 0.266,
+      "cka_similarity": 0.5359882840053036,
+      "params": 630762240,
+      "latency_gpu_ms": 31.508922576904297,
+      "latency_cpu_ms": 601.0064668953419,
+      "fi_score": 0.0
+    },
+    "ctrl+random-uniform-70%-sliced": {
+      "linear_probe": 0.3043999969959259,
+      "knn_accuracy": 0.1764,
+      "cka_similarity": 0.4224101241083975,
+      "params": 486498560,
+      "latency_gpu_ms": 25.015149265527725,
+      "latency_cpu_ms": 470.528919249773,
+      "fi_score": 0.12578616352201258
+    },
+    "ctrl+magnitude-70%-sliced": {
+      "linear_probe": 0.4819999933242798,
+      "knn_accuracy": 0.266,
+      "cka_similarity": 0.5359882840053036,
+      "params": 486498560,
+      "latency_gpu_ms": 25.013800710439682,
+      "latency_cpu_ms": 469.92251090705395,
+      "fi_score": 0.1139937106918239
+    }
+  },
+  "figures": [
+    "feature_maps_comparison.png",
+    "compression_table.png",
+    "fi_before_after.png",
+    "latency_comparison.png"
+  ],
+  "wall_clock_s": 4481.2,
+  "sal_vs_control_70pct": {
+    "random-70%/linear_probe": {
+      "sal": 0.3776000142097473,
+      "ctrl": 0.3799999952316284,
+      "delta": -0.0023999810218811035,
+      "sal_retention": 0.4573643427642375,
+      "ctrl_retention": 0.4556354905783923
+    },
+    "random-70%/knn_accuracy": {
+      "sal": 0.2112,
+      "ctrl": 0.1952,
+      "delta": 0.015999999999999986,
+      "sal_retention": 0.26626323751891073,
+      "ctrl_retention": 0.2459677419354839
+    },
+    "random-70%/cka_similarity": {
+      "sal": 0.4665787753029457,
+      "ctrl": 0.4598927588607989,
+      "delta": 0.006686016442146836,
+      "sal_retention": 0.4723593045681607,
+      "ctrl_retention": 0.46827968998977393
+    },
+    "magnitude-70%/linear_probe": {
+      "sal": 0.4819999933242798,
+      "ctrl": 0.4819999933242798,
+      "delta": 0.0,
+      "sal_retention": 0.5838178015445515,
+      "ctrl_retention": 0.5779376478234514
+    },
+    "magnitude-70%/knn_accuracy": {
+      "sal": 0.2576,
+      "ctrl": 0.266,
+      "delta": -0.008400000000000019,
+      "sal_retention": 0.32476046394351993,
+      "ctrl_retention": 0.33518145161290325
+    },
+    "magnitude-70%/cka_similarity": {
+      "sal": 0.5477188381382504,
+      "ctrl": 0.5359882840053036,
+      "delta": 0.011730554132946769,
+      "sal_retention": 0.554504626392146,
+      "ctrl_retention": 0.5457629472007522
+    },
+    "random-uniform-70%-sliced/linear_probe": {
+      "sal": 0.3052000105381012,
+      "ctrl": 0.3043999969959259,
+      "delta": 0.000800013542175293,
+      "sal_retention": 0.3696705428455297,
+      "ctrl_retention": 0.36498800974657447
+    },
+    "random-uniform-70%-sliced/knn_accuracy": {
+      "sal": 0.1744,
+      "ctrl": 0.1764,
+      "delta": -0.0020000000000000018,
+      "sal_retention": 0.2198688855269793,
+      "ctrl_retention": 0.22227822580645162
+    },
+    "random-uniform-70%-sliced/cka_similarity": {
+      "sal": 0.42356475317980813,
+      "ctrl": 0.4224101241083975,
+      "delta": 0.0011546290714106178,
+      "sal_retention": 0.4288123739055467,
+      "ctrl_retention": 0.430113495276612
+    }
+  },
+  "environment_note": "A100-SXM4-80GB, torch 2.4.1+cu124, transformers 4.51.3, OMP_NUM_THREADS=12. Seed 42, SAL trained with --mask-ratio 0.7 (358/512 heads masked by end of training), control retrained fresh. Single seed.",
+  "finding": "Training SAL at the target ratio does not change the 70% picture: gaps vs control stay within +/-1.6pp with mixed signs (5/9 SAL wins), and SAL@0.7 matches SAL@0.3 (jepa_sal_70pct.json) to within 1pp. The SAL@0.7 training loss rises 0.66 -> 1.05 (control 0.65 -> 0.50), i.e. the model does not recover from 70% masking in 5 epochs. Not measured: pruning exactly the heads SAL trained without (non-uniform per layer, so masked-only)."
+}

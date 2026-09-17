@@ -1,0 +1,108 @@
+
+=== Environment =========================================================
+  GPU:   NVIDIA A100-SXM4-80GB
+  VRAM:  85.1 GB
+  batch: 32
+  gradient checkpointing: off  (auto: on below 48GB)
+  output: /workspace/results_sal70
+  mode:   full | epochs=5 | mask_ratio=0.7
+
+=== Assets ==============================================================
+  model:   facebook/ijepa_vith14_1k
+  dataset: clane9/imagenet-100
+  (cached under ~/.cache/huggingface — re-runs do not re-download)
+  loaded:  631M params, 32 layers x 16 heads, patch 14
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+  dataset: 126689 train / 5000 val available
+
+
+
+  classes: 100
+
+=== Pre-SAL structural scan =============================================
+  FI=0.0056 | 1 immune, 9 buffer, 22 critical
+  absorption: 10 elastic, 21 saturated, 1 hub  |  mean routing=0.851, mean MI=0.041
+  saved /workspace/results_sal70/pre_sal_scan.json
+
+=== SAL training (5 epochs, mask_ratio=0.7) =============================
+  output space: 155328.6GB reported free, ~10.1GB needed
+  space probe: OK
+
+    epoch 1/5 | loss 0.660582 | masker: {'active': True, 'total_heads': 512, 'active_heads': 461, 'pruned_heads': 51, 'prune_events': 51, 'prune_fraction': 0.7}
+    checkpoint -> /workspace/results_sal70/checkpoint.pt (epoch 1, 2.5GB)
+
+    epoch 2/5 | loss 0.722321 | masker: {'active': True, 'total_heads': 512, 'active_heads': 359, 'pruned_heads': 153, 'prune_events': 153, 'prune_fraction': 0.7}
+    checkpoint -> /workspace/results_sal70/checkpoint.pt (epoch 2, 2.5GB)
+
+    epoch 3/5 | loss 0.909992 | masker: {'active': True, 'total_heads': 512, 'active_heads': 257, 'pruned_heads': 255, 'prune_events': 255, 'prune_fraction': 0.7}
+    checkpoint -> /workspace/results_sal70/checkpoint.pt (epoch 3, 2.5GB)
+
+    epoch 4/5 | loss 1.093780 | masker: {'active': True, 'total_heads': 512, 'active_heads': 154, 'pruned_heads': 358, 'prune_events': 358, 'prune_fraction': 0.7}
+    checkpoint -> /workspace/results_sal70/checkpoint.pt (epoch 4, 2.5GB)
+
+    epoch 5/5 | loss 1.050123 | masker: {'active': True, 'total_heads': 512, 'active_heads': 154, 'pruned_heads': 358, 'prune_events': 358, 'prune_fraction': 0.7}
+    checkpoint -> /workspace/results_sal70/checkpoint.pt (epoch 5, 2.5GB)
+
+  losses: [0.660582, 0.722321, 0.909992, 1.09378, 1.050123]
+  masker: {'active': True, 'total_heads': 512, 'active_heads': 154, 'pruned_heads': 358, 'prune_events': 358, 'prune_fraction': 0.7}
+
+=== Post-SAL structural scan ============================================
+  FI 0.0056 -> 0.0052 (-0.0004)
+  FI=0.0052 | 1 immune, 6 buffer, 25 critical
+  saved /workspace/results_sal70/post_sal_scan.json
+
+=== Control arm (5 epochs, no head masking) =============================
+
+    epoch 1 mean loss 0.651462
+
+    epoch 2 mean loss 0.607302
+
+    epoch 3 mean loss 0.569226
+
+    epoch 4 mean loss 0.533018
+
+    epoch 5 mean loss 0.503276
+
+=== Compression benchmark ===============================================
+  scoring original ...
+  scoring sal-trained ...
+  scoring sal+random-70% ...
+  scoring sal+magnitude-70% ...
+  scoring sal+random-uniform-70%-sliced ...
+  scoring sal+magnitude-70%-sliced ...
+  scoring control-trained ...
+  scoring ctrl+random-70% ...
+  scoring ctrl+magnitude-70% ...
+  scoring ctrl+random-uniform-70%-sliced ...
+  scoring ctrl+magnitude-70%-sliced ...
+
+=== Saving ==============================================================
+  model -> /workspace/results_sal70/model (config.json + model.safetensors)
+    feature_maps_comparison.png
+    compression_table.png
+    fi_before_after.png
+    latency_comparison.png
+  metrics -> /workspace/results_sal70/jepa_sal_benchmark.json
+
+=== Summary =============================================================
+┌─────────────────────────────────┬────────┬───────────┬───────────┬───────────┬──────────┬──────────┐
+│ Variant                         │ Params │ Lin.Probe │ kNN       │ CKA       │ GPU ms   │ CPU ms   │
+├─────────────────────────────────┼────────┼───────────┼───────────┼───────────┼──────────┼──────────┤
+│ original                        │ 631M   │ 82.0%     │ 77.4%     │ 1.000     │ 29ms     │ 584ms    │
+│ sal-trained                     │ 631M   │ 82.6%     │ 79.3%     │ 0.988     │ 29ms     │ 592ms    │
+│ sal+random-70%                  │ 631M   │ 37.8%     │ 21.1%     │ 0.467     │ 32ms     │ 585ms    │
+│ sal+magnitude-70%               │ 631M   │ 48.2%     │ 25.8%     │ 0.548     │ 32ms     │ 608ms    │
+│ sal+random-uniform-70%-sliced   │ 486M   │ 30.5%     │ 17.4%     │ 0.424     │ 25ms     │ 476ms    │
+│ sal+magnitude-70%-sliced        │ 486M   │ 48.2%     │ 25.8%     │ 0.548     │ 25ms     │ 459ms    │
+│ control-trained                 │ 631M   │ 83.4%     │ 79.4%     │ 0.982     │ 29ms     │ 591ms    │
+│ ctrl+random-70%                 │ 631M   │ 38.0%     │ 19.5%     │ 0.460     │ 32ms     │ 585ms    │
+│ ctrl+magnitude-70%              │ 631M   │ 48.2%     │ 26.6%     │ 0.536     │ 32ms     │ 601ms    │
+│ ctrl+random-uniform-70%-sliced  │ 486M   │ 30.4%     │ 17.6%     │ 0.422     │ 25ms     │ 471ms    │
+│ ctrl+magnitude-70%-sliced       │ 486M   │ 48.2%     │ 26.6%     │ 0.536     │ 25ms     │ 470ms    │
+└─────────────────────────────────┴────────┴───────────┴───────────┴───────────┴──────────┴──────────┘
+
+FI: 0.0056 -> 0.0052 (-0.0004)
+wall clock: 74.7 min
+
+CKA is measured against each arm's own unpruned model.
+Everything is in /workspace/results_sal70 — scp that directory back.
