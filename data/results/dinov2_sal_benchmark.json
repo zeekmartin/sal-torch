@@ -1,0 +1,421 @@
+{
+  "model": "facebook/dinov2-large",
+  "dataset": "clane9/imagenet-100",
+  "smoke": false,
+  "seed": 42,
+  "epochs": 5,
+  "mask_ratio": 0.3,
+  "patch_mask_ratio": 0.4,
+  "batch_size": 32,
+  "gradient_checkpointing": false,
+  "vram_gb": 85.1,
+  "device": "cuda",
+  "fi_caveat": "FI is comparable only between models with the same head count. Masked heads emit zero signatures, carry no edges, and push the fixed edge budget onto survivors, which lowers FI by construction. Use slice_heads() to compare sizes.",
+  "latency_caveat": "Rows without '-sliced' mask rather than slice, so parameter count and FLOPs are unchanged and they are marginally SLOWER from hook overhead. '-sliced' rows physically remove the heads (slice_heads()); only they show real size and latency. Latency is batch-1 median.",
+  "prune_ratios": [
+    0.33,
+    0.5
+  ],
+  "slice_caveat": "'-sliced' rows remove round(ratio * heads) heads from EVERY layer. 'magnitude' selects exactly as its masked row; 'random-uniform' samples within each layer, unlike the masked 'random' row, which samples across the whole model. Each sliced model is checked against the same heads masked by hook (relative_diff_vs_masked).",
+  "slicing": {
+    "sal+random-uniform-33%-sliced": {
+      "heads_removed_per_layer": 5,
+      "heads_per_layer_after": 11,
+      "fraction_removed": 0.3125,
+      "max_abs_diff_vs_masked": 0.0,
+      "relative_diff_vs_masked": 0.0,
+      "params": 272888320,
+      "param_fraction": 0.8965717361683516,
+      "speedup_gpu": 1.0876939633383784,
+      "speedup_cpu": 1.168406238117085
+    },
+    "sal+magnitude-33%-sliced": {
+      "heads_removed_per_layer": 5,
+      "heads_per_layer_after": 11,
+      "fraction_removed": 0.3125,
+      "max_abs_diff_vs_masked": 0.0,
+      "relative_diff_vs_masked": 0.0,
+      "params": 272888320,
+      "param_fraction": 0.8965717361683516,
+      "speedup_gpu": 1.0884585156815363,
+      "speedup_cpu": 1.1245724898085763
+    },
+    "sal+random-uniform-50%-sliced": {
+      "heads_removed_per_layer": 8,
+      "heads_per_layer_after": 8,
+      "fraction_removed": 0.5,
+      "max_abs_diff_vs_masked": 0.0,
+      "relative_diff_vs_masked": 0.0,
+      "params": 254000128,
+      "param_fraction": 0.8345147778693627,
+      "speedup_gpu": 1.1076521267891848,
+      "speedup_cpu": 1.2459057545433823
+    },
+    "sal+magnitude-50%-sliced": {
+      "heads_removed_per_layer": 8,
+      "heads_per_layer_after": 8,
+      "fraction_removed": 0.5,
+      "max_abs_diff_vs_masked": 0.0,
+      "relative_diff_vs_masked": 0.0,
+      "params": 254000128,
+      "param_fraction": 0.8345147778693627,
+      "speedup_gpu": 1.1074995755604653,
+      "speedup_cpu": 1.252578595811361
+    },
+    "ctrl+random-uniform-33%-sliced": {
+      "heads_removed_per_layer": 5,
+      "heads_per_layer_after": 11,
+      "fraction_removed": 0.3125,
+      "max_abs_diff_vs_masked": 0.0,
+      "relative_diff_vs_masked": 0.0,
+      "params": 272888320,
+      "param_fraction": 0.8965717361683516,
+      "speedup_gpu": 1.0874602875026067,
+      "speedup_cpu": 1.1490626070727634
+    },
+    "ctrl+magnitude-33%-sliced": {
+      "heads_removed_per_layer": 5,
+      "heads_per_layer_after": 11,
+      "fraction_removed": 0.3125,
+      "max_abs_diff_vs_masked": 0.0,
+      "relative_diff_vs_masked": 0.0,
+      "params": 272888320,
+      "param_fraction": 0.8965717361683516,
+      "speedup_gpu": 1.0877028250617062,
+      "speedup_cpu": 1.1448491220013708
+    },
+    "ctrl+random-uniform-50%-sliced": {
+      "heads_removed_per_layer": 8,
+      "heads_per_layer_after": 8,
+      "fraction_removed": 0.5,
+      "max_abs_diff_vs_masked": 0.0,
+      "relative_diff_vs_masked": 0.0,
+      "params": 254000128,
+      "param_fraction": 0.8345147778693627,
+      "speedup_gpu": 1.107967072788557,
+      "speedup_cpu": 1.2587083590197223
+    },
+    "ctrl+magnitude-50%-sliced": {
+      "heads_removed_per_layer": 8,
+      "heads_per_layer_after": 8,
+      "fraction_removed": 0.5,
+      "max_abs_diff_vs_masked": 0.0,
+      "relative_diff_vs_masked": 0.0,
+      "params": 254000128,
+      "param_fraction": 0.8345147778693627,
+      "speedup_gpu": 1.1080516111654048,
+      "speedup_cpu": 1.2697750403031243
+    }
+  },
+  "slicing_errors": {},
+  "objective": "I-JEPA-shaped: predict the clean-image representation from a patch-masked image. No predictor network, no EMA target encoder \u2014 NOT I-JEPA pretraining, and for DINOv2 NOT its self-distillation objective: the same masked-prediction objective is applied to every --model so arms stay comparable.",
+  "comparison": "SAL-training vs no-SAL control (--control)",
+  "num_classes": 100,
+  "fi_before": 0.006527060103345118,
+  "fi_after": 0.005983138428066358,
+  "sal_losses": [
+    1.1798707423731685,
+    1.2588529074564576,
+    2.0333113064989448,
+    2.3494880087673664,
+    2.4419758301228285
+  ],
+  "masker_stats": {
+    "active": true,
+    "total_heads": 384,
+    "active_heads": 269,
+    "pruned_heads": 115,
+    "prune_events": 115,
+    "prune_fraction": 0.3
+  },
+  "control_losses": [
+    1.153632279485464,
+    0.8943847096525133,
+    0.7594846647698432,
+    0.6893368337769061,
+    0.639802738558501
+  ],
+  "results": {
+    "original": {
+      "linear_probe": 0.8992000222206116,
+      "knn_accuracy": 0.8472,
+      "cka_similarity": 1.0,
+      "params": 304368640,
+      "latency_gpu_ms": 21.88323810696602,
+      "latency_cpu_ms": 336.97996102273464,
+      "fi_score": 0.006527060103345118
+    },
+    "sal-trained": {
+      "linear_probe": 0.8988000154495239,
+      "knn_accuracy": 0.8424,
+      "cka_similarity": 0.9924222548124575,
+      "params": 304368640,
+      "latency_gpu_ms": 21.873148158192635,
+      "latency_cpu_ms": 338.742695748806,
+      "fi_score": 0.005983138428066358
+    },
+    "sal+random-33%": {
+      "linear_probe": 0.5568000078201294,
+      "knn_accuracy": 0.3208,
+      "cka_similarity": 0.20642780038448694,
+      "params": 304368640,
+      "latency_gpu_ms": 24.68804270029068,
+      "latency_cpu_ms": 332.51785300672054,
+      "fi_score": 0.0
+    },
+    "sal+magnitude-33%": {
+      "linear_probe": 0.3628000020980835,
+      "knn_accuracy": 0.214,
+      "cka_similarity": 0.0778181588469611,
+      "params": 304368640,
+      "latency_gpu_ms": 24.718303233385086,
+      "latency_cpu_ms": 330.3174488246441,
+      "fi_score": 0.00013598041881968996
+    },
+    "sal+random-uniform-33%-sliced": {
+      "linear_probe": 0.8396000266075134,
+      "knn_accuracy": 0.7544,
+      "cka_similarity": 0.8829679396418615,
+      "params": 272888320,
+      "latency_gpu_ms": 20.11892944574356,
+      "latency_cpu_ms": 288.40992972254753,
+      "fi_score": 0.025057603686635944
+    },
+    "sal+magnitude-33%-sliced": {
+      "linear_probe": 0.3628000020980835,
+      "knn_accuracy": 0.214,
+      "cka_similarity": 0.0778181588469611,
+      "params": 272888320,
+      "latency_gpu_ms": 20.104797556996346,
+      "latency_cpu_ms": 299.65161345899105,
+      "fi_score": 0.03542626728110599
+    },
+    "sal+random-50%": {
+      "linear_probe": 0.31520000100135803,
+      "knn_accuracy": 0.1368,
+      "cka_similarity": 0.1697412115255556,
+      "params": 304368640,
+      "latency_gpu_ms": 24.69482645392418,
+      "latency_cpu_ms": 334.07813496887684,
+      "fi_score": 0.0
+    },
+    "sal+magnitude-50%": {
+      "linear_probe": 0.3156000077724457,
+      "knn_accuracy": 0.2008,
+      "cka_similarity": 0.30730166588639224,
+      "params": 304368640,
+      "latency_gpu_ms": 24.694837629795074,
+      "latency_cpu_ms": 330.6178580969572,
+      "fi_score": 0.0
+    },
+    "sal+random-uniform-50%-sliced": {
+      "linear_probe": 0.38920000195503235,
+      "knn_accuracy": 0.182,
+      "cka_similarity": 0.20902165427926409,
+      "params": 254000128,
+      "latency_gpu_ms": 19.756417721509933,
+      "latency_cpu_ms": 270.4698648303747,
+      "fi_score": 0.061068702290076333
+    },
+    "sal+magnitude-50%-sliced": {
+      "linear_probe": 0.3156000077724457,
+      "knn_accuracy": 0.2008,
+      "cka_similarity": 0.30730166588639224,
+      "params": 254000128,
+      "latency_gpu_ms": 19.75913904607296,
+      "latency_cpu_ms": 269.02899518609047,
+      "fi_score": 0.0697928026172301
+    },
+    "control-trained": {
+      "linear_probe": 0.8992000222206116,
+      "knn_accuracy": 0.8412,
+      "cka_similarity": 0.9940623250178137,
+      "params": 304368640,
+      "latency_gpu_ms": 21.87386155128479,
+      "latency_cpu_ms": 333.25169794261456,
+      "fi_score": 0.007886864291542018
+    },
+    "ctrl+random-33%": {
+      "linear_probe": 0.459199994802475,
+      "knn_accuracy": 0.218,
+      "cka_similarity": 0.12690287451294782,
+      "params": 304368640,
+      "latency_gpu_ms": 24.6882364153862,
+      "latency_cpu_ms": 333.15524458885193,
+      "fi_score": 0.0002719608376393799
+    },
+    "ctrl+magnitude-33%": {
+      "linear_probe": 0.36039999127388,
+      "knn_accuracy": 0.2308,
+      "cka_similarity": 0.1344597873975138,
+      "params": 304368640,
+      "latency_gpu_ms": 24.668013677001,
+      "latency_cpu_ms": 332.61991292238235,
+      "fi_score": 0.0
+    },
+    "ctrl+random-uniform-33%-sliced": {
+      "linear_probe": 0.8095999956130981,
+      "knn_accuracy": 0.6848,
+      "cka_similarity": 0.8309972485014768,
+      "params": 272888320,
+      "latency_gpu_ms": 20.123252645134926,
+      "latency_cpu_ms": 293.26510056853294,
+      "fi_score": 0.026785714285714284
+    },
+    "ctrl+magnitude-33%-sliced": {
+      "linear_probe": 0.36039999127388,
+      "knn_accuracy": 0.2308,
+      "cka_similarity": 0.1344597873975138,
+      "params": 272888320,
+      "latency_gpu_ms": 20.11876553297043,
+      "latency_cpu_ms": 294.3444289267063,
+      "fi_score": 0.02793778801843318
+    },
+    "ctrl+random-50%": {
+      "linear_probe": 0.31839999556541443,
+      "knn_accuracy": 0.1548,
+      "cka_similarity": 0.17774955510048998,
+      "params": 304368640,
+      "latency_gpu_ms": 24.655897170305252,
+      "latency_cpu_ms": 329.4036742299795,
+      "fi_score": 0.0
+    },
+    "ctrl+magnitude-50%": {
+      "linear_probe": 0.30799999833106995,
+      "knn_accuracy": 0.1904,
+      "cka_similarity": 0.3040259389853423,
+      "params": 304368640,
+      "latency_gpu_ms": 24.69865418970585,
+      "latency_cpu_ms": 321.71180844306946,
+      "fi_score": 0.0
+    },
+    "ctrl+random-uniform-50%-sliced": {
+      "linear_probe": 0.3515999913215637,
+      "knn_accuracy": 0.172,
+      "cka_similarity": 0.17925772754103533,
+      "params": 254000128,
+      "latency_gpu_ms": 19.750801846385002,
+      "latency_cpu_ms": 267.718855291605,
+      "fi_score": 0.06706652126499454
+    },
+    "ctrl+magnitude-50%-sliced": {
+      "linear_probe": 0.30799999833106995,
+      "knn_accuracy": 0.1904,
+      "cka_similarity": 0.3040259389853423,
+      "params": 254000128,
+      "latency_gpu_ms": 19.749294966459274,
+      "latency_cpu_ms": 265.38556069135666,
+      "fi_score": 0.07251908396946564
+    }
+  },
+  "figures": [
+    "feature_maps_comparison.png",
+    "compression_table.png",
+    "fi_before_after.png",
+    "latency_comparison.png"
+  ],
+  "wall_clock_s": 4187.7,
+  "sal_vs_control": {
+    "random-33%/linear_probe": {
+      "sal": 0.5568000078201294,
+      "ctrl": 0.459199994802475,
+      "delta": 0.09760001301765442
+    },
+    "random-33%/knn_accuracy": {
+      "sal": 0.3208,
+      "ctrl": 0.218,
+      "delta": 0.10279999999999997
+    },
+    "random-33%/cka_similarity": {
+      "sal": 0.20642780038448694,
+      "ctrl": 0.12690287451294782,
+      "delta": 0.07952492587153911
+    },
+    "magnitude-33%/linear_probe": {
+      "sal": 0.3628000020980835,
+      "ctrl": 0.36039999127388,
+      "delta": 0.002400010824203491
+    },
+    "magnitude-33%/knn_accuracy": {
+      "sal": 0.214,
+      "ctrl": 0.2308,
+      "delta": -0.01680000000000001
+    },
+    "magnitude-33%/cka_similarity": {
+      "sal": 0.0778181588469611,
+      "ctrl": 0.1344597873975138,
+      "delta": -0.0566416285505527
+    },
+    "random-50%/linear_probe": {
+      "sal": 0.31520000100135803,
+      "ctrl": 0.31839999556541443,
+      "delta": -0.0031999945640563965
+    },
+    "random-50%/knn_accuracy": {
+      "sal": 0.1368,
+      "ctrl": 0.1548,
+      "delta": -0.017999999999999988
+    },
+    "random-50%/cka_similarity": {
+      "sal": 0.1697412115255556,
+      "ctrl": 0.17774955510048998,
+      "delta": -0.008008343574934379
+    },
+    "magnitude-50%/linear_probe": {
+      "sal": 0.3156000077724457,
+      "ctrl": 0.30799999833106995,
+      "delta": 0.007600009441375732
+    },
+    "magnitude-50%/knn_accuracy": {
+      "sal": 0.2008,
+      "ctrl": 0.1904,
+      "delta": 0.010399999999999993
+    },
+    "magnitude-50%/cka_similarity": {
+      "sal": 0.30730166588639224,
+      "ctrl": 0.3040259389853423,
+      "delta": 0.0032757269010499357
+    },
+    "random-uniform-33%-sliced/linear_probe": {
+      "sal": 0.8396000266075134,
+      "ctrl": 0.8095999956130981,
+      "delta": 0.030000030994415283
+    },
+    "random-uniform-33%-sliced/knn_accuracy": {
+      "sal": 0.7544,
+      "ctrl": 0.6848,
+      "delta": 0.0696
+    },
+    "random-uniform-33%-sliced/cka_similarity": {
+      "sal": 0.8829679396418615,
+      "ctrl": 0.8309972485014768,
+      "delta": 0.05197069114038466
+    },
+    "random-uniform-50%-sliced/linear_probe": {
+      "sal": 0.38920000195503235,
+      "ctrl": 0.3515999913215637,
+      "delta": 0.03760001063346863
+    },
+    "random-uniform-50%-sliced/knn_accuracy": {
+      "sal": 0.182,
+      "ctrl": 0.172,
+      "delta": 0.010000000000000009
+    },
+    "random-uniform-50%-sliced/cka_similarity": {
+      "sal": 0.20902165427926409,
+      "ctrl": 0.17925772754103533,
+      "delta": 0.029763926738228752
+    }
+  },
+  "sal_wins": "13/18 (magnitude-sliced rows omitted: identical to masked magnitude rows)",
+  "environment_note": "A100-SXM4-80GB, torch 2.4.1+cu124, transformers 4.51.3, OMP_NUM_THREADS=12. facebook/dinov2-large (24 layers x 16 heads), seed 42, 5 epochs, SAL mask_ratio 0.3 (115/384 heads). Single seed.",
+  "findings": [
+    "DINOv2 is far more fragile to head removal than I-JEPA: 33% of heads already costs 6-54pp of linear probe depending on selection.",
+    "Selection dominates: per-layer uniform random keeps 0.84 probe at 33% (sliced), global random 0.56, magnitude 0.36 (CKA 0.08). Magnitude selection is a poor baseline on DINOv2.",
+    "SAL helps where the model survives: random-33% masked +9.8pp probe / +10.3pp kNN; random-uniform-33% sliced +3.0pp probe / +7.0pp kNN / +0.05 CKA. At 50% both arms collapse (probe 0.31-0.39) and gaps are mostly noise.",
+    "SAL training loss rises (1.18 -> 2.44) while control falls (1.15 -> 0.64): with 30% of heads masked, DINOv2 does not recover the unmasked target within 5 epochs at lr 1e-5. Unpruned SAL-trained quality is unaffected (probe 0.8988 vs 0.8992).",
+    "Head-set overlap between SAL training masks and post-hoc random selection is at chance level (simulated with the same seeds), so SAL's random-pruning gains are not from re-removing heads it trained without.",
+    "Sliced: 304M -> 273M (33%) / 254M (50%); ~1.09-1.11x GPU, ~1.15-1.27x CPU; outputs identical to masked."
+  ],
+  "objective_note": "Same masked-prediction objective as I-JEPA runs; NOT DINOv2's self-distillation objective."
+}

@@ -1,0 +1,124 @@
+
+=== Environment =========================================================
+  GPU:   NVIDIA A100-SXM4-80GB
+  VRAM:  85.1 GB
+  batch: 32
+  gradient checkpointing: off  (auto: on below 48GB)
+  output: /workspace/results_dinov2
+  mode:   full | epochs=5 | mask_ratio=0.3
+
+=== Assets ==============================================================
+  model:   facebook/dinov2-large
+  dataset: clane9/imagenet-100
+  (cached under ~/.cache/huggingface — re-runs do not re-download)
+  loaded:  304M params, 24 layers x 16 heads, patch 14
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+  dataset: 126689 train / 5000 val available
+
+
+
+  classes: 100
+
+=== Pre-SAL structural scan =============================================
+  FI=0.0065 | 1 immune, 4 buffer, 19 critical
+  absorption: 1 elastic, 4 saturated, 19 hub  |  mean routing=0.659, mean MI=0.040
+  saved /workspace/results_dinov2/pre_sal_scan.json
+
+=== SAL training (5 epochs, mask_ratio=0.3) =============================
+  output space: 155186.0GB reported free, ~6.2GB needed
+  space probe: OK
+
+    epoch 1/5 | loss 1.179871 | masker: {'active': True, 'total_heads': 384, 'active_heads': 368, 'pruned_heads': 16, 'prune_events': 16, 'prune_fraction': 0.3}
+    checkpoint -> /workspace/results_dinov2/checkpoint.pt (epoch 1, 1.2GB)
+
+    epoch 2/5 | loss 1.258853 | masker: {'active': True, 'total_heads': 384, 'active_heads': 335, 'pruned_heads': 49, 'prune_events': 49, 'prune_fraction': 0.3}
+    checkpoint -> /workspace/results_dinov2/checkpoint.pt (epoch 2, 1.2GB)
+
+    epoch 3/5 | loss 2.033311 | masker: {'active': True, 'total_heads': 384, 'active_heads': 302, 'pruned_heads': 82, 'prune_events': 82, 'prune_fraction': 0.3}
+    checkpoint -> /workspace/results_dinov2/checkpoint.pt (epoch 3, 1.2GB)
+
+    epoch 4/5 | loss 2.349488 | masker: {'active': True, 'total_heads': 384, 'active_heads': 269, 'pruned_heads': 115, 'prune_events': 115, 'prune_fraction': 0.3}
+    checkpoint -> /workspace/results_dinov2/checkpoint.pt (epoch 4, 1.2GB)
+
+    epoch 5/5 | loss 2.441976 | masker: {'active': True, 'total_heads': 384, 'active_heads': 269, 'pruned_heads': 115, 'prune_events': 115, 'prune_fraction': 0.3}
+    checkpoint -> /workspace/results_dinov2/checkpoint.pt (epoch 5, 1.2GB)
+
+  losses: [1.179871, 1.258853, 2.033311, 2.349488, 2.441976]
+  masker: {'active': True, 'total_heads': 384, 'active_heads': 269, 'pruned_heads': 115, 'prune_events': 115, 'prune_fraction': 0.3}
+
+=== Post-SAL structural scan ============================================
+  FI 0.0065 -> 0.0060 (-0.0005)
+  FI=0.0060 | 1 immune, 4 buffer, 19 critical
+  saved /workspace/results_dinov2/post_sal_scan.json
+
+=== Control arm (5 epochs, no head masking) =============================
+
+    epoch 1 mean loss 1.153632
+
+    epoch 2 mean loss 0.894385
+
+    epoch 3 mean loss 0.759485
+
+    epoch 4 mean loss 0.689337
+
+    epoch 5 mean loss 0.639803
+
+=== Compression benchmark ===============================================
+  scoring original ...
+  scoring sal-trained ...
+  scoring sal+random-33% ...
+  scoring sal+magnitude-33% ...
+  scoring sal+random-uniform-33%-sliced ...
+  scoring sal+magnitude-33%-sliced ...
+  scoring sal+random-50% ...
+  scoring sal+magnitude-50% ...
+  scoring sal+random-uniform-50%-sliced ...
+  scoring sal+magnitude-50%-sliced ...
+  scoring control-trained ...
+  scoring ctrl+random-33% ...
+  scoring ctrl+magnitude-33% ...
+  scoring ctrl+random-uniform-33%-sliced ...
+  scoring ctrl+magnitude-33%-sliced ...
+  scoring ctrl+random-50% ...
+  scoring ctrl+magnitude-50% ...
+  scoring ctrl+random-uniform-50%-sliced ...
+  scoring ctrl+magnitude-50%-sliced ...
+
+=== Saving ==============================================================
+  model -> /workspace/results_dinov2/model (config.json + model.safetensors)
+    feature_maps_comparison.png
+    compression_table.png
+    fi_before_after.png
+    latency_comparison.png
+  metrics -> /workspace/results_dinov2/jepa_sal_benchmark.json
+
+=== Summary =============================================================
+┌─────────────────────────────────┬────────┬───────────┬───────────┬───────────┬──────────┬──────────┐
+│ Variant                         │ Params │ Lin.Probe │ kNN       │ CKA       │ GPU ms   │ CPU ms   │
+├─────────────────────────────────┼────────┼───────────┼───────────┼───────────┼──────────┼──────────┤
+│ original                        │ 304M   │ 89.9%     │ 84.7%     │ 1.000     │ 22ms     │ 337ms    │
+│ sal-trained                     │ 304M   │ 89.9%     │ 84.2%     │ 0.992     │ 22ms     │ 339ms    │
+│ sal+random-33%                  │ 304M   │ 55.7%     │ 32.1%     │ 0.206     │ 25ms     │ 333ms    │
+│ sal+magnitude-33%               │ 304M   │ 36.3%     │ 21.4%     │ 0.078     │ 25ms     │ 330ms    │
+│ sal+random-uniform-33%-sliced   │ 273M   │ 84.0%     │ 75.4%     │ 0.883     │ 20ms     │ 288ms    │
+│ sal+magnitude-33%-sliced        │ 273M   │ 36.3%     │ 21.4%     │ 0.078     │ 20ms     │ 300ms    │
+│ sal+random-50%                  │ 304M   │ 31.5%     │ 13.7%     │ 0.170     │ 25ms     │ 334ms    │
+│ sal+magnitude-50%               │ 304M   │ 31.6%     │ 20.1%     │ 0.307     │ 25ms     │ 331ms    │
+│ sal+random-uniform-50%-sliced   │ 254M   │ 38.9%     │ 18.2%     │ 0.209     │ 20ms     │ 270ms    │
+│ sal+magnitude-50%-sliced        │ 254M   │ 31.6%     │ 20.1%     │ 0.307     │ 20ms     │ 269ms    │
+│ control-trained                 │ 304M   │ 89.9%     │ 84.1%     │ 0.994     │ 22ms     │ 333ms    │
+│ ctrl+random-33%                 │ 304M   │ 45.9%     │ 21.8%     │ 0.127     │ 25ms     │ 333ms    │
+│ ctrl+magnitude-33%              │ 304M   │ 36.0%     │ 23.1%     │ 0.134     │ 25ms     │ 333ms    │
+│ ctrl+random-uniform-33%-sliced  │ 273M   │ 81.0%     │ 68.5%     │ 0.831     │ 20ms     │ 293ms    │
+│ ctrl+magnitude-33%-sliced       │ 273M   │ 36.0%     │ 23.1%     │ 0.134     │ 20ms     │ 294ms    │
+│ ctrl+random-50%                 │ 304M   │ 31.8%     │ 15.5%     │ 0.178     │ 25ms     │ 329ms    │
+│ ctrl+magnitude-50%              │ 304M   │ 30.8%     │ 19.0%     │ 0.304     │ 25ms     │ 322ms    │
+│ ctrl+random-uniform-50%-sliced  │ 254M   │ 35.2%     │ 17.2%     │ 0.179     │ 20ms     │ 268ms    │
+│ ctrl+magnitude-50%-sliced       │ 254M   │ 30.8%     │ 19.0%     │ 0.304     │ 20ms     │ 265ms    │
+└─────────────────────────────────┴────────┴───────────┴───────────┴───────────┴──────────┴──────────┘
+
+FI: 0.0065 -> 0.0060 (-0.0005)
+wall clock: 69.8 min
+
+CKA is measured against each arm's own unpruned model.
+Everything is in /workspace/results_dinov2 — scp that directory back.
