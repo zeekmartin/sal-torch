@@ -30,7 +30,11 @@ fi
 echo "--- installing sal-torch and prototype dependencies"
 python -m pip install --quiet --upgrade pip
 python -m pip install --quiet -e ".[dev,reports]"
-python -m pip install --quiet transformers datasets torchvision safetensors accelerate
+# transformers 5.x needs torch >= 2.5 and silently disables PyTorch otherwise
+# (RunPod's image ships 2.4.1). Pin the last 4.x release on older torch.
+TRANSFORMERS_SPEC=$(python -c "import torch; v = tuple(int(x) for x in torch.__version__.split('+')[0].split('.')[:2]); print('transformers' if v >= (2, 5) else 'transformers==4.51.3')")
+echo "    torch $(python -c 'import torch; print(torch.__version__)') -> $TRANSFORMERS_SPEC"
+python -m pip install --quiet "$TRANSFORMERS_SPEC" datasets torchvision safetensors accelerate
 # Optional: real NF4 cross-check of the INT4 cells. Failure is not fatal.
 python -m pip install --quiet "bitsandbytes>=0.43" \
     || echo "    bitsandbytes unavailable — INT4 cells will be simulated only"
