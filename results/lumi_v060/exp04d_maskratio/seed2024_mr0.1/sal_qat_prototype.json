@@ -1,0 +1,580 @@
+{
+  "model": "google/vit-base-patch16-224",
+  "dataset": "clane9/imagenet-100",
+  "smoke": false,
+  "seed": 2024,
+  "epochs": 5,
+  "batch_size": 64,
+  "n_train": 20000,
+  "n_val": 5000,
+  "num_classes": 100,
+  "mask_ratio": 0.1,
+  "qat_bits": 4,
+  "prune_seeds": [
+    2024,
+    2025,
+    2026,
+    2027,
+    2028,
+    2029,
+    2030,
+    2031,
+    2032,
+    2033,
+    2034,
+    2035,
+    2036,
+    2037,
+    2038,
+    2039,
+    2040,
+    2041,
+    2042,
+    2043
+  ],
+  "device": "cuda",
+  "vram_gb": 68.7,
+  "lr": {
+    "backbone": 5e-05,
+    "head": 0.001,
+    "weight_decay": 0.05,
+    "warmup_fraction": 0.05,
+    "schedule": "linear warmup + cosine"
+  },
+  "caveats": {
+    "quantization": "int8/int4 accuracy = per-output-channel symmetric weight round-trip on every nn.Linear except the classifier; the same grid QAT trains against. *_nf4 = real bitsandbytes NF4.",
+    "size": "computed: fp16 non-quantized params, bits/8 bytes per quantized weight + one fp16 scale per output channel",
+    "latency": "measured once per setting (architecture-dependent only). int8 CPU latency is torch.ao dynamic INT8; no CPU INT4 kernel exists in stock PyTorch, so int4 latency is null.",
+    "pruning": "uniform random heads per layer, sliced with slice_heads(); mean over prune_seeds; identical selections for every variant",
+    "fi": "fi_score on the dense trained model only",
+    "seed": "one training seed; treat sub-1pp gaps as not shown"
+  },
+  "training": {
+    "baseline": {
+      "losses": [
+        0.7717582288320167,
+        0.0664500980325543,
+        0.013181132313902505,
+        0.0026207649018451834,
+        0.0013293503412081244
+      ],
+      "masker_stats": null,
+      "qat_backend": null,
+      "train_seconds": 290.3,
+      "steps": 1565
+    },
+    "sal": {
+      "losses": [
+        0.7730248481118546,
+        0.07191275980638953,
+        0.018644980053021648,
+        0.005493054160857187,
+        0.0021225750680080057
+      ],
+      "masker_stats": {
+        "active": true,
+        "total_heads": 144,
+        "active_heads": 130,
+        "pruned_heads": 14,
+        "prune_events": 14,
+        "prune_fraction": 0.1
+      },
+      "qat_backend": null,
+      "train_seconds": 252.0,
+      "steps": 1565
+    },
+    "qat": {
+      "losses": [
+        0.7843957848775501,
+        0.07373907035008406,
+        0.01681128114974424,
+        0.0030805182647140037,
+        0.0013739139587542535
+      ],
+      "masker_stats": null,
+      "qat_backend": "torch.ao",
+      "train_seconds": 314.3,
+      "steps": 1565
+    },
+    "sal_qat": {
+      "losses": [
+        0.787673229637285,
+        0.07710810741052603,
+        0.019983243955947912,
+        0.006379859231876585,
+        0.002675639219323959
+      ],
+      "masker_stats": {
+        "active": true,
+        "total_heads": 144,
+        "active_heads": 130,
+        "pruned_heads": 14,
+        "prune_events": 14,
+        "prune_fraction": 0.1
+      },
+      "qat_backend": "torch.ao",
+      "train_seconds": 317.3,
+      "steps": 1565
+    }
+  },
+  "results": {
+    "baseline": {
+      "fp16": {
+        "accuracy": 0.934,
+        "std": null,
+        "per_seed": [
+          0.934
+        ],
+        "fi_score": 0.16601941747572815
+      },
+      "prune33": {
+        "accuracy": 0.6727400000000002,
+        "std": 0.13243075322597844,
+        "per_seed": [
+          0.5274,
+          0.7704,
+          0.6186,
+          0.786,
+          0.7658,
+          0.7888,
+          0.7398,
+          0.7126,
+          0.3566,
+          0.814,
+          0.8044,
+          0.781,
+          0.672,
+          0.7776,
+          0.4806,
+          0.5736,
+          0.7276,
+          0.7566,
+          0.5104,
+          0.491
+        ],
+        "heads_removed_per_layer": 4
+      },
+      "prune50": {
+        "accuracy": 0.3491699999999999,
+        "std": 0.10137440061475086,
+        "per_seed": [
+          0.2364,
+          0.3348,
+          0.2824,
+          0.556,
+          0.3326,
+          0.4324,
+          0.5,
+          0.5202,
+          0.3344,
+          0.4208,
+          0.2644,
+          0.4076,
+          0.2832,
+          0.3624,
+          0.1354,
+          0.2812,
+          0.4224,
+          0.2814,
+          0.2898,
+          0.3056
+        ],
+        "heads_removed_per_layer": 6
+      },
+      "int8": {
+        "accuracy": 0.9336,
+        "std": null,
+        "per_seed": [
+          0.9336
+        ]
+      },
+      "int4": {
+        "accuracy": 0.9238,
+        "std": null,
+        "per_seed": [
+          0.9238
+        ]
+      },
+      "prune50_int4": {
+        "accuracy": 0.30557,
+        "std": 0.09494822325878458,
+        "per_seed": [
+          0.2034,
+          0.301,
+          0.2568,
+          0.513,
+          0.2906,
+          0.369,
+          0.4304,
+          0.4564,
+          0.2942,
+          0.3822,
+          0.2408,
+          0.3688,
+          0.214,
+          0.3004,
+          0.0992,
+          0.244,
+          0.3774,
+          0.239,
+          0.2602,
+          0.2706
+        ]
+      }
+    },
+    "sal": {
+      "fp16": {
+        "accuracy": 0.9338,
+        "std": null,
+        "per_seed": [
+          0.9338
+        ],
+        "fi_score": 0.11844660194174757
+      },
+      "prune33": {
+        "accuracy": 0.66067,
+        "std": 0.15555700273533174,
+        "per_seed": [
+          0.4366,
+          0.7886,
+          0.5948,
+          0.804,
+          0.7646,
+          0.805,
+          0.73,
+          0.6704,
+          0.3116,
+          0.8242,
+          0.8108,
+          0.7978,
+          0.6772,
+          0.7834,
+          0.4454,
+          0.5262,
+          0.764,
+          0.732,
+          0.487,
+          0.4598
+        ],
+        "heads_removed_per_layer": 4
+      },
+      "prune50": {
+        "accuracy": 0.35013,
+        "std": 0.12692609306206507,
+        "per_seed": [
+          0.1606,
+          0.3462,
+          0.2324,
+          0.5914,
+          0.3658,
+          0.4862,
+          0.5256,
+          0.484,
+          0.3666,
+          0.4382,
+          0.2832,
+          0.4372,
+          0.2298,
+          0.3908,
+          0.1072,
+          0.2682,
+          0.4824,
+          0.2012,
+          0.2852,
+          0.3204
+        ],
+        "heads_removed_per_layer": 6
+      },
+      "int8": {
+        "accuracy": 0.9336,
+        "std": null,
+        "per_seed": [
+          0.9336
+        ]
+      },
+      "int4": {
+        "accuracy": 0.9308,
+        "std": null,
+        "per_seed": [
+          0.9308
+        ]
+      },
+      "prune50_int4": {
+        "accuracy": 0.30815999999999993,
+        "std": 0.12024906818765792,
+        "per_seed": [
+          0.1396,
+          0.3074,
+          0.215,
+          0.5524,
+          0.3146,
+          0.4192,
+          0.46,
+          0.4416,
+          0.3194,
+          0.4088,
+          0.2578,
+          0.4026,
+          0.17,
+          0.3296,
+          0.0808,
+          0.2268,
+          0.427,
+          0.1612,
+          0.256,
+          0.2734
+        ]
+      }
+    },
+    "qat": {
+      "fp16": {
+        "accuracy": 0.9382,
+        "std": null,
+        "per_seed": [
+          0.9382
+        ],
+        "fi_score": 0.12135922330097088
+      },
+      "prune33": {
+        "accuracy": 0.67413,
+        "std": 0.1337987634472008,
+        "per_seed": [
+          0.4998,
+          0.7696,
+          0.6032,
+          0.7924,
+          0.7706,
+          0.7916,
+          0.7468,
+          0.6846,
+          0.3898,
+          0.8166,
+          0.8002,
+          0.7876,
+          0.675,
+          0.7888,
+          0.4588,
+          0.5918,
+          0.75,
+          0.7654,
+          0.5066,
+          0.4934
+        ],
+        "heads_removed_per_layer": 4
+      },
+      "prune50": {
+        "accuracy": 0.35428000000000004,
+        "std": 0.10501709194221671,
+        "per_seed": [
+          0.204,
+          0.3452,
+          0.2348,
+          0.5622,
+          0.3574,
+          0.4552,
+          0.511,
+          0.497,
+          0.3176,
+          0.4194,
+          0.2882,
+          0.4256,
+          0.3168,
+          0.3882,
+          0.1468,
+          0.297,
+          0.442,
+          0.285,
+          0.2638,
+          0.3284
+        ],
+        "heads_removed_per_layer": 6
+      },
+      "int8": {
+        "accuracy": 0.9382,
+        "std": null,
+        "per_seed": [
+          0.9382
+        ]
+      },
+      "int4": {
+        "accuracy": 0.9342,
+        "std": null,
+        "per_seed": [
+          0.9342
+        ]
+      },
+      "prune50_int4": {
+        "accuracy": 0.32347,
+        "std": 0.0976607039704302,
+        "per_seed": [
+          0.1966,
+          0.3102,
+          0.2478,
+          0.5284,
+          0.3082,
+          0.4012,
+          0.4538,
+          0.4808,
+          0.2932,
+          0.3982,
+          0.2662,
+          0.387,
+          0.2592,
+          0.3274,
+          0.1312,
+          0.2692,
+          0.4158,
+          0.2488,
+          0.244,
+          0.3022
+        ]
+      }
+    },
+    "sal_qat": {
+      "fp16": {
+        "accuracy": 0.935,
+        "std": null,
+        "per_seed": [
+          0.935
+        ],
+        "fi_score": 0.13883495145631067
+      },
+      "prune33": {
+        "accuracy": 0.6687000000000001,
+        "std": 0.14023190079293657,
+        "per_seed": [
+          0.459,
+          0.7798,
+          0.6062,
+          0.7988,
+          0.7552,
+          0.8036,
+          0.7512,
+          0.6638,
+          0.3888,
+          0.8192,
+          0.7932,
+          0.7906,
+          0.6804,
+          0.7904,
+          0.4614,
+          0.5526,
+          0.7504,
+          0.7562,
+          0.4758,
+          0.4974
+        ],
+        "heads_removed_per_layer": 4
+      },
+      "prune50": {
+        "accuracy": 0.36383000000000004,
+        "std": 0.11962637292838063,
+        "per_seed": [
+          0.2006,
+          0.363,
+          0.2504,
+          0.6092,
+          0.368,
+          0.4806,
+          0.5338,
+          0.5076,
+          0.3626,
+          0.4422,
+          0.2846,
+          0.4598,
+          0.2648,
+          0.3976,
+          0.1322,
+          0.2666,
+          0.473,
+          0.2844,
+          0.2798,
+          0.3158
+        ],
+        "heads_removed_per_layer": 6
+      },
+      "int8": {
+        "accuracy": 0.9354,
+        "std": null,
+        "per_seed": [
+          0.9354
+        ]
+      },
+      "int4": {
+        "accuracy": 0.93,
+        "std": null,
+        "per_seed": [
+          0.93
+        ]
+      },
+      "prune50_int4": {
+        "accuracy": 0.33696999999999994,
+        "std": 0.11290396405795503,
+        "per_seed": [
+          0.1948,
+          0.337,
+          0.2642,
+          0.577,
+          0.3414,
+          0.4334,
+          0.4816,
+          0.486,
+          0.3324,
+          0.4168,
+          0.2734,
+          0.428,
+          0.2212,
+          0.3588,
+          0.111,
+          0.2502,
+          0.4398,
+          0.2398,
+          0.2562,
+          0.2964
+        ]
+      }
+    }
+  },
+  "budget": {
+    "fp16": {
+      "size_mb": 171.751112,
+      "latency_cpu_ms": 89.27864255383611,
+      "latency_gpu_ms": 8.156712516210973
+    },
+    "prune33": {
+      "size_mb": 152.858312,
+      "latency_cpu_ms": 79.65954451356083,
+      "latency_gpu_ms": 8.185652433894575
+    },
+    "prune50": {
+      "size_mb": 143.411912,
+      "latency_cpu_ms": 74.7916050022468,
+      "latency_gpu_ms": 8.161436533555388
+    },
+    "int8": {
+      "size_mb": 86.982344,
+      "latency_cpu_ms": 52.70232446491718,
+      "latency_gpu_ms": null
+    },
+    "int4": {
+      "size_mb": 44.515016,
+      "latency_cpu_ms": null,
+      "latency_gpu_ms": null
+    },
+    "prune50_int4": {
+      "size_mb": 37.381832,
+      "latency_cpu_ms": null,
+      "latency_gpu_ms": null
+    },
+    "prune50_int8_cpu_reference": {
+      "size_mb": 72.771272,
+      "latency_cpu_ms": 44.115487951785326,
+      "latency_gpu_ms": null
+    }
+  },
+  "figures": [
+    "accuracy_by_compression.png",
+    "size_vs_accuracy.png"
+  ],
+  "wall_clock_s": 2107.6
+}
