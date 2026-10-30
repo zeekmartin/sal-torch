@@ -81,6 +81,13 @@ def main(argv=None):
                 if any(acc(j, a, c) is not None for j in seeds.values()) else None))
     print()
 
+    # The published NVIDIA figures averaged 3 random head selections. Comparing a
+    # run that averaged a different number against them would conflate the
+    # platform difference with the sampling difference, so only do it at 3.
+    ps = first.get("prune_seeds")
+    n_prune_seeds = len(ps) if isinstance(ps, list) else ps
+    comparable = n_prune_seeds == 3
+
     print("Key cell - P50+I4, SAL+QAT vs Baseline:")
     deltas = []
     for seed in sorted(seeds):
@@ -93,8 +100,10 @@ def main(argv=None):
         deltas.append(d)
         ref = NVIDIA_KEY_DELTA.get(seed)
         extra = ""
-        if ref is not None:
+        if ref is not None and comparable:
             extra = f"   | NVIDIA v0.5.0: {ref:+.2f}pp   (ROCm - NVIDIA: {d - ref:+.2f}pp)"
+        elif ref is not None:
+            extra = f"   | NVIDIA v0.5.0: {ref:+.2f}pp   (not comparable, see note)"
         print(f"  seed {seed:<5d} baseline {b:5.1f}%  sal_qat {s:5.1f}%  "
               f"delta {d:+6.2f}pp{extra}")
 
@@ -107,9 +116,14 @@ def main(argv=None):
         repro = [(s, acc(seeds[s], 'sal_qat', KEY) - acc(seeds[s], 'baseline', KEY)
                   - NVIDIA_KEY_DELTA[s])
                  for s in sorted(seeds) if s in NVIDIA_KEY_DELTA]
-        if repro:
+        if repro and comparable:
             print(f"\n  ROCm vs NVIDIA on the {len(repro)} shared seeds: "
                   f"mean difference {statistics.fmean(d for _, d in repro):+.2f}pp")
+        elif repro:
+            print(f"\n  NOT comparing against NVIDIA: the published v0.5.0 deltas are "
+                  f"themselves 3-head-selection estimates, and this run averaged "
+                  f"{n_prune_seeds}. Differencing the two would mix a platform effect "
+                  f"with a sampling effect. The platform check is the 3-vs-3 run.")
 
     # Also report SAL+QAT against SAL alone — the increment QAT actually adds.
     print("\nIncrement from adding QAT to SAL (P50+I4):")
