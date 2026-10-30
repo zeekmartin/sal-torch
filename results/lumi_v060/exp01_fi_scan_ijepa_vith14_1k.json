@@ -1,0 +1,90 @@
+{
+  "experiment": "exp01_fi_scan",
+  "model": "facebook/ijepa_vith14_1k",
+  "params_m": 630.8,
+  "probe": {
+    "dataset": "uoft-cs/cifar10",
+    "split": "test",
+    "n": 256,
+    "batch_size": 8,
+    "attn_implementation": "eager"
+  },
+  "fi_score": 0.003974927381134383,
+  "num_layers": 32,
+  "num_heads_per_layer": 16,
+  "num_immune": 1,
+  "num_buffer": 4,
+  "num_critical": 27,
+  "fi_summary": "FI=0.0040 | 1 immune, 4 buffer, 27 critical",
+  "layer_classification": {
+    "0": "CRITICAL",
+    "1": "CRITICAL",
+    "2": "CRITICAL",
+    "3": "CRITICAL",
+    "4": "CRITICAL",
+    "5": "CRITICAL",
+    "6": "CRITICAL",
+    "7": "CRITICAL",
+    "8": "CRITICAL",
+    "9": "CRITICAL",
+    "10": "CRITICAL",
+    "11": "CRITICAL",
+    "12": "CRITICAL",
+    "13": "CRITICAL",
+    "14": "CRITICAL",
+    "15": "CRITICAL",
+    "16": "CRITICAL",
+    "17": "IMMUNE",
+    "18": "CRITICAL",
+    "19": "BUFFER",
+    "20": "BUFFER",
+    "21": "BUFFER",
+    "22": "BUFFER",
+    "23": "CRITICAL",
+    "24": "CRITICAL",
+    "25": "CRITICAL",
+    "26": "CRITICAL",
+    "27": "CRITICAL",
+    "28": "CRITICAL",
+    "29": "CRITICAL",
+    "30": "CRITICAL",
+    "31": "CRITICAL"
+  },
+  "timing_s": {
+    "load_and_probe": 45.3,
+    "fi_scan": 67.8,
+    "plasticity_scan": 7.4
+  },
+  "env": {
+    "device": "AMD Instinct MI250X",
+    "torch": "2.5.1+rocm6.2",
+    "transformers": "4.47.1",
+    "sal": "0.5.1",
+    "python": "3.11.7",
+    "peak_gpu_mem_gb": 7.0
+  },
+  "plasticity": {
+    "summary": "8 elastic, 23 saturated, 1 hub  |  mean routing=0.866, mean MI=0.061",
+    "mean_routing": 0.8656,
+    "mean_cka": 0.9728,
+    "mean_mi": 0.0609,
+    "routing_available": true
+  },
+  "reproduction": {
+    "reference": {
+      "fi_score": 0.004,
+      "num_layers": 32,
+      "num_heads": 16,
+      "num_immune": 1,
+      "num_buffer": 4,
+      "num_critical": 27,
+      "mean_routing": 0.8656,
+      "mean_cka": 0.9728,
+      "mean_mi": 0.0609
+    },
+    "fi_abs_delta": 2.5e-05,
+    "fi_matches": true,
+    "layer_classification_matches": true,
+    "verdict": "MATCH"
+  }
+}

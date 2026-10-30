@@ -1,0 +1,17 @@
+SAL+QAT Prototype - ViT-B/16 on ImageNet-100 (1 epoch, SMOKE)
+════════════════════════════════════════════════════
+
+                  FP16  Prune33%  Prune50%      INT8
+              ────────  ────────  ────────  ────────
+Baseline         15.0%      4.0%      3.0%     16.0%
+SAL only         15.0%      4.0%      2.0%     15.0%
+QAT only         16.0%      4.0%      3.0%     16.0%
+SAL + QAT        15.0%      3.0%      3.0%     15.0%
+════════════════════════════════════════════════════
+Size             172MB     153MB     143MB      87MB
+CPU latency       92ms      79ms      74ms      53ms
+
+Pruned cells are means over random head selections (same heads for every variant).
+INT8/INT4 = per-channel weight round-trip, the grid QAT trains against. Size is computed.
+CPU latency: INT8 is real torch.ao dynamic INT8. PyTorch has no CPU INT4 kernel, so INT4 is n/a.
+SMOKE RUN - 200 images, 1 epoch. These numbers mean nothing.

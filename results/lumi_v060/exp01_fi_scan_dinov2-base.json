@@ -1,0 +1,57 @@
+{
+  "experiment": "exp01_fi_scan",
+  "model": "facebook/dinov2-base",
+  "params_m": 86.6,
+  "probe": {
+    "dataset": "uoft-cs/cifar10",
+    "split": "test",
+    "n": 256,
+    "batch_size": 8,
+    "attn_implementation": "eager"
+  },
+  "fi_score": 0.06504854368932039,
+  "num_layers": 12,
+  "num_heads_per_layer": 12,
+  "num_immune": 1,
+  "num_buffer": 3,
+  "num_critical": 8,
+  "fi_summary": "FI=0.0650 | 1 immune, 3 buffer, 8 critical",
+  "layer_classification": {
+    "0": "CRITICAL",
+    "1": "CRITICAL",
+    "2": "CRITICAL",
+    "3": "CRITICAL",
+    "4": "CRITICAL",
+    "5": "BUFFER",
+    "6": "IMMUNE",
+    "7": "CRITICAL",
+    "8": "CRITICAL",
+    "9": "CRITICAL",
+    "10": "BUFFER",
+    "11": "BUFFER"
+  },
+  "timing_s": {
+    "load_and_probe": 55.6,
+    "fi_scan": 58.8,
+    "plasticity_scan": 2.2
+  },
+  "env": {
+    "device": "AMD Instinct MI250X",
+    "torch": "2.5.1+rocm6.2",
+    "transformers": "4.46.0",
+    "sal": "0.5.1",
+    "python": "3.11.7",
+    "peak_gpu_mem_gb": 1.61
+  },
+  "plasticity": {
+    "summary": "0 elastic, 6 saturated, 6 hub  |  mean routing=0.665, mean MI=0.047",
+    "mean_routing": 0.6654,
+    "mean_cka": 0.9273,
+    "mean_mi": 0.0472,
+    "routing_available": true
+  },
+  "reproduction": {
+    "reference": null,
+    "note": "no published v0.5.1 figure for this model; this run establishes the ROCm baseline"
+  }
+}
