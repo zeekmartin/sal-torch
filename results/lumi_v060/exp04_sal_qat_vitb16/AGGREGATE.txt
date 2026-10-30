@@ -1,0 +1,72 @@
+exp04 — SAL+QAT on google/vit-base-patch16-224 / clane9/imagenet-100
+  5 seeds: [42, 123, 137, 456, 2024]
+  5 epochs, 20000 train / 5000 val, batch 64, mask_ratio 0.3
+  device cuda (68.7 GB), QAT backend torch.ao
+
+seed 42:
+                 FP16Prune33%Prune50%    INT8    INT4  P50+I4
+  -----------------------------------------------------------
+  Baseline     93.8%   66.9%   42.0%   93.9%   93.2%   36.5% 
+  SAL only     92.9%   72.8%   53.8%   93.0%   92.1%   48.8% 
+  QAT only     93.8%   68.2%   44.3%   93.8%   93.5%   39.3% 
+  SAL + QAT    92.9%   73.0%   54.7%   92.9%   92.4%   52.0% 
+
+seed 123:
+                 FP16Prune33%Prune50%    INT8    INT4  P50+I4
+  -----------------------------------------------------------
+  Baseline     93.7%   70.1%   38.9%   93.6%   92.6%   32.5% 
+  SAL only     93.1%   79.6%   61.3%   93.2%   92.4%   56.4% 
+  QAT only     93.9%   71.3%   41.7%   93.9%   93.3%   37.8% 
+  SAL + QAT    93.3%   79.1%   61.1%   93.3%   92.9%   58.7% 
+
+seed 137:
+                 FP16Prune33%Prune50%    INT8    INT4  P50+I4
+  -----------------------------------------------------------
+  Baseline     93.9%   67.8%   30.7%   93.9%   93.1%   26.2% 
+  SAL only     93.4%   71.7%   38.4%   93.3%   92.5%   33.3% 
+  QAT only     93.9%   69.2%   32.1%   93.9%   93.6%   29.0% 
+  SAL + QAT    92.9%   72.4%   39.8%   93.0%   92.7%   37.4% 
+
+seed 456:
+                 FP16Prune33%Prune50%    INT8    INT4  P50+I4
+  -----------------------------------------------------------
+  Baseline     93.5%   66.1%   30.1%   93.5%   92.8%   23.6% 
+  SAL only     92.7%   79.1%   52.2%   92.7%   92.1%   45.5% 
+  QAT only     94.1%   63.0%   29.4%   94.1%   93.4%   25.4% 
+  SAL + QAT    93.0%   78.9%   54.1%   93.0%   92.3%   50.8% 
+
+seed 2024:
+                 FP16Prune33%Prune50%    INT8    INT4  P50+I4
+  -----------------------------------------------------------
+  Baseline     93.5%   64.9%   27.9%   93.5%   92.9%   24.5% 
+  SAL only     93.1%   60.0%   29.2%   93.2%   92.7%   26.7% 
+  QAT only     93.6%   63.6%   27.4%   93.5%   93.4%   24.2% 
+  SAL + QAT    93.2%   55.1%   25.8%   93.2%   92.7%   25.0% 
+
+MEAN over 5 seeds:
+                 FP16Prune33%Prune50%    INT8    INT4  P50+I4
+  -----------------------------------------------------------
+  Baseline     93.7%   67.2%   33.9%   93.7%   92.9%   28.7% 
+  SAL only     93.1%   72.6%   47.0%   93.1%   92.4%   42.1% 
+  QAT only     93.9%   67.0%   35.0%   93.9%   93.4%   31.1% 
+  SAL + QAT    93.0%   71.7%   47.1%   93.1%   92.6%   44.8% 
+
+Key cell - P50+I4, SAL+QAT vs Baseline:
+  seed 42    baseline  36.5%  sal_qat  52.0%  delta +15.52pp   | NVIDIA v0.5.0: +15.51pp   (ROCm - NVIDIA: +0.01pp)
+  seed 123   baseline  32.5%  sal_qat  58.7%  delta +26.17pp   | NVIDIA v0.5.0: +25.28pp   (ROCm - NVIDIA: +0.89pp)
+  seed 137   baseline  26.2%  sal_qat  37.4%  delta +11.21pp
+  seed 456   baseline  23.6%  sal_qat  50.8%  delta +27.21pp   | NVIDIA v0.5.0: +25.13pp   (ROCm - NVIDIA: +2.08pp)
+  seed 2024  baseline  24.5%  sal_qat  25.0%  delta  +0.57pp
+
+  mean +16.13pp over 5 seeds, sd 11.07
+  SAL+QAT beats baseline on 5/5 seeds
+
+  ROCm vs NVIDIA on the 3 shared seeds: mean difference +0.99pp
+
+Increment from adding QAT to SAL (P50+I4):
+  seed 42    sal  48.8%  sal_qat  52.0%  delta  +3.21pp
+  seed 123   sal  56.4%  sal_qat  58.7%  delta  +2.25pp
+  seed 137   sal  33.3%  sal_qat  37.4%  delta  +4.17pp
+  seed 456   sal  45.5%  sal_qat  50.8%  delta  +5.31pp
+  seed 2024  sal  26.7%  sal_qat  25.0%  delta  -1.68pp
+  mean +2.65pp
