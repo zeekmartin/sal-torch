@@ -147,8 +147,47 @@ the three shipped, `ExpertMasker`.
   I-JEPA ViT-H/14: SAL wins 35/36 over 3 seeds at 33/50% (+0.4 to +1.9pp); no
   effect at 70%. DINOv2 ViT-L/14 (1 seed): 13/18. Slicing 50% of heads: 1.1x GPU /
   1.2x CPU (attention is ~1/3 of a ViT block). 271 unit tests pass on CPU.
-- Next: v0.6.0 SAL + QAT and MLP pruning (target 2x real speedup); v0.7.0
-  topology-guided distillation; Phase 5 (license signing + compliance reports).
+- **v0.6.0 (in progress): validated on LUMI (AMD MI250X / ROCm 6.2).** Phase 1
+  reproduced the published structural scans on ROCm exactly (I-JEPA ViT-H/14
+  FI=0.003975 vs 0.0040 on NVIDIA, same 1/4/27 layer split). exp04 then
+  re-measured SAL+QAT on ViT-B/16 / ImageNet-100 at **15 seeds and 20 random
+  head selections per cell**, which changed three things. Full trail in
+  `results/lumi_v060/PHASE1.md`, `PHASE2.md`, `PHASE2A.md`, `PHASE2B.md`.
+  - **The headline is +14.5pp ± 4.3** at 50% pruning + INT4 (95% CI
+    [+12.4, +16.7], 15/15 seeds), **not the +22pp** published from 3 seeds, and
+    QAT adds **+2.4pp ± 0.9** (15/15). Those three seeds were the most
+    favourable of five.
+  - **`--prune-seeds 3` is too few for any published cell.** Head-selection
+    sampling, not the training seed, was the dominant noise term: sd 11.07 → 4.28
+    on the same checkpoints. It is also the cheapest to remove (evaluation only,
+    no retraining). Two readings in `PHASE2.md` — "unstable baseline" and "SAL
+    actively harmful on seed 2024" — were artefacts of 3 selections and are
+    retracted in `PHASE2A.md`. The baseline in fact spans 1.6pp.
+  - **Dose-response is monotone**: gain at P50+I4 rises +6.2 → +20.8pp as
+    `prune_fraction` goes 0.1 → 0.5, costing 0.3-1.5pp of clean accuracy. Best
+    when the training ratio matches the deployment ratio, so the **0.33 default
+    under-delivers against a 50% target** (default not yet changed — product
+    decision).
+  - **Scope**: robust at ≥50% pruning; **weak and inconsistent at 33% on
+    ViT-B/16/ImageNet-100**, though 33% is SAL's best row on GPT-2 Medium and
+    ViT/CIFAR-10. Task difficulty is the obvious candidate and is confounded
+    with architecture and dataset; nothing measured separates them.
+  - Control arms `drophead` and `nonaccum` are implemented in
+    `scripts/run_sal_qat_prototype.py` (opt-in via `--variants`, default
+    unchanged) but **not yet run**. They test whether the gain is ordinary
+    regularisation and whether accumulation is load-bearing.
+  - MLP pruning and the compile/ONNX paths live in **sal-torch-pro**
+    (`sal_pro.mlp`, `sal_pro.deploy`) — mechanism unit-tested, accuracy and
+    speedup not yet measured.
+- LUMI notes: compute nodes have no internet, so pre-fetch into
+  `HF_HOME=/scratch/project_465003656/sal-torch/hf_cache` from a login node and
+  run with `HF_HUB_OFFLINE=1`. Pin `OMP_NUM_THREADS` to `SLURM_CPUS_PER_TASK`.
+  The first training step costs ~60s of one-time MIOpen kernel compilation.
+  I-JEPA needs transformers >= 4.47, so it runs in a second env `.venv-tf47`
+  (`SAL_VENV=.venv-tf47`); the default `.venv` stays at 4.46.0.
+- Next: finish v0.6.0 — control arms (drophead/nonaccum), MLP prune sweep and
+  joint head+MLP for the 2x real speedup target; v0.7.0 topology-guided
+  distillation; Phase 5 (license signing + compliance reports).
   See `ROADMAP.md` (public).
 
 ## Integration tests

@@ -347,9 +347,11 @@ winner is whichever model loses proportionally less.
 
 ### What we measured
 
-The primary evidence is GPT-2 Medium at five seeds. A three-seed vision study
-follows it as **secondary, preliminary** evidence — promising, and not yet
-enough to call SAL cross-modally validated.
+The primary evidence is GPT-2 Medium at five seeds, and ViT-B/16 on
+ImageNet-100 at **fifteen** seeds. A three-seed ViT/CIFAR-10 study sits between
+them as the earlier, thinner vision result. Two modalities are measured; what
+is still missing is a reading of *why* the effect size differs so much between
+them, so "cross-modally validated" remains an overstatement.
 
 #### Five seeds, full eval split — GPT-2 Medium (primary evidence)
 
@@ -449,6 +451,50 @@ architecture and task-difficulty are all confounded across these two studies,
 and nothing here separates them. Do not assume your model lands at either end —
 measure it with `RobustnessTest`.
 
+#### ViT-B/16 on ImageNet-100 — fifteen seeds, and where SAL stops helping
+
+The most finely measured study in the project: ViT-B/16 on ImageNet-100 (100-way),
+5 epochs, **15 seeds**, every compressed cell averaged over **20 random head
+selections** rather than the 3 used above
+(`scripts/run_sal_qat_prototype.py`, full trail in
+`results/lumi_v060/PHASE2{,A,B}.md`). Head pruning at 50% plus INT4 weights:
+
+| arm | P50+I4 top-1 | vs baseline |
+|---|---|---|
+| standard fine-tune | 31.0% ± 1.4 | — |
+| SAL | 43.2% ± 3.8 | **+12.1pp** |
+| SAL + QAT | 45.6% ± 4.3 | **+14.5pp ± 4.3**, 95% CI [+12.4, +16.7], 15/15 seeds |
+
+Three things came out of it that the thinner studies could not show.
+
+- **Higher `prune_fraction` during training increases compression resilience
+  monotonically.** Sweeping it over {0.1, 0.2, 0.3, 0.4, 0.5}, the gain at
+  half-pruned + INT4 rises steadily: **+6.2 → +9.0 → +12.7 → +16.6 → +20.8pp**.
+  The best cells are the ones where the *training* ratio matches the
+  *deployment* ratio, and the cost is also monotone and small — 0.3 to 1.5pp of
+  clean accuracy. A monotone response across five levels is much stronger
+  evidence that the mechanism is real than any single cell. Practical rule:
+  **train at the ratio you intend to deploy at.** The shipped default of 0.33
+  leaves most of the effect unused if you are targeting 50%.
+- **At 50% pruning SAL is robust; at 33% on this setup it is weak and
+  inconsistent.** The 33% mean is small (+2 to +7pp depending on mask ratio)
+  and one recurring seed sits *below* baseline at four of the five mask ratios,
+  at 20 head selections — not noise. The reading that fits: SAL trains a model
+  to operate under heavy structural damage, so when the real damage is *milder*
+  than what it trained for, the adaptation can be a net loss.
+  **This does not generalise into a rule about 33%.** On GPT-2 Medium (above)
+  33% is SAL's single most reliable row, +2.45pp on 5/5 seeds, and on
+  ViT/CIFAR-10 it is +14.37pp on 3/3. Three setups, three answers at the same
+  prune ratio — so 33% is where the *model and task* decide, and the only
+  honest instruction is to measure yours with `RobustnessTest`.
+- **Three head selections per cell is too few to publish from.** The same
+  fifteen checkpoints scored at 3 selections gave a standard deviation of
+  11.07pp; at 20 it is 4.28pp, with the mean essentially unchanged. The
+  baseline looked like it spanned 23.6–36.5% at 3 selections and in fact spans
+  1.6pp. Head-selection sampling, not the training seed, was the dominant noise
+  term — and it is the cheapest to remove, since it costs evaluation passes and
+  no retraining.
+
 #### The earlier single-seed runs
 
 The four runs below are what motivated the multi-seed study. They stay here
@@ -505,9 +551,16 @@ the adaptation cannot.
 - **Scale is still open.** Phi-2 2.7B was LoRA-only, so "LoRA starves it" and
   "SAL stops working above ~350M" remain confounded at that size. Phi-2 under
   full fine-tuning is the experiment that separates them.
-- **Cross-modal validation.** Under investigation. One vision architecture on
-  one task at three seeds is a preliminary result, not a validated claim, and
-  the README should not be read as making one.
+- **Cross-modal validation.** Two modalities are now measured, the vision side
+  at fifteen seeds. What is not established is *why* the effect size differs by
+  an order of magnitude between them, so the README still should not be read as
+  claiming SAL is cross-modally validated.
+- **What decides whether 33% pruning helps.** Three setups give three answers at
+  the same prune ratio — GPT-2 Medium +2.45pp on 5/5, ViT/CIFAR-10 +14.37pp on
+  3/3, ViT-B/16/ImageNet-100 weak and one seed negative. Task difficulty
+  (2-way / 10-way / 100-way) is the obvious candidate and is confounded with
+  architecture and dataset. Nothing measured so far separates them, so there is
+  no rule yet for predicting which side your model lands on.
 - **Why the effect size differs so much between the two studies.** ViT gained
   +14 to +20pp under pruning where GPT-2 Medium gained +2.45pp. The pattern fits
   "SAL recovers damage in proportion to how much there is", but that is a
@@ -527,7 +580,8 @@ the adaptation cannot.
 | your setup | recommendation |
 |---|---|
 | **Full fine-tuning, and you prune heads** | **Yes.** The strongest and best-replicated case: +2.45pp at 33% pruning on 5/5 seeds of GPT-2 Medium, at no cost to clean accuracy. |
-| **Vision transformers** | **Promising, preliminary.** Three seeds on ViT-base/CIFAR-10 gave +14 to +20pp under pruning, unanimously — but it cost 1.03pp of clean accuracy, and one architecture on one task is not cross-modal validation. Measure yours. |
+| **Vision transformers, pruning at ≥50%** | **Yes.** The best-measured case in the project: ViT-B/16/ImageNet-100, 15 seeds, 20 head selections per cell, **+14.5pp ± 4.3** at 50% pruning + INT4 (95% CI [+12.4, +16.7], 15/15 seeds). Costs 0.3–1.5pp of clean accuracy, rising with `prune_fraction`. |
+| **Vision transformers, pruning at 33%** | **Measure first.** On ViT-B/16/ImageNet-100 the benefit is weak and inconsistent (one recurring seed below baseline), while on ViT-base/CIFAR-10 it was +14 to +20pp on 3/3 and on GPT-2 Medium +2.45pp on 5/5. Same ratio, three different answers — this is where your model and task decide. |
 | **Full fine-tuning, quantization only** | **Measure first.** INT8 gave +0.73pp on GPT-2 (4/5 seeds) and nothing on ViT; INT4 alone was a coin flip (3/5, +0.21pp). Use `RobustnessTest` on your own model before committing. |
 | **Self-supervised vision encoders** | **Yes, at 33–50% head pruning, with modest expectations.** I-JEPA ViT-H/14: +0.4 to +1.9pp, 35/36 wins over 3 seeds. No effect at 70%. DINOv2 is single-seed. |
 | **LoRA / QLoRA adapters** | **Not recommended.** Measured worse than not using SAL at all, and it costs clean accuracy. The adapters are too small to redistribute what the masking removes. |
