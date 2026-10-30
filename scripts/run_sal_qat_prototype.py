@@ -102,6 +102,32 @@ VARIANTS = (                      # (key, label, use_sal, use_qat)
     ("qat", "QAT only", False, True),
     ("sal_qat", "SAL + QAT", True, True),
 )
+
+# Control arms, opt-in via --variants. They exist to answer "is SAL's gain
+# actually SAL's?", and are deliberately NOT in the default set, so the four
+# validated arms above keep running exactly as before.
+#
+#   drophead  — classic stochastic head dropout: ``mask_ratio`` of heads masked
+#               every step, resampled every step, on from step 0, never held.
+#               If this matches SAL, the gain is ordinary regularisation and
+#               nothing about progressive structural damage is needed.
+#   nonaccum  — SAL's schedule with the accumulation removed: the pruned *count*
+#               ramps over the same window, but the identities are resampled at
+#               every step so no head stays dead. Isolates accumulation alone,
+#               holding the ramp fixed. CLAUDE.md calls accumulation "the causal
+#               mechanism"; this is the arm that tests it.
+CONTROL_VARIANTS = (              # (key, label, mask_mode, use_qat)
+    ("drophead", "DropHead ctrl", "drophead", False),
+    ("nonaccum", "No-accum ctrl", "nonaccum", False),
+    ("drophead_qat", "DropHead + QAT", "drophead", True),
+    ("nonaccum_qat", "No-accum + QAT", "nonaccum", True),
+)
+
+# One list the main loop walks, with use_sal normalised into a mask mode.
+ALL_VARIANTS = tuple(
+    (k, label, "sal" if use_sal else "none", use_qat)
+    for k, label, use_sal, use_qat in VARIANTS
+) + CONTROL_VARIANTS
 CONFIGS = ("fp16", "prune33", "prune50", "int8", "int4", "prune50_int4")
 CONFIG_LABELS = {"fp16": "FP16", "prune33": "Prune33%", "prune50": "Prune50%",
                  "int8": "INT8", "int4": "INT4", "prune50_int4": "P50+I4"}
@@ -402,6 +428,66 @@ class _NoMask:
     stats = {"pruned_heads": 0}
 
 
+class ResampleMasker:
+    """``HeadMasker`` with the accumulation taken out — the control arms.
+
+    Wraps a real :class:`sal.HeadMasker` so the masking *mechanism* (the
+    pre-hook on the attention output projection, the per-head slicing) is
+    byte-for-byte the one SAL uses. Only ``step()`` differs: instead of
+    accumulating dead heads, it clears the masks and draws a fresh random set
+    every step, so no head is ever permanently removed.
+
+    ``ramp=False`` gives classic DropHead — the full ``mask_ratio`` from step 0.
+    ``ramp=True`` reuses SAL's own scheduled count, so the pruned *quantity*
+    follows the identical curve and the only thing that changed is whether the
+    same heads stay dead.
+
+    This reaches into a few private members of HeadMasker (``_masks``,
+    ``_active``, ``_scheduled_count``, ``_deactivate_random_heads``). That is
+    deliberate: reimplementing them would make the control differ from the
+    treatment in exactly the way the control is meant to rule out.
+    """
+
+    def __init__(self, model, config, seed, ramp: bool):
+        from sal import HeadMasker
+        self.inner = HeadMasker(model, config, seed=seed)
+        self.ramp = ramp
+
+    def install(self):
+        self.inner.install()
+
+    def remove(self):
+        self.inner.remove()
+
+    def apply_mask(self):
+        self.inner.apply_mask()
+
+    def remove_mask(self):
+        self.inner.remove_mask()
+
+    def unmasked(self):
+        return self.inner.unmasked()
+
+    def step(self, global_step: int, total_steps: int):
+        inner = self.inner
+        if self.ramp:
+            if global_step / max(total_steps, 1) < inner.config.prune_start_ratio:
+                inner.deactivate()
+                return
+            target = inner._scheduled_count(global_step, total_steps)
+        else:
+            target = inner.config.num_heads_to_prune
+        for m in inner._masks.values():                 # drop the previous set
+            m.fill_(1.0)
+        inner._active = True
+        if target > 0:
+            inner._deactivate_random_heads(target)
+
+    @property
+    def stats(self):
+        return self.inner.stats
+
+
 def make_step(device, use_amp: bool, progress: Progress | None = None):
     """The one training step every arm runs: supervised cross-entropy.
 
@@ -451,9 +537,14 @@ def make_optimizer(model, total_steps: int):
     return opt, torch.optim.lr_scheduler.LambdaLR(opt, factor)
 
 
-def train_variant(key, use_sal, use_qat, num_classes, train_split, epochs, batch_size,
+def train_variant(key, mask_mode, use_qat, num_classes, train_split, epochs, batch_size,
                   seed, device, use_amp, mask_ratio, force_manual_qat=False):
-    """Build and train one variant. Returns ``(model, info)``, with QAT stripped."""
+    """Build and train one variant. Returns ``(model, info)``, with QAT stripped().
+
+    ``mask_mode`` is ``"none"`` (no masking at all), ``"sal"`` (the validated
+    accumulating schedule, via SALTrainer), or one of the controls
+    ``"drophead"`` / ``"nonaccum"`` (see :class:`ResampleMasker`).
+    """
     from sal import SALConfig, SALTrainer
 
     set_seed(seed)                     # identical head init across arms
@@ -470,12 +561,31 @@ def train_variant(key, use_sal, use_qat, num_classes, train_split, epochs, batch
     step = make_step(device, use_amp, prog)
 
     t0 = time.time()
-    if use_sal:
+    if mask_mode == "sal":
         cfg = SALConfig.auto(model, prune_fraction=mask_ratio)
         trainer = SALTrainer(model, cfg, optimizer, loader, scheduler=scheduler,
                              seed=seed, train_step=step)
         history = trainer.train(num_epochs=epochs)
         losses, masker_stats = history["losses"], history["masker_stats"]
+    elif mask_mode in ("drophead", "nonaccum"):
+        # Same hook, same schedule shape, no accumulation. Driven by hand rather
+        # than SALTrainer, which owns the accumulating schedule we are removing.
+        cfg = SALConfig.auto(model, prune_fraction=mask_ratio)
+        masker = ResampleMasker(model, cfg, seed=seed, ramp=(mask_mode == "nonaccum"))
+        masker.install()
+        losses, gstep = [], 0
+        try:
+            for _ in range(epochs):
+                total_loss = 0.0
+                for batch in loader:
+                    masker.step(gstep, total)
+                    total_loss += step(model, batch, optimizer, masker)
+                    scheduler.step()
+                    gstep += 1
+                losses.append(total_loss / max(len(loader), 1))
+            masker_stats = dict(masker.stats)
+        finally:
+            masker.remove()
     else:
         # Not SALTrainer with a tiny prune_fraction: num_heads_to_prune floors at
         # 1, so "nearly off" is not off. The control has to have no masking at all.
@@ -679,7 +789,7 @@ def _box():
 
 def summary_table(results: dict, budget: dict, epochs: int, smoke: bool) -> str:
     heavy, light = _box()
-    cols = [c for c in CONFIGS if any(c in results.get(v[0], {}) for v in VARIANTS)]
+    cols = [c for c in CONFIGS if any(c in results.get(v[0], {}) for v in ALL_VARIANTS)]
     w0, w = 12, 10
     lines = [f"SAL+QAT Prototype - ViT-B/16 on ImageNet-100 "
              f"({epochs} epoch{'s' if epochs != 1 else ''}{', SMOKE' if smoke else ''})",
@@ -691,7 +801,7 @@ def summary_table(results: dict, budget: dict, epochs: int, smoke: bool) -> str:
     def pct(v):
         return "n/a" if v is None else f"{v * 100:.1f}%"
 
-    for key, label, _, _ in VARIANTS:
+    for key, label, _, _ in ALL_VARIANTS:
         r = results.get(key)
         if r:
             lines.append(f"{label:<{w0}}" + "".join(
@@ -710,7 +820,7 @@ def summary_table(results: dict, budget: dict, epochs: int, smoke: bool) -> str:
     if base is not None:
         lines += ["", f"Key cell - {CONFIG_LABELS[KEY_CELL]} accuracy, change vs baseline:"]
         deltas = {}
-        for key, label, _, _ in VARIANTS[1:]:
+        for key, label, _, _ in ALL_VARIANTS[1:]:
             v = results.get(key, {}).get(KEY_CELL, {}).get("accuracy")
             if v is not None:
                 deltas[key] = v - base
@@ -735,7 +845,7 @@ def summary_table(results: dict, budget: dict, epochs: int, smoke: bool) -> str:
               "Size is computed.",
               "CPU latency: INT8 is real torch.ao dynamic INT8. PyTorch has no CPU INT4 "
               "kernel, so INT4 is n/a."]
-    nf4 = [k for k, *_ in VARIANTS if "prune50_int4_nf4" in results.get(k, {})]
+    nf4 = [k for k, *_ in ALL_VARIANTS if "prune50_int4_nf4" in results.get(k, {})]
     if nf4:
         lines.append("bitsandbytes NF4 cross-check, P50+NF4: " + ", ".join(
             f"{k} {results[k]['prune50_int4_nf4']['accuracy'] * 100:.1f}%" for k in nf4))
@@ -764,8 +874,8 @@ def make_figures(outdir: Path, results: dict, budget: dict) -> list:
                          "xtick.color": muted, "ytick.color": muted,
                          "axes.spines.top": False, "axes.spines.right": False,
                          "font.size": 10})
-    cols = [c for c in CONFIGS if any(c in results.get(v[0], {}) for v in VARIANTS)]
-    present = [v for v in VARIANTS if v[0] in results]
+    cols = [c for c in CONFIGS if any(c in results.get(v[0], {}) for v in ALL_VARIANTS)]
+    present = [v for v in ALL_VARIANTS if v[0] in results]
     written = []
 
     def attempt(name, fn):
@@ -848,7 +958,7 @@ def parse_args(argv=None):
     p.add_argument("--prune-seeds", type=int, default=3,
                    help="random head selections averaged per pruning setting")
     p.add_argument("--variants", nargs="+", default=[v[0] for v in VARIANTS],
-                   choices=[v[0] for v in VARIANTS], help="subset of arms to run")
+                   choices=[v[0] for v in ALL_VARIANTS], help="subset of arms to run")
     p.add_argument("--manual-qat", action="store_true",
                    help="skip torch.ao prepare_qat and use the manual STE fake-quantizer")
     p.add_argument("--no-save-models", action="store_true",
@@ -901,10 +1011,10 @@ def main(argv=None):
     verify_batch = {"pixel_values": fi_x[:4]}
 
     results, training, budget = {}, {}, {}
-    for key, label, use_sal, use_qat in VARIANTS:
+    for key, label, mask_mode, use_qat in ALL_VARIANTS:
         if key not in args.variants:
             continue
-        rule(f"Variant: {label}  (SAL={'on' if use_sal else 'off'}, "
+        rule(f"Variant: {label}  (masking={mask_mode}, "
              f"QAT={'on' if use_qat else 'off'})")
         ckpt = models_dir / f"{key}.pt"
         if args.reuse_models and ckpt.exists():
@@ -916,7 +1026,7 @@ def main(argv=None):
             log(f"  reused {ckpt}")
         else:
             model, training[key] = train_variant(
-                key, use_sal, use_qat, num_classes, train_split, epochs,
+                key, mask_mode, use_qat, num_classes, train_split, epochs,
                 args.batch_size, args.seed, device, use_amp, args.mask_ratio,
                 force_manual_qat=args.manual_qat)
             if not args.no_save_models:
