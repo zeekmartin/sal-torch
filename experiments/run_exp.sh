@@ -33,6 +33,19 @@ export TRANSFORMERS_OFFLINE=1
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-7}
 export MKL_NUM_THREADS=${SLURM_CPUS_PER_TASK:-7}
 
+# MIOpen keeps a SQLite kernel database, by default under $HOME/.config/miopen,
+# which on LUMI is Lustre. SQLite on Lustre is unreliable, and many jobs writing
+# it at once corrupts it: a batch of 28 parallel jobs was followed by
+# "RuntimeError: miopenStatusInternalError" on the first conv2d of a run whose
+# code had already worked 28 times. Give every job its own database on the
+# node-local disk instead. The cost is that kernel compilation (~60s) is paid
+# per job rather than cached across them, which is the right trade for jobs
+# measured in tens of minutes.
+export MIOPEN_USER_DB_PATH="/tmp/miopen-${SLURM_JOB_ID:-local}-$$"
+export MIOPEN_CUSTOM_CACHE_DIR="$MIOPEN_USER_DB_PATH"
+mkdir -p "$MIOPEN_USER_DB_PATH"
+trap 'rm -rf "$MIOPEN_USER_DB_PATH"' EXIT
+
 cd "$ROOT"
 echo "=== $(date -Is) | node $(hostname) | job ${SLURM_JOB_ID:-local} ==="
 echo "venv: ${SAL_VENV:-.venv}"

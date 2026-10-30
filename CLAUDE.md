@@ -182,9 +182,18 @@ the three shipped, `ExpertMasker`.
 - LUMI notes: compute nodes have no internet, so pre-fetch into
   `HF_HOME=/scratch/project_465003656/sal-torch/hf_cache` from a login node and
   run with `HF_HUB_OFFLINE=1`. Pin `OMP_NUM_THREADS` to `SLURM_CPUS_PER_TASK`.
-  The first training step costs ~60s of one-time MIOpen kernel compilation.
+  The first training step costs ~60s of MIOpen kernel compilation.
   I-JEPA needs transformers >= 4.47, so it runs in a second env `.venv-tf47`
   (`SAL_VENV=.venv-tf47`); the default `.venv` stays at 4.46.0.
+- **Always give each job its own MIOpen cache on node-local `/tmp`**
+  (`MIOPEN_USER_DB_PATH` / `MIOPEN_CUSTOM_CACHE_DIR`, set in
+  `experiments/run_exp.sh`). MIOpen's default is a SQLite DB under
+  `$HOME/.config/miopen`, which on LUMI is Lustre; SQLite on Lustre is
+  unreliable under concurrency. After a batch of 28 parallel jobs, the next job
+  died with `RuntimeError: miopenStatusInternalError` on the first `conv2d` of
+  code that had just worked 28 times. Smoke-test one job before submitting a
+  batch, and prefer `sbatch --dependency=afterok:<smoke>` so a held batch
+  cannot burn hours on a broken path.
 - Next: finish v0.6.0 — control arms (drophead/nonaccum), MLP prune sweep and
   joint head+MLP for the 2x real speedup target; v0.7.0 topology-guided
   distillation; Phase 5 (license signing + compliance reports).
