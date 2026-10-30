@@ -116,12 +116,29 @@ VARIANTS = (                      # (key, label, use_sal, use_qat)
 #               every step so no head stays dead. Isolates accumulation alone,
 #               holding the ramp fixed. CLAUDE.md calls accumulation "the causal
 #               mechanism"; this is the arm that tests it.
+#   progressive — DropHead with a ramp. The dropped *count* grows linearly from
+#               PROGRESSIVE_START_RATIO to mask_ratio across the whole run, and
+#               identities are resampled every step. Tests whether the ramp in
+#               SAL's schedule is worth anything once accumulation is gone.
+#   fi_drophead — DropHead that biases its draw towards structurally fragile
+#               heads, read off the model's own attention graph and refreshed
+#               during training. Same expected drop rate as plain DropHead, so
+#               only *which* heads get dropped differs. See `head_fragility`.
 CONTROL_VARIANTS = (              # (key, label, mask_mode, use_qat)
     ("drophead", "DropHead ctrl", "drophead", False),
     ("nonaccum", "No-accum ctrl", "nonaccum", False),
     ("drophead_qat", "DropHead + QAT", "drophead", True),
     ("nonaccum_qat", "No-accum + QAT", "nonaccum", True),
+    ("progressive", "Progressive DH", "progressive", False),
+    ("fi_drophead", "FI-guided DH", "fi_drophead", False),
+    ("progressive_qat", "Progressive + QAT", "progressive", True),
+    ("fi_drophead_qat", "FI-guided + QAT", "fi_drophead", True),
 )
+
+PROGRESSIVE_START_RATIO = 0.1     # where the progressive ramp begins
+FI_FRAGILE_BOOST = 2.0            # drop weight for fragile heads, before renormalising
+FI_RESILIENT_BOOST = 0.5          # drop weight for the rest
+FI_RESCAN_EPOCHS = 2              # refresh the fragility read every N epochs
 
 # One list the main loop walks, with use_sal normalised into a mask mode.
 ALL_VARIANTS = tuple(
@@ -437,10 +454,15 @@ class ResampleMasker:
     accumulating dead heads, it clears the masks and draws a fresh random set
     every step, so no head is ever permanently removed.
 
-    ``ramp=False`` gives classic DropHead — the full ``mask_ratio`` from step 0.
-    ``ramp=True`` reuses SAL's own scheduled count, so the pruned *quantity*
-    follows the identical curve and the only thing that changed is whether the
-    same heads stay dead.
+    Three modes:
+
+    ``"drophead"``    classic DropHead — the full ``mask_ratio`` from step 0.
+    ``"nonaccum"``    SAL's own scheduled count, so the dropped *quantity*
+                      follows the identical curve and the only thing that
+                      changed is whether the same heads stay dead.
+    ``"progressive"`` a linear ramp of its own, from
+                      ``PROGRESSIVE_START_RATIO`` to ``mask_ratio`` across the
+                      whole run rather than inside SAL's window.
 
     This reaches into a few private members of HeadMasker (``_masks``,
     ``_active``, ``_scheduled_count``, ``_deactivate_random_heads``). That is
@@ -448,10 +470,12 @@ class ResampleMasker:
     treatment in exactly the way the control is meant to rule out.
     """
 
-    def __init__(self, model, config, seed, ramp: bool):
+    def __init__(self, model, config, seed, mode: str = "drophead"):
         from sal import HeadMasker
+        if mode not in ("drophead", "nonaccum", "progressive"):
+            raise ValueError(f"unknown resample mode {mode!r}")
         self.inner = HeadMasker(model, config, seed=seed)
-        self.ramp = ramp
+        self.mode = mode
 
     def install(self):
         self.inner.install()
@@ -468,15 +492,25 @@ class ResampleMasker:
     def unmasked(self):
         return self.inner.unmasked()
 
+    def target_count(self, global_step: int, total_steps: int) -> int:
+        inner = self.inner
+        if self.mode == "nonaccum":
+            if global_step / max(total_steps, 1) < inner.config.prune_start_ratio:
+                return -1                               # before the window: nothing
+            return inner._scheduled_count(global_step, total_steps)
+        if self.mode == "progressive":
+            progress = global_step / max(total_steps, 1)
+            ratio = (PROGRESSIVE_START_RATIO
+                     + (inner.config.prune_fraction - PROGRESSIVE_START_RATIO) * progress)
+            return int(round(inner.config.total_heads * ratio))
+        return inner.config.num_heads_to_prune
+
     def step(self, global_step: int, total_steps: int):
         inner = self.inner
-        if self.ramp:
-            if global_step / max(total_steps, 1) < inner.config.prune_start_ratio:
-                inner.deactivate()
-                return
-            target = inner._scheduled_count(global_step, total_steps)
-        else:
-            target = inner.config.num_heads_to_prune
+        target = self.target_count(global_step, total_steps)
+        if target < 0:
+            inner.deactivate()
+            return
         for m in inner._masks.values():                 # drop the previous set
             m.fill_(1.0)
         inner._active = True
@@ -486,6 +520,126 @@ class ResampleMasker:
     @property
     def stats(self):
         return self.inner.stats
+
+
+def head_fragility(model, fi_batches) -> "list[float]":
+    """Per-head fragility, in [0, 1], read off the model's own attention graph.
+
+    ``sal.compute_fi`` reports one number for the whole graph: the share of
+    edges that no triangle supports, i.e. edges whose two heads share no common
+    neighbour and so have no redundant pathway. This is the same quantity read
+    per head instead of globally — the share of *a head's own* edges that
+    nothing supports. A head whose edges are all unsupported has no backup for
+    anything it carries; a head sitting in a densely triangulated
+    neighbourhood does.
+
+    An isolated head (no edges at all) scores 1.0: nothing supports it either.
+    """
+    import numpy as np
+    from sal.fi import extract_activation_graph
+
+    n_probe = sum(b["pixel_values"].shape[0] for b in fi_batches)
+    adj = extract_activation_graph(model, fi_batches, num_samples=n_probe,
+                                   batch_size=fi_batches[0]["pixel_values"].shape[0])
+    A = (np.asarray(adj) != 0).astype(np.int64)
+    np.fill_diagonal(A, 0)
+    support = A @ A                                     # shared neighbours per pair
+    out = []
+    for i in range(A.shape[0]):
+        nbrs = np.nonzero(A[i])[0]
+        if len(nbrs) == 0:
+            out.append(1.0)
+            continue
+        out.append(float((support[i, nbrs] == 0).sum()) / len(nbrs))
+    return out
+
+
+class FIDropHeadMasker(ResampleMasker):
+    """DropHead that biases its draw towards structurally fragile heads.
+
+    Same mechanism and the **same expected number of dropped heads** as plain
+    DropHead — only the distribution over *which* heads changes. Fragile heads
+    (fragility above the median) are dropped with weight
+    ``FI_FRAGILE_BOOST``, the rest with ``FI_RESILIENT_BOOST``, and both are
+    renormalised so the expected rate equals ``mask_ratio`` exactly:
+
+        E[rate] = f * c * BOOST_f + (1 - f) * c * BOOST_r = mask_ratio
+        => c = 1 / (f * BOOST_f + (1 - f) * BOOST_r)
+
+    with ``f`` the fragile fraction. At the median split f = 0.5, giving
+    per-step drop probabilities of 1.6x and 0.4x the base ratio.
+
+    Draws are **independent Bernoulli per head**, which makes the stated
+    probabilities exact but lets the per-step count fluctuate around the
+    target, where plain DropHead holds it fixed. That is a real difference
+    between the two arms and is the reason the count is logged.
+
+    The graph is re-read every ``rescan_steps`` steps, with masking suspended
+    for the scan: the graph must describe the model, not the model minus
+    whatever was dropped this step.
+    """
+
+    def __init__(self, model, config, seed, fi_batches, rescan_steps: int):
+        super().__init__(model, config, seed, mode="drophead")
+        self.fi_batches = fi_batches
+        self.rescan_steps = max(1, rescan_steps)
+        self.model = model
+        self._probs = None
+        self._rescans = 0
+        self._fragile_fraction = None
+        self._counts = []
+
+    def _rescan(self):
+        """Refresh per-head drop probabilities from the current graph."""
+        import numpy as np
+
+        was_training = self.model.training
+        with self.inner.unmasked():                     # scan the whole model
+            self.model.eval()
+            try:
+                frag = head_fragility(self.model, self.fi_batches)
+            finally:
+                if was_training:
+                    self.model.train()
+
+        frag = np.asarray(frag, dtype=float)
+        median = float(np.median(frag))
+        fragile = frag > median
+        f = float(fragile.mean())
+        base = self.inner.config.prune_fraction
+        c = 1.0 / (f * FI_FRAGILE_BOOST + (1.0 - f) * FI_RESILIENT_BOOST)
+        p = np.where(fragile, c * FI_FRAGILE_BOOST, c * FI_RESILIENT_BOOST) * base
+        self._probs = np.clip(p, 0.0, 1.0)
+        self._fragile_fraction = f
+        self._rescans += 1
+
+    def step(self, global_step: int, total_steps: int):
+        import numpy as np
+
+        if self._probs is None or global_step % self.rescan_steps == 0:
+            self._rescan()
+
+        inner = self.inner
+        nh = inner.config.num_heads_per_layer
+        draw = np.random.default_rng(
+            abs(hash((global_step, id(self)))) % (2 ** 32)).random(len(self._probs))
+        drop = np.nonzero(draw < self._probs)[0]
+        for m in inner._masks.values():
+            m.fill_(1.0)
+        inner._active = True
+        for flat in drop.tolist():
+            inner._masks[flat // nh][flat % nh] = 0.0
+        self._counts.append(int(len(drop)))
+
+    @property
+    def stats(self):
+        s = dict(self.inner.stats)
+        s["fi_rescans"] = self._rescans
+        s["fi_fragile_fraction"] = (round(self._fragile_fraction, 4)
+                                    if self._fragile_fraction is not None else None)
+        if self._counts:
+            s["mean_dropped_per_step"] = round(sum(self._counts) / len(self._counts), 1)
+        return s
 
 
 def make_step(device, use_amp: bool, progress: Progress | None = None):
@@ -538,12 +692,15 @@ def make_optimizer(model, total_steps: int):
 
 
 def train_variant(key, mask_mode, use_qat, num_classes, train_split, epochs, batch_size,
-                  seed, device, use_amp, mask_ratio, force_manual_qat=False):
+                  seed, device, use_amp, mask_ratio, force_manual_qat=False,
+                  fi_batches=None):
     """Build and train one variant. Returns ``(model, info)``, with QAT stripped().
 
     ``mask_mode`` is ``"none"`` (no masking at all), ``"sal"`` (the validated
     accumulating schedule, via SALTrainer), or one of the controls
-    ``"drophead"`` / ``"nonaccum"`` (see :class:`ResampleMasker`).
+    ``"drophead"`` / ``"nonaccum"`` / ``"progressive"`` (see
+    :class:`ResampleMasker`) or ``"fi_drophead"`` (see
+    :class:`FIDropHeadMasker`, which needs ``fi_batches``).
     """
     from sal import SALConfig, SALTrainer
 
@@ -567,11 +724,21 @@ def train_variant(key, mask_mode, use_qat, num_classes, train_split, epochs, bat
                              seed=seed, train_step=step)
         history = trainer.train(num_epochs=epochs)
         losses, masker_stats = history["losses"], history["masker_stats"]
-    elif mask_mode in ("drophead", "nonaccum"):
+        # Which heads this arm was trained without. Needed to score a model on
+        # its own pruned set rather than an unrelated random one (exp12).
+        pruned_heads = history.get("pruned_heads")
+    elif mask_mode in ("drophead", "nonaccum", "progressive", "fi_drophead"):
         # Same hook, same schedule shape, no accumulation. Driven by hand rather
         # than SALTrainer, which owns the accumulating schedule we are removing.
         cfg = SALConfig.auto(model, prune_fraction=mask_ratio)
-        masker = ResampleMasker(model, cfg, seed=seed, ramp=(mask_mode == "nonaccum"))
+        if mask_mode == "fi_drophead":
+            if not fi_batches:
+                raise ValueError("fi_drophead needs fi_batches to read the graph from")
+            steps_per_epoch = max(1, len(loader))
+            masker = FIDropHeadMasker(model, cfg, seed=seed, fi_batches=fi_batches,
+                                      rescan_steps=steps_per_epoch * FI_RESCAN_EPOCHS)
+        else:
+            masker = ResampleMasker(model, cfg, seed=seed, mode=mask_mode)
         masker.install()
         losses, gstep = [], 0
         try:
@@ -584,6 +751,11 @@ def train_variant(key, mask_mode, use_qat, num_classes, train_split, epochs, bat
                     gstep += 1
                 losses.append(total_loss / max(len(loader), 1))
             masker_stats = dict(masker.stats)
+            # Deliberately not recorded: these arms resample every step, so the
+            # final mask is just the last draw, not a set the model was trained
+            # to live without. Pretending otherwise would invite a meaningless
+            # "aligned" comparison.
+            pruned_heads = None
         finally:
             masker.remove()
     else:
@@ -597,13 +769,15 @@ def train_variant(key, mask_mode, use_qat, num_classes, train_split, epochs, bat
                 scheduler.step()
             losses.append(total_loss / max(len(loader), 1))
         masker_stats = None
+        pruned_heads = None
     prog.done()
 
     if use_qat:
         model = strip_qat(model)
     model.eval()
     info = {"losses": losses, "masker_stats": masker_stats, "qat_backend": qat_backend,
-            "train_seconds": round(time.time() - t0, 1), "steps": total}
+            "train_seconds": round(time.time() - t0, 1), "steps": total,
+            "pruned_heads": pruned_heads}
     log(f"  {key}: epoch losses {[round(x, 4) for x in losses]}"
         + (f" | masker {masker_stats}" if masker_stats else "")
         + f" | {info['train_seconds']:.0f}s")
@@ -1028,7 +1202,7 @@ def main(argv=None):
             model, training[key] = train_variant(
                 key, mask_mode, use_qat, num_classes, train_split, epochs,
                 args.batch_size, args.seed, device, use_amp, args.mask_ratio,
-                force_manual_qat=args.manual_qat)
+                force_manual_qat=args.manual_qat, fi_batches=fi_batches)
             if not args.no_save_models:
                 models_dir.mkdir(parents=True, exist_ok=True)
                 torch.save({k: v.detach().cpu() for k, v in model.state_dict().items()},
