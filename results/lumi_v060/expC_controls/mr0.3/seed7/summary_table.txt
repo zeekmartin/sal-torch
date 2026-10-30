@@ -1,0 +1,29 @@
+SAL+QAT Prototype - ViT-B/16 on ImageNet-100 (5 epochs)
+════════════════════════════════════════════════════════════════════════
+
+                  FP16  Prune33%  Prune50%      INT8      INT4    P50+I4
+              ────────  ────────  ────────  ────────  ────────  ────────
+Baseline         93.7%     69.4%     34.1%     93.8%     93.2%     29.9%
+SAL only         92.8%     75.4%     50.5%     92.8%     92.2%     46.0%
+QAT only         93.7%     69.9%     34.9%     93.7%     93.6%     32.2%
+SAL + QAT        93.4%     75.9%     50.7%     93.3%     93.0%     48.3%
+DropHead ctrl     93.7%     87.6%     75.1%     93.7%     93.3%     71.9%
+No-accum ctrl     93.8%     84.8%     64.8%     93.8%     93.1%     60.3%
+DropHead + QAT     94.0%     87.5%     75.2%     94.0%     93.5%     74.1%
+No-accum + QAT     93.7%     84.7%     64.9%     93.6%     93.3%     63.2%
+════════════════════════════════════════════════════════════════════════
+Size             172MB     153MB     143MB      87MB      45MB      37MB
+CPU latency       90ms      81ms      76ms      53ms       n/a       n/a
+
+Key cell - P50+I4 accuracy, change vs baseline:
+  SAL only    46.00%  (+16.07pp)
+  QAT only    32.17%  (+2.24pp)
+  SAL + QAT   48.25%  (+18.32pp)
+  DropHead ctrl  71.86%  (+41.93pp)
+  No-accum ctrl  60.27%  (+30.34pp)
+  DropHead + QAT  74.08%  (+44.15pp)
+  No-accum + QAT  63.21%  (+33.27pp)
+
+Pruned cells are means over random head selections (same heads for every variant).
+INT8/INT4 = per-channel weight round-trip, the grid QAT trains against. Size is computed.
+CPU latency: INT8 is real torch.ao dynamic INT8. PyTorch has no CPU INT4 kernel, so INT4 is n/a.
