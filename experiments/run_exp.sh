@@ -33,18 +33,22 @@ export TRANSFORMERS_OFFLINE=1
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-7}
 export MKL_NUM_THREADS=${SLURM_CPUS_PER_TASK:-7}
 
-# MIOpen keeps a SQLite kernel database, by default under $HOME/.config/miopen,
-# which on LUMI is Lustre. SQLite on Lustre is unreliable, and many jobs writing
-# it at once corrupts it: a batch of 28 parallel jobs was followed by
-# "RuntimeError: miopenStatusInternalError" on the first conv2d of a run whose
-# code had already worked 28 times. Give every job its own database on the
-# node-local disk instead. The cost is that kernel compilation (~60s) is paid
-# per job rather than cached across them, which is the right trade for jobs
-# measured in tens of minutes.
-export MIOPEN_USER_DB_PATH="/tmp/miopen-${SLURM_JOB_ID:-local}-$$"
-export MIOPEN_CUSTOM_CACHE_DIR="$MIOPEN_USER_DB_PATH"
-mkdir -p "$MIOPEN_USER_DB_PATH"
-trap 'rm -rf "$MIOPEN_USER_DB_PATH"' EXIT
+# MIOpen's kernel cache is a SQLite database; on this image it lands in /tmp.
+# Convolutions need it (GEMMs go through rocBLAS and do not), so when MIOpen
+# cannot initialise that database a run dies with
+# "RuntimeError: miopenStatusInternalError" on the very first conv2d — which on
+# a ViT is the patch embedding, before any sal-torch code runs. It is
+# intermittent because /tmp/gfx90a6e.ukdb is shared state whose presence and
+# validity vary by node: the same node failed and then succeeded an hour later.
+#
+# Pointing MIOPEN_USER_DB_PATH at a fresh per-job directory does NOT fix this
+# and in fact fails every time, on /tmp, /dev/shm and Lustre alike, even though
+# all three are writable — MIOpen cannot build a usable database from nothing.
+# Disabling the cache is what works deterministically. Measured on an MI250X:
+# default-unset is a coin flip, per-job dirs always fail, DISABLE_CACHE always
+# works (logs/*-mioloc.out). The cost is recompiling kernels, which these jobs
+# already paid once per run anyway.
+export MIOPEN_DISABLE_CACHE=1
 
 cd "$ROOT"
 echo "=== $(date -Is) | node $(hostname) | job ${SLURM_JOB_ID:-local} ==="
