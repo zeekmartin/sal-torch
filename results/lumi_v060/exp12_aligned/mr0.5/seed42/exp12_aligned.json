@@ -1,0 +1,422 @@
+{
+  "experiment": "exp12_aligned_pruning",
+  "model": "google/vit-base-patch16-224",
+  "dataset": "clane9/imagenet-100",
+  "seed": 42,
+  "mask_ratio": 0.5,
+  "epochs": 5,
+  "n_train": 20000,
+  "n_val": 5000,
+  "draws": 20,
+  "smoke": false,
+  "device": "cuda",
+  "vram_gb": 68.7,
+  "num_layers": 12,
+  "num_heads_per_layer": 12,
+  "sal_pruned_heads": [
+    [
+      0,
+      0
+    ],
+    [
+      0,
+      6
+    ],
+    [
+      0,
+      7
+    ],
+    [
+      0,
+      8
+    ],
+    [
+      0,
+      9
+    ],
+    [
+      0,
+      10
+    ],
+    [
+      0,
+      11
+    ],
+    [
+      1,
+      2
+    ],
+    [
+      1,
+      4
+    ],
+    [
+      1,
+      5
+    ],
+    [
+      1,
+      6
+    ],
+    [
+      1,
+      7
+    ],
+    [
+      1,
+      10
+    ],
+    [
+      1,
+      11
+    ],
+    [
+      2,
+      1
+    ],
+    [
+      2,
+      2
+    ],
+    [
+      2,
+      3
+    ],
+    [
+      2,
+      4
+    ],
+    [
+      2,
+      5
+    ],
+    [
+      2,
+      6
+    ],
+    [
+      2,
+      8
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      3,
+      1
+    ],
+    [
+      3,
+      4
+    ],
+    [
+      3,
+      8
+    ],
+    [
+      3,
+      9
+    ],
+    [
+      4,
+      0
+    ],
+    [
+      4,
+      4
+    ],
+    [
+      4,
+      7
+    ],
+    [
+      4,
+      8
+    ],
+    [
+      4,
+      10
+    ],
+    [
+      4,
+      11
+    ],
+    [
+      5,
+      0
+    ],
+    [
+      5,
+      2
+    ],
+    [
+      5,
+      4
+    ],
+    [
+      5,
+      5
+    ],
+    [
+      5,
+      6
+    ],
+    [
+      5,
+      7
+    ],
+    [
+      5,
+      10
+    ],
+    [
+      5,
+      11
+    ],
+    [
+      6,
+      0
+    ],
+    [
+      6,
+      1
+    ],
+    [
+      6,
+      2
+    ],
+    [
+      6,
+      3
+    ],
+    [
+      6,
+      5
+    ],
+    [
+      6,
+      7
+    ],
+    [
+      6,
+      9
+    ],
+    [
+      7,
+      0
+    ],
+    [
+      7,
+      1
+    ],
+    [
+      7,
+      2
+    ],
+    [
+      7,
+      10
+    ],
+    [
+      7,
+      11
+    ],
+    [
+      8,
+      2
+    ],
+    [
+      8,
+      4
+    ],
+    [
+      8,
+      9
+    ],
+    [
+      8,
+      10
+    ],
+    [
+      9,
+      1
+    ],
+    [
+      9,
+      7
+    ],
+    [
+      9,
+      8
+    ],
+    [
+      9,
+      9
+    ],
+    [
+      9,
+      10
+    ],
+    [
+      9,
+      11
+    ],
+    [
+      10,
+      3
+    ],
+    [
+      10,
+      5
+    ],
+    [
+      10,
+      8
+    ],
+    [
+      10,
+      11
+    ],
+    [
+      11,
+      0
+    ],
+    [
+      11,
+      1
+    ],
+    [
+      11,
+      2
+    ],
+    [
+      11,
+      5
+    ],
+    [
+      11,
+      9
+    ],
+    [
+      11,
+      11
+    ]
+  ],
+  "sal_pruned_count": 72,
+  "sal_pruned_per_layer": [
+    7,
+    7,
+    7,
+    5,
+    6,
+    8,
+    7,
+    5,
+    4,
+    6,
+    4,
+    6
+  ],
+  "results": {
+    "baseline": {
+      "clean": 0.9402,
+      "aligned": 0.36,
+      "random_mean": 0.34455,
+      "random_std": 0.08407382407584921,
+      "random_per_draw": [
+        0.2926,
+        0.2712,
+        0.4046,
+        0.3342,
+        0.3868,
+        0.2812,
+        0.2728,
+        0.46,
+        0.2408,
+        0.359,
+        0.3606,
+        0.3808,
+        0.2226,
+        0.3166,
+        0.3412,
+        0.3158,
+        0.5798,
+        0.4188,
+        0.3876,
+        0.264
+      ],
+      "aligned_int4": 0.3036,
+      "random_int4_mean": 0.28803999999999996,
+      "aligned_minus_random": 0.015449999999999964
+    },
+    "sal": {
+      "clean": 0.9154,
+      "aligned": 0.824,
+      "random_mean": 0.55379,
+      "random_std": 0.08580237942964912,
+      "random_per_draw": [
+        0.4542,
+        0.6314,
+        0.5456,
+        0.6346,
+        0.6758,
+        0.5464,
+        0.6044,
+        0.5698,
+        0.642,
+        0.4884,
+        0.504,
+        0.6342,
+        0.4464,
+        0.5138,
+        0.5404,
+        0.5462,
+        0.6922,
+        0.5414,
+        0.5228,
+        0.3418
+      ],
+      "aligned_int4": 0.7976,
+      "random_int4_mean": 0.534,
+      "aligned_minus_random": 0.27020999999999995
+    },
+    "drophead": {
+      "clean": 0.9234,
+      "aligned": 0.802,
+      "random_mean": 0.81532,
+      "random_std": 0.01167009673887654,
+      "random_per_draw": [
+        0.8066,
+        0.8166,
+        0.8082,
+        0.822,
+        0.8372,
+        0.8034,
+        0.8094,
+        0.8186,
+        0.807,
+        0.8116,
+        0.8048,
+        0.8178,
+        0.804,
+        0.8158,
+        0.831,
+        0.8074,
+        0.8414,
+        0.827,
+        0.8182,
+        0.7984
+      ],
+      "aligned_int4": 0.7886,
+      "random_int4_mean": 0.79904,
+      "aligned_minus_random": -0.013319999999999999
+    }
+  },
+  "caveats": {
+    "masking": "aligned and random cells are both applied by masking, not slicing: SAL's pruned set is not uniform per layer so slice_heads() cannot express it. Masking is accuracy-equivalent to slicing the same heads and makes the two cells differ only in which heads are removed.",
+    "int4": "per-output-channel symmetric weight round-trip on every nn.Linear except the classifier, as in the prototype.",
+    "drophead_aligned": "drophead never had a pruned set of its own; it is scored on SAL's set so every arm faces the same perturbation."
+  },
+  "wall_clock_s": 1187.6
+}
