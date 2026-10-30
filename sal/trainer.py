@@ -94,9 +94,14 @@ class SALTrainer:
                         global_step += 1
                 losses.append(epoch_loss / max(steps, 1))
             stats = self.masker.stats
+            # Capture which heads the model was trained without, before
+            # remove() clears the masks. The adaptation is specific to this
+            # set, so it belongs with the checkpoint.
+            pruned = self.masker.pruned_heads()
         finally:
             self.masker.remove()
-        return {"losses": losses, "total_steps": global_step, "masker_stats": stats}
+        return {"losses": losses, "total_steps": global_step, "masker_stats": stats,
+                "pruned_heads": pruned}
 
     # ----------------------------------------------------------------- custom
     def _train_custom(self, num_epochs: int) -> dict:
@@ -123,9 +128,14 @@ class SALTrainer:
                     global_step += 1
                 losses.append(epoch_loss / max(steps, 1))
             stats = self.masker.stats
+            # Capture which heads the model was trained without, before
+            # remove() clears the masks. The adaptation is specific to this
+            # set, so it belongs with the checkpoint.
+            pruned = self.masker.pruned_heads()
         finally:
             self.masker.remove()
-        return {"losses": losses, "total_steps": global_step, "masker_stats": stats}
+        return {"losses": losses, "total_steps": global_step, "masker_stats": stats,
+                "pruned_heads": pruned}
 
     # -------------------------------------------------------------- internals
     def _to_device(self, batch):

@@ -204,6 +204,30 @@ class HeadMasker:
     def _active_head_count(self) -> int:
         return int(sum(m.sum().item() for m in self._masks.values()))
 
+    # ------------------------------------------------------------- bookkeeping
+    def pruned_heads(self) -> list[tuple[int, int]]:
+        """``(layer, head)`` pairs currently masked off, in layer then head order.
+
+        This is the set the model was trained to operate without. It is worth
+        recording alongside a checkpoint: the adaptation is specific to *these*
+        heads, so removing a different set at deployment time is not the
+        situation the model was prepared for. Call it before ``remove()``, which
+        clears the masks.
+
+        The set is **not uniform per layer** — heads are drawn from the whole
+        model, so one layer may lose more than another. That is why it cannot be
+        handed straight to :func:`sal.slice_heads`, which requires the same
+        count in every layer; mask it instead, or pick a uniform subset.
+        """
+        return [(layer, head)
+                for layer, mask in sorted(self._masks.items())
+                for head in (mask == 0.0).nonzero(as_tuple=True)[0].tolist()]
+
+    def pruned_heads_by_layer(self) -> dict[int, list[int]]:
+        """``{layer: [head indices pruned]}`` — the same set, grouped."""
+        return {layer: (mask == 0.0).nonzero(as_tuple=True)[0].tolist()
+                for layer, mask in sorted(self._masks.items())}
+
     def _make_hook(self, layer_idx: int):
         nh = self.config.num_heads_per_layer
 
