@@ -1,5 +1,103 @@
 # Changelog
 
+## [0.6.0] — 2026-10-31
+
+Two shipped defaults change, and a second method joins SAL. Everything here was
+measured on LUMI (AMD MI250X / ROCm 6.2), ~85 GPU-hours, with the full trail in
+`results/lumi_v060/PHASE1.md` and `PHASE2{,A,B,C,D,E,F}.md`.
+
+### Changed — breaking
+- **`SALConfig.prune_fraction` is now `0.50`** (was `0.33`). The dose-response
+  is monotone: sweeping the training ratio over {0.1 … 0.5}, the gain at 50%
+  pruning + INT4 rises +6.2 → +9.0 → +12.7 → +16.6 → +20.8pp, and the best cells
+  are the ones where the training ratio matches the deployment ratio. 0.33 left
+  most of the effect unused against a 50% target.
+- **`SALConfig.uniform_per_layer` is new and defaults to `True`.** Head selection
+  now takes an equal quota from every layer instead of sampling the whole model.
+  This is what makes the set of heads SAL trained without a valid
+  `slice_heads()` argument — previously it was not uniform per layer (measured
+  `[8,4,5,7,3,7,4,7,5,8,7,7]`), so the accuracy SAL retained could only be had
+  by masking, which removes no weight and no matmul. Selection stays uniformly
+  random *within* each layer, and the quota is held at every point along the
+  accumulation ramp rather than only at the end. Pass `uniform_per_layer=False`
+  for the pre-0.6.0 global draw.
+- **`num_heads_to_prune` snaps to a multiple of the layer count** when
+  `uniform_per_layer` is on, because an equal quota is otherwise unreachable:
+  0.33 of a 12×12 model is 47 heads, which no constraint on the draw can split
+  evenly. `SALConfig.effective_prune_fraction` reports what was actually
+  requested of the model.
+
+### Added
+- **`SALConfig.effective_prune_fraction`** — the fraction actually pruned, which
+  the uniform constraint may round.
+- **`HeadMasker.pruned_heads()` / `pruned_heads_by_layer()`** — the set of heads
+  the model was trained to operate without. Save it with the checkpoint: the
+  adaptation is specific to *those* heads, and without the list the advantage is
+  unrecoverable.
+- **`SALTrainer` returns `pruned_heads`** in its history, from both the
+  supervised and the custom-step loops.
+- **Control arms in `scripts/run_sal_qat_prototype.py`** (opt-in via
+  `--variants`): `drophead`, `nonaccum`, `progressive`, `fi_drophead`, plus QAT
+  pairs. `drophead` is the one that matters — see below.
+- **Experiments**: `exp12_aligned_pruning.py` (aligned vs random head sets, with
+  sliced cells under `--uniform-per-layer`), `exp13_crossarch_drophead.py`
+  (DINOv2-base and GPT-2 Medium), `exp15_ijepa_aligned.py` (I-JEPA ViT-H/14),
+  `diag_gpt2_nan.py`.
+
+### Measured
+- **DropHead — per-step resampled head dropout — is the strong general method.**
+  At 50% pruning + INT4 on ViT-B/16 / ImageNet-100, 10 seeds, 20 shared head
+  selections: **+41.20pp** over a standard fine-tune at mask_ratio 0.3 (CI
+  [+40.44, +41.96]) and **+49.77pp** at 0.5 (CI [+48.68, +50.86]), both 10/10
+  seeds. It holds across architectures: DINOv2-base +64.9pp at 33% and +58.6pp
+  at 50% (3/3 seeds), GPT-2 Medium +1.3pp and +4.3pp (3/3).
+- **SAL specialises.** Scored on the head set it trained without, SAL beats
+  DropHead by **+2.02pp on 10/10 seeds** (identical set, mask_ratio 0.5) and by
+  **+1.36pp after real slicing** at 16.5% fewer parameters (85.9M → 71.7M, CI
+  [+0.53, +2.18], 8/10). Masked and sliced accuracy agree to **±0.01pp over 10
+  seeds**. On an *arbitrary* set of the same size SAL is **27.6pp behind**
+  DropHead — the price of specialisation. So: SAL when you control and record
+  the head set, DropHead when you do not.
+- **The control that distinguishes adaptation from selection.** A model trained
+  without any masking does *not* find SAL's head set easy: its aligned-vs-random
+  difference is −3.09pp and −5.14pp with intervals spanning zero (4/10 and 2/10
+  seeds). The set is not made of unimportant heads.
+- **Structured selection still loses.** A fragility-weighted training draw
+  (fragile heads at 2× the base rate, resilient at 0.5×, same expected rate)
+  loses to a plain uniform draw by **−5.02pp and −4.77pp on 0/10 seeds**, with
+  ±0.4pp intervals. FI remains a diagnostic and does not select heads. A ramped
+  ratio is the weakest arm everywhere, which makes the mechanism legible: total
+  exposure to the perturbation is what matters.
+- **The headline SAL+QAT figure is +14.5pp ± 4.3**, not the +22pp published from
+  three seeds (15 seeds, 20 head selections, 95% CI [+12.4, +16.7], 15/15), and
+  QAT adds +2.4pp ± 0.9 (15/15). Three head selections per cell is too few to
+  publish from: sd 11.07 → 4.28 on the same checkpoints.
+- **ROCm reproduces NVIDIA** on the published structural scans (I-JEPA ViT-H/14
+  FI = 0.003975 against 0.0040, same 1/4/27 layer split).
+
+### Fixed
+- **GPT-2 needs `attn_implementation="eager"` on ROCm.** Under SDPA it returns
+  finite logits and corrupted gradients — grad norms of 7.7e13, 3.6e18 and `inf`
+  within 40 steps against 15–140 under eager — so `clip_grad_norm_` scales by
+  `1/inf = 0`, nothing is learned and the loss goes NaN. Only the backward pass
+  is affected, so a forward-only check passes.
+- **Experiments write their measurements before anything that presents them**,
+  and a non-finite loss now raises instead of yielding a majority-class accuracy.
+- **`summary_table()` named its arms instead of counting them** — a run with
+  four control variants produced three deltas and walked into `deltas["sal"]`.
+
+### Docs
+- **README rewritten around the complete picture**: both methods, the two
+  deployment regimes, the full comparison table masked and sliced, the
+  cross-architecture results, an explicit note that FI does not select heads,
+  and four additions to *What is not established* — that SAL's edge does **not**
+  survive INT4 on top of slicing (+0.49pp, CI [−0.39, +1.37], 6/10), that 16.5%
+  fewer parameters is not a measured speedup (v0.5.1 measured 1.1× GPU), that
+  the aligned/sliced path has been measured on one architecture only, and that
+  DropHead is ahead by 27.6pp whenever the head set is not yours to choose.
+- **`CLAUDE.md`**: LUMI operational notes — MIOpen kernel cache, the GPT-2/SDPA
+  trap, gating a batch with a small non-smoke run rather than a smoke.
+
 ## [0.5.1] — 2026-09-17
 
 SAL stops being supervised-only, and the self-supervised benchmark behind it has
