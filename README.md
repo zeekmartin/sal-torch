@@ -596,6 +596,54 @@ advantage at deployment is ~1.4pp, not ~2pp. And SAL scored on a set it did not
 train for is **27.6pp behind** DropHead. That gap is the price of specialisation
 and nothing in v0.6.0 reduced it.
 
+#### Does the smaller model actually run faster?
+
+Up to v0.6.0 this README reported a size reduction and declined to claim a
+latency one. It is now measured: ViT-B/16, AMD Instinct MI250X, torch
+2.5.1+rocm6.2, median of 50 runs after 10 warmup, `slice_heads()` for the sliced
+arms and stock `torch.compile` for the compiled ones.
+
+**Batch 32 — batched or offline inference**
+
+| arm | params | eager | from slicing | best compiled | from compiling | **total** | throughput |
+|---|---|---|---|---|---|---|---|
+| dense | 85.9M | 46.93 ms | 1.00x | 42.03 ms (`max-autotune`) | 1.12x | 1.12x | 761 img/s |
+| sliced-33 | 76.4M | 41.67 ms | 1.13x | 37.22 ms (`max-autotune`) | 1.12x | 1.26x | 860 img/s |
+| **sliced-50** | **71.7M** | 39.03 ms | **1.20x** | **34.19 ms** (`max-autotune`) | 1.14x | **1.37x** | **936 img/s** |
+
+Slicing and compiling **compound almost exactly**: 1.20 × 1.14 = 1.37, and
+throughput rises 761 → 936 img/s, **+23%**. Worth noting on its own —
+**sliced-50 in plain eager (39.03 ms) already beats the dense model under
+`max-autotune` (42.03 ms)**, so removing half the heads buys more than compiling
+the dense model does, and costs no compilation time.
+
+**Batch 1 — single requests**
+
+| arm | eager | from slicing | best compiled | from compiling | total |
+|---|---|---|---|---|---|
+| dense | 8.31 ms | 1.00x | 3.86 ms (`reduce-overhead`) | **2.16x** | 2.16x |
+| sliced-33 | 8.64 ms | 0.96x | 3.80 ms (`reduce-overhead`) | 2.27x | 2.19x |
+| sliced-50 | 8.62 ms | 0.96x | 3.73 ms (`max-autotune`) | 2.31x | 2.23x |
+
+**Slicing buys nothing at batch 1 — it is marginally slower.** At this shape the
+GPU is bound by kernel launch overhead, not by arithmetic, so taking work out of
+each kernel does not shorten the wall clock. Compilation is what helps, and it
+helps a lot: **2.16x** on the dense model, because `reduce-overhead` attacks
+exactly that launch overhead. The sliced models finish only 3% ahead of the
+compiled dense one.
+
+| you serve | do this | expect |
+|---|---|---|
+| **Batched / offline inference** | slice **and** compile with `max-autotune` | **1.37x**, +23% throughput |
+| **Single requests** | **compile** with `reduce-overhead`; slice for the memory, not the latency | **2.16x** from compiling, ~0 from slicing |
+
+`max-autotune` costs 86-194 s of compilation per shape and `reduce-overhead`
+7-12 s, paid once per process. One caution from running this: `torch.compile`
+caches a limited number of variants per process (8 by default), and past that
+limit it falls back to eager **silently** — a sweep over several models and batch
+sizes needs `torch._dynamo.reset()` between them, or the later rows quietly
+report eager timings as though they were compiled.
+
 #### Cross-architecture — does DropHead's advantage travel?
 
 Three architectures and two training objectives, same masking protocol
@@ -676,11 +724,17 @@ the adaptation cannot.
   [+0.53, +2.18], 8/10 seeds. With INT4 weights stacked on top the same
   comparison is +0.49pp with the interval spanning zero, 6/10. The deployment
   claim holds for slicing; it is unproven for slicing *plus* 4-bit weights.
-- **That the smaller model is a faster model.** Slicing 50% of heads from
-  ViT-B/16 removes 16.5% of parameters, but attention is roughly a third of a
-  transformer block: v0.5.1 measured only 1.1x GPU / 1.2x CPU. A size reduction
-  is reported here; a latency reduction is not. The joint head+MLP path is where
-  that work lives and it is not in this package.
+- **That slicing helps at batch size 1.** It does not — it is marginally
+  *slower* (0.96x), because that shape is bound by kernel launch overhead rather
+  than arithmetic. The speedup at batch 32 is measured and real (1.20x eager,
+  1.37x compiled); see [Does the smaller model actually run
+  faster?](#does-the-smaller-model-actually-run-faster). Where the two regimes
+  cross over is somewhere between 1 and 32 and has not been located, and the
+  whole sweep is one GPU (MI250X), one architecture and one image size.
+- **That head slicing alone reaches a 2x speedup.** 1.37x is what 50% of heads
+  buys with compilation on top. Attention is roughly a third of a transformer
+  block, so the remaining headroom is in the FFN, and joint head+MLP pruning is
+  not in this package.
 - **That the aligned/sliced result travels.** It has been measured on **one
   architecture** (ViT-B/16 / ImageNet-100). The cross-architecture table covers
   DropHead on DINOv2 and GPT-2, not the aligned-pruning path.

@@ -87,6 +87,13 @@ measured on LUMI (AMD MI250X / ROCm 6.2), ~85 GPU-hours, with the full trail in
   four control variants produced three deltas and walked into `deltas["sal"]`.
 
 ### Docs
+- **Measured speedups replace the "not a measured speedup" caveat.** Slicing 50%
+  of ViT-B/16's heads gives **1.20x** at batch 32 in eager and **1.37x** with
+  `torch.compile max-autotune` on top (936 img/s against 761, +23%); sliced-50 in
+  eager already beats the dense model compiled. At batch 1 slicing gives nothing
+  (0.96x) because the shape is launch-bound, while compiling alone gives
+  **2.16x** via `reduce-overhead`. So: batched inference slices *and* compiles,
+  single requests compile and slice only for the memory.
 - **README rewritten around the complete picture**: both methods, the two
   deployment regimes, the full comparison table masked and sliced, the
   cross-architecture results, an explicit note that FI does not select heads,
