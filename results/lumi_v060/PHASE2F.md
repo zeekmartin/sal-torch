@@ -56,11 +56,19 @@ Within noise of each other at 0.5 and better at 0.3. Constraining *which* heads
 SAL may pick does not cost the adaptation — only the quota per layer is fixed,
 and selection within a layer stays uniformly random.
 
-**2. It is still adaptation, not selection.** The `baseline` control behaves
+**2. It is still adaptation, not selection — on this architecture.** The
+`baseline` control behaves
 exactly as in exp12: its aligned-vs-random interval spans zero at both ratios and
 the point estimate is *negative* (−3.09, −5.14pp), on 4/10 and 2/10 seeds. An
 untrained model does not find SAL's set easy. The set is not made of unimportant
 heads; the trained model's relationship to it is what matters.
+
+> **Do not read this as architecture-free.** `PHASE2G.md` runs the same control on
+> I-JEPA ViT-H/14 and gets the *opposite* sign: **+5.17pp**, 3/3 seeds, and the
+> effect appears in every arm including DropHead, so there it really is a property
+> of the set. The adaptation term reproduces at nearly the same size (+2.55pp
+> same-set against +2.02pp here), but on I-JEPA a selection component sits on top
+> of it. The claim above is scoped to ViT-B/16 / ImageNet-100.
 
 **3. The gain survives physical slicing, which is the new result.** Masked and
 sliced accuracy agree to **±0.01pp over 10 seeds** — the equivalence is exact, as
