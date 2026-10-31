@@ -116,8 +116,16 @@ def batches(split, batch_size, shuffle=False, seed=0):
 def load_model(model_id, num_classes, tok=None):
     if is_text(model_id):
         from transformers import AutoModelForSequenceClassification
+        # eager attention, not SDPA. On MI250X / ROCm 6.2, GPT-2 under SDPA
+        # returns finite logits but corrupted gradients: measured grad norms of
+        # 7.7e13, 3.6e18 and inf within the first 40 steps, against 15-140 under
+        # eager. clip_grad_norm_ then scales by 1/inf = 0, the model never learns,
+        # and the loss eventually goes NaN. That is exactly what the first exp13
+        # GPT-2 runs did -- nan losses on all three arms and 428/872 = 49.08%
+        # accuracy, the majority class. Only the backward pass is affected, so a
+        # forward-only check will not catch it. See logs/*-diag-gpt2nan.out.
         m = AutoModelForSequenceClassification.from_pretrained(
-            model_id, num_labels=num_classes)
+            model_id, num_labels=num_classes, attn_implementation="eager")
         if m.config.pad_token_id is None:
             m.config.pad_token_id = tok.pad_token_id if tok else 0
         return m
@@ -171,6 +179,12 @@ def train_arm(arm, model_id, num_classes, train_split, epochs, batch_size, seed,
 
     def one_step(m, batch, optimizer, mask_module):
         loss, _, _ = forward_loss(m, batch, device, is_txt, normalize)
+        # Fail loudly. A diverged run still produces an accuracy -- the majority
+        # class -- and quietly writing that to JSON is worse than crashing.
+        if not torch.isfinite(loss):
+            raise RuntimeError(
+                f"{arm}: non-finite loss ({loss.item()}). Training has diverged; "
+                "the resulting accuracies would be the majority-class rate.")
         loss.backward()
         nn.utils.clip_grad_norm_(m.parameters(), 1.0)
         optimizer.step()

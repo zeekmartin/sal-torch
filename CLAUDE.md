@@ -196,6 +196,29 @@ the three shipped, `ExpertMasker`.
   that fails *every* time on `/tmp`, `/dev/shm` and Lustre alike even though all
   are writable, because MIOpen cannot build a usable database from an empty
   directory. See `logs/*-mioloc.out` for the comparison.
+- **Load GPT-2 with `attn_implementation="eager"` on ROCm.** Under the default
+  SDPA path, GPT-2 on MI250X returns *finite logits* but corrupted gradients:
+  measured grad norms of 7.7e13, 3.6e18 and `inf` inside the first 40 steps,
+  against 15-140 under eager on the same batches. `clip_grad_norm_` then scales
+  by `1/inf = 0`, so nothing is learned and the loss eventually goes NaN. The
+  first exp13 GPT-2 runs reported `losses [nan, nan]` on all three arms and
+  49.08% accuracy on every cell — 428/872, the SST-2 majority class. Because
+  only the backward pass is affected, a forward-only check passes: masking was
+  separately verified to move GPT-2 logits by 4.2 with every head off. ViT and
+  DINOv2 train correctly under SDPA; this is GPT-2-specific so far. See
+  `logs/*-diag-gpt2nan.out`.
+- **Fail loudly on a non-finite loss.** A diverged run still yields an accuracy
+  (the majority-class rate) and writing that to JSON is worse than crashing;
+  `exp13` now raises on the first non-finite loss.
+- **Write measurements before anything that presents them.** Twenty expF jobs
+  died inside `summary_table()` after ~35 min of training each and left nothing
+  behind, because the table was written before the JSON — 11.7 GPU-hours for
+  nothing. The prototype now saves the JSON first and wraps table/figures in a
+  `try` that only warns. Related trap: `skip_int4` is tied to `--smoke`, so a
+  smoke run never populates the `prune50_int4` key cell and never exercises the
+  code that reads it. Gate a batch with a *small non-smoke* run instead
+  (`--epochs 1 --n-train 2000 --prune-seeds 2`), which costs ~4 min and covers
+  the real table path.
 - Smoke-test one job before submitting a batch, and submit the batch with
   `sbatch --dependency=afterok:<smoke-id>`. This caught the MIOpen failure with
   20 jobs held at `DependencyNeverSatisfied` and zero GPU-hours burned. Cancel
