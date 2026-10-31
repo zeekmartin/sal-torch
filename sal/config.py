@@ -12,6 +12,7 @@ class SALConfig:
     prune_end_ratio: float = 0.80
     prune_interval: int = 1
     schedule: str = "random"
+    uniform_per_layer: bool = False
     fi_interval: int = 0
     attention_pattern: Optional[str] = None
     head_dim: Optional[int] = None
@@ -32,7 +33,25 @@ class SALConfig:
 
     @property
     def num_heads_to_prune(self) -> int:
-        return max(1, int(self._total_heads * self.prune_fraction))
+        n = max(1, int(self._total_heads * self.prune_fraction))
+        if self.uniform_per_layer and self.num_layers > 0:
+            # An equal quota per layer is only achievable when the target is a
+            # multiple of the layer count: 0.33 of a 12x12 model is 43 heads,
+            # which cannot be split evenly however the draw is constrained. Snap
+            # to the nearest reachable count so the trained set really is a
+            # slice_heads() argument. Read `effective_prune_fraction` for what
+            # was actually requested of the model.
+            n = max(self.num_layers,
+                    min(self._total_heads,
+                        round(n / self.num_layers) * self.num_layers))
+        return n
+
+    @property
+    def effective_prune_fraction(self) -> float:
+        """The fraction actually pruned, which ``uniform_per_layer`` may round."""
+        if self._total_heads == 0:
+            return 0.0
+        return self.num_heads_to_prune / self._total_heads
 
     @classmethod
     def auto(cls, model, **overrides) -> SALConfig:

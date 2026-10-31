@@ -194,12 +194,39 @@ class HeadMasker:
         self._prune_events += 1
 
     def _deactivate_random_heads(self, n: int):
+        if self.config.uniform_per_layer:
+            self._deactivate_balanced_heads(n)
+            return
         active = [(l, h)
                   for l in range(self.config.num_layers)
                   for h in range(self.config.num_heads_per_layer)
                   if self._masks[l][h].item() == 1.0]
         for li, hi in self.rng.sample(active, min(n, len(active))):
             self._masks[li][hi] = 0.0
+
+    def _deactivate_balanced_heads(self, n: int):
+        """Deactivate ``n`` heads while keeping per-layer counts as equal as possible.
+
+        Selection stays uniformly random *within* a layer; only the layer quota
+        is constrained. Each head is taken from a layer that currently has the
+        fewest pruned heads, so the set is exactly uniform whenever the total is
+        a multiple of ``num_layers`` and differs by at most one otherwise, at
+        every point along the accumulation schedule rather than only at the end.
+
+        This is what makes the trained set expressible as a
+        :func:`sal.slice_heads` argument — see :meth:`pruned_heads`.
+        """
+        for _ in range(n):
+            pruned = {l: int((self._masks[l] == 0.0).sum().item())
+                      for l in range(self.config.num_layers)}
+            candidates = [l for l in range(self.config.num_layers)
+                          if pruned[l] < self.config.num_heads_per_layer]
+            if not candidates:
+                return
+            fewest = min(pruned[l] for l in candidates)
+            layer = self.rng.choice([l for l in candidates if pruned[l] == fewest])
+            free = (self._masks[layer] == 1.0).nonzero(as_tuple=True)[0].tolist()
+            self._masks[layer][self.rng.choice(free)] = 0.0
 
     def _active_head_count(self) -> int:
         return int(sum(m.sum().item() for m in self._masks.values()))
@@ -214,10 +241,16 @@ class HeadMasker:
         situation the model was prepared for. Call it before ``remove()``, which
         clears the masks.
 
-        The set is **not uniform per layer** — heads are drawn from the whole
-        model, so one layer may lose more than another. That is why it cannot be
-        handed straight to :func:`sal.slice_heads`, which requires the same
-        count in every layer; mask it instead, or pick a uniform subset.
+        By default the set is **not uniform per layer** — heads are drawn from
+        the whole model, so one layer may lose more than another. That is why it
+        cannot be handed straight to :func:`sal.slice_heads`, which requires the
+        same count in every layer; mask it instead, or pick a uniform subset.
+
+        Set ``SALConfig(uniform_per_layer=True)`` to constrain the draw to an
+        equal quota per layer. The returned set is then a valid
+        :func:`sal.slice_heads` argument whenever the total is a multiple of the
+        layer count, so the adaptation can be realised as a smaller, faster
+        model rather than only as a mask.
         """
         return [(layer, head)
                 for layer, mask in sorted(self._masks.items())

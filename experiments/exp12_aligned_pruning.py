@@ -96,16 +96,67 @@ class MaskSet:
         return False
 
 
-def random_heads(num_layers, num_heads, count, seed):
-    """``count`` distinct (layer, head) pairs drawn from the whole model.
+def random_heads(num_layers, num_heads, count, seed, uniform=False):
+    """``count`` distinct (layer, head) pairs.
 
-    Matches how ``HeadMasker`` draws — globally, not per layer — so the random
-    comparison has the same shape of perturbation as the aligned one, differing
-    only in which heads it picks.
+    By default these are drawn from the whole model, matching how ``HeadMasker``
+    draws, so the random comparison has the same shape of perturbation as the
+    aligned one and differs only in which heads it picks. With ``uniform=True``
+    the quota is spread equally over the layers, matching a uniform-per-layer
+    trained set — the shapes must agree or the comparison measures the shape
+    rather than the adaptation.
     """
     rng = random.Random(seed)
-    allh = [(l, h) for l in range(num_layers) for h in range(num_heads)]
-    return sorted(rng.sample(allh, count))
+    if not uniform:
+        allh = [(l, h) for l in range(num_layers) for h in range(num_heads)]
+        return sorted(rng.sample(allh, count))
+    per, extra = divmod(count, num_layers)
+    bonus = set(rng.sample(range(num_layers), extra))
+    out = []
+    for layer in range(num_layers):
+        k = min(num_heads, per + (1 if layer in bonus else 0))
+        out += [(layer, h) for h in sorted(rng.sample(range(num_heads), k))]
+    return sorted(out)
+
+
+def slice_and_score(model, heads, cfg, val_split, device, use_amp, P):
+    """Physically remove ``heads`` and score the smaller model.
+
+    This is the question the masked cells cannot answer. Masking keeps every
+    weight and every matmul, so a masked accuracy gain is not a size or speed
+    gain. ``slice_heads()`` needs the same count in every layer, which is
+    exactly what a uniform-per-layer trained set provides. Returns ``None`` when
+    the set is not uniform, since then there is nothing to slice.
+    """
+    from sal import slice_heads
+
+    by_layer = {}
+    for layer, head in heads:
+        by_layer.setdefault(layer, []).append(head)
+    counts = {len(v) for v in by_layer.values()}
+    if len(counts) != 1 or len(by_layer) != cfg.num_layers:
+        return None
+
+    params_before = sum(p.numel() for p in model.parameters())
+    t0 = time.time()
+    # slice_heads takes the (layer, head) pairs, not the grouped dict -- iterating
+    # a dict yields its int keys -- and it returns a new model unless inplace.
+    sliced = slice_heads(model, heads)
+    sliced.to(device).eval()
+    acc = P.accuracy(sliced, val_split, device, use_amp)
+    params_after = sum(p.numel() for p in sliced.parameters())
+    out = {
+        "accuracy": acc,
+        "params_before": params_before,
+        "params_after": params_after,
+        "param_reduction": 1.0 - params_after / params_before,
+        "slice_seconds": round(time.time() - t0, 2),
+        "heads_per_layer_removed": next(iter(counts)),
+    }
+    del sliced
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+    return out
 
 
 def main(argv=None):
@@ -120,6 +171,9 @@ def main(argv=None):
     p.add_argument("--draws", type=int, default=20,
                    help="random head sets to average the 'random' cell over")
     p.add_argument("--output", default="results/exp12_aligned")
+    p.add_argument("--uniform-per-layer", action="store_true",
+                   help="constrain every draw to an equal quota per layer, so the "
+                        "trained set can be handed to slice_heads()")
     p.add_argument("--smoke", action="store_true")
     args = p.parse_args(argv)
 
@@ -150,7 +204,8 @@ def main(argv=None):
         P.rule(f"training {key} (masking={mask_mode})")
         model, info = P.train_variant(
             key, mask_mode, False, num_classes, train_split, args.epochs,
-            args.batch_size, args.seed, device, use_amp, args.mask_ratio)
+            args.batch_size, args.seed, device, use_amp, args.mask_ratio,
+            uniform_per_layer=args.uniform_per_layer)
         arms[key] = model
         if key == "sal":
             pruned_by_sal = info.get("pruned_heads")
@@ -160,7 +215,8 @@ def main(argv=None):
         log("ERROR: SALTrainer did not report pruned_heads — is sal up to date?")
         return 1
 
-    cfg = SALConfig.auto(arms["baseline"], prune_fraction=args.mask_ratio)
+    cfg = SALConfig.auto(arms["baseline"], prune_fraction=args.mask_ratio,
+                         uniform_per_layer=args.uniform_per_layer)
     nl, nh = cfg.num_layers, cfg.num_heads_per_layer
     n_pruned = len(pruned_by_sal)
     per_layer = {}
@@ -169,10 +225,18 @@ def main(argv=None):
 
     P.rule("SAL's pruned set")
     log(f"  {n_pruned} of {nl * nh} heads ({n_pruned / (nl * nh):.1%})")
+    log(f"  config target {cfg.num_heads_to_prune} "
+        f"(requested fraction {args.mask_ratio}, effective "
+        f"{cfg.effective_prune_fraction:.3f})")
     log(f"  per layer: {[per_layer.get(i, 0) for i in range(nl)]}")
-    log(f"  uniform per layer: {len(set(per_layer.values())) == 1 and len(per_layer) == nl}")
+    is_uniform = len(set(per_layer.values())) == 1 and len(per_layer) == nl
+    log(f"  uniform per layer: {is_uniform}")
+    if args.uniform_per_layer and not is_uniform:
+        log("  WARNING: --uniform-per-layer was requested but the recorded set is "
+            "not uniform. The sliced cells will be skipped.")
 
-    draws = [random_heads(nl, nh, n_pruned, 10_000 + args.seed * 100 + i)
+    draws = [random_heads(nl, nh, n_pruned, 10_000 + args.seed * 100 + i,
+                          uniform=args.uniform_per_layer)
              for i in range(args.draws)]
 
     results = {}
@@ -198,9 +262,27 @@ def main(argv=None):
                 rnd_i4.append(P.accuracy(q, val_split, device, use_amp))
         del q
 
+        # The cells that decide deployability: the same two head sets removed for
+        # real rather than zeroed. Only possible when the sets are uniform.
+        sliced_aligned = slice_and_score(model, pruned_by_sal, cfg, val_split,
+                                         device, use_amp, P)
+        sliced_random = [slice_and_score(model, heads, cfg, val_split, device,
+                                         use_amp, P)
+                         for heads in draws[:max(1, args.draws // 4)]]
+        sliced_random = [r for r in sliced_random if r]
+        if sliced_aligned:
+            log(f"    sliced aligned {sliced_aligned['accuracy'] * 100:6.2f}%  "
+                f"({sliced_aligned['param_reduction']:.1%} fewer params)")
+
         results[key] = {
             "clean": clean,
             "aligned": aligned,
+            "sliced_aligned": sliced_aligned,
+            "sliced_random_mean": (statistics.fmean(r["accuracy"] for r in sliced_random)
+                                   if sliced_random else None),
+            "sliced_random_per_draw": [r["accuracy"] for r in sliced_random],
+            "mask_vs_slice_aligned": (sliced_aligned["accuracy"] - aligned
+                                      if sliced_aligned else None),
             "random_mean": statistics.fmean(rnd),
             "random_std": statistics.stdev(rnd) if len(rnd) > 1 else None,
             "random_per_draw": rnd,
@@ -216,12 +298,23 @@ def main(argv=None):
 
     P.rule("Summary")
     log(f"  {'arm':<10}{'clean':>9}{'aligned':>9}{'random':>9}{'A-R':>9}"
-        f"{'aln+I4':>9}{'rnd+I4':>9}")
+        f"{'aln+I4':>9}{'rnd+I4':>9}{'slc-aln':>9}{'slc-rnd':>9}")
     for key in ("baseline", "sal", "drophead"):
         r = results[key]
+        sa = r["sliced_aligned"]
+        sr = r["sliced_random_mean"]
         log(f"  {key:<10}{r['clean'] * 100:8.2f}%{r['aligned'] * 100:8.2f}%"
             f"{r['random_mean'] * 100:8.2f}%{r['aligned_minus_random'] * 100:+8.2f} "
-            f"{r['aligned_int4'] * 100:7.2f}%{r['random_int4_mean'] * 100:8.2f}%")
+            f"{r['aligned_int4'] * 100:7.2f}%{r['random_int4_mean'] * 100:8.2f}%"
+            + (f"{sa['accuracy'] * 100:8.2f}%" if sa else f"{'n/a':>9}")
+            + (f"{sr * 100:8.2f}%" if sr is not None else f"{'n/a':>9}"))
+    any_sliced = next((r["sliced_aligned"] for r in results.values()
+                       if r["sliced_aligned"]), None)
+    if any_sliced:
+        log(f"  slicing removed {any_sliced['heads_per_layer_removed']} heads from "
+            f"every layer: {any_sliced['param_reduction']:.1%} fewer parameters "
+            f"({any_sliced['params_before'] / 1e6:.1f}M -> "
+            f"{any_sliced['params_after'] / 1e6:.1f}M)")
 
     payload = {
         "experiment": "exp12_aligned_pruning",
@@ -229,6 +322,10 @@ def main(argv=None):
         "seed": args.seed, "mask_ratio": args.mask_ratio, "epochs": args.epochs,
         "n_train": train_split[0].shape[0], "n_val": val_split[0].shape[0],
         "draws": args.draws, "smoke": args.smoke,
+        "uniform_per_layer": args.uniform_per_layer,
+        "sal_set_is_uniform": is_uniform,
+        "config_target_heads": cfg.num_heads_to_prune,
+        "effective_prune_fraction": cfg.effective_prune_fraction,
         "device": str(device), "vram_gb": round(vram, 1),
         "num_layers": nl, "num_heads_per_layer": nh,
         "sal_pruned_heads": pruned_by_sal,
@@ -236,11 +333,16 @@ def main(argv=None):
         "sal_pruned_per_layer": [per_layer.get(i, 0) for i in range(nl)],
         "results": results,
         "caveats": {
-            "masking": "aligned and random cells are both applied by masking, not "
-                       "slicing: SAL's pruned set is not uniform per layer so "
-                       "slice_heads() cannot express it. Masking is accuracy-"
-                       "equivalent to slicing the same heads and makes the two "
-                       "cells differ only in which heads are removed.",
+            "masking": "aligned and random cells are applied by masking, which "
+                       "keeps every weight and matmul and so measures accuracy "
+                       "retention only. Under --uniform-per-layer the same two "
+                       "sets are additionally applied by slice_heads() "
+                       "(sliced_aligned / sliced_random_mean), which is what "
+                       "turns the retention into a real size reduction. Without "
+                       "the flag SAL's set is not uniform per layer and cannot "
+                       "be sliced at all.",
+            "sliced_random_draws": "the sliced random cell uses a quarter of the "
+                                   "draws, since each one rebuilds the model.",
             "int4": "per-output-channel symmetric weight round-trip on every "
                     "nn.Linear except the classifier, as in the prototype.",
             "drophead_aligned": "drophead never had a pruned set of its own; it is "

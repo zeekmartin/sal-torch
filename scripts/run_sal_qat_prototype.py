@@ -693,7 +693,7 @@ def make_optimizer(model, total_steps: int):
 
 def train_variant(key, mask_mode, use_qat, num_classes, train_split, epochs, batch_size,
                   seed, device, use_amp, mask_ratio, force_manual_qat=False,
-                  fi_batches=None):
+                  fi_batches=None, uniform_per_layer=False):
     """Build and train one variant. Returns ``(model, info)``, with QAT stripped().
 
     ``mask_mode`` is ``"none"`` (no masking at all), ``"sal"`` (the validated
@@ -701,6 +701,10 @@ def train_variant(key, mask_mode, use_qat, num_classes, train_split, epochs, bat
     ``"drophead"`` / ``"nonaccum"`` / ``"progressive"`` (see
     :class:`ResampleMasker`) or ``"fi_drophead"`` (see
     :class:`FIDropHeadMasker`, which needs ``fi_batches``).
+
+    ``uniform_per_layer`` constrains every draw to an equal quota per layer, so
+    the trained set is expressible as a ``slice_heads()`` argument. Off by
+    default; the shipped behaviour is the global draw.
     """
     from sal import SALConfig, SALTrainer
 
@@ -719,7 +723,8 @@ def train_variant(key, mask_mode, use_qat, num_classes, train_split, epochs, bat
 
     t0 = time.time()
     if mask_mode == "sal":
-        cfg = SALConfig.auto(model, prune_fraction=mask_ratio)
+        cfg = SALConfig.auto(model, prune_fraction=mask_ratio,
+                             uniform_per_layer=uniform_per_layer)
         trainer = SALTrainer(model, cfg, optimizer, loader, scheduler=scheduler,
                              seed=seed, train_step=step)
         history = trainer.train(num_epochs=epochs)
@@ -730,7 +735,8 @@ def train_variant(key, mask_mode, use_qat, num_classes, train_split, epochs, bat
     elif mask_mode in ("drophead", "nonaccum", "progressive", "fi_drophead"):
         # Same hook, same schedule shape, no accumulation. Driven by hand rather
         # than SALTrainer, which owns the accumulating schedule we are removing.
-        cfg = SALConfig.auto(model, prune_fraction=mask_ratio)
+        cfg = SALConfig.auto(model, prune_fraction=mask_ratio,
+                             uniform_per_layer=uniform_per_layer)
         if mask_mode == "fi_drophead":
             if not fi_batches:
                 raise ValueError("fi_drophead needs fi_batches to read the graph from")
