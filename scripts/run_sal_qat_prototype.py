@@ -999,7 +999,10 @@ def summary_table(results: dict, budget: dict, epochs: int, smoke: bool) -> str:
             if v is not None:
                 deltas[key] = v - base
                 lines.append(f"  {label:<10} {v * 100:6.2f}%  ({deltas[key] * 100:+.2f}pp)")
-        if len(deltas) == 3:
+        # Membership, not a count: a run with --variants baseline drophead
+        # progressive fi_drophead also yields three deltas, and the additive
+        # prediction is meaningless (and a KeyError) without the SAL/QAT arms.
+        if {"sal", "qat", "sal_qat"} <= deltas.keys():
             s, q, b = deltas["sal"], deltas["qat"], deltas["sal_qat"]
             lines.append(f"  additive prediction (SAL + QAT gains): {(s + q) * 100:+.2f}pp; "
                          f"measured SAL+QAT: {b * 100:+.2f}pp")
@@ -1222,9 +1225,6 @@ def main(argv=None):
 
     # ------------------------------------------------------------------ save
     rule("Saving")
-    table = summary_table(results, budget, epochs, args.smoke)
-    (outdir / "summary_table.txt").write_text(table + "\n", encoding="utf-8")
-    figures = make_figures(outdir, results, budget)
     payload = {
         "model": MODEL_ID, "dataset": DATASET_ID, "smoke": args.smoke,
         "seed": args.seed, "epochs": epochs, "batch_size": args.batch_size,
@@ -1249,11 +1249,26 @@ def main(argv=None):
             "seed": "one training seed; treat sub-1pp gaps as not shown",
         },
         "training": training, "results": results, "budget": budget,
-        "figures": figures, "wall_clock_s": round(time.time() - started, 1),
+        "figures": {}, "wall_clock_s": round(time.time() - started, 1),
     }
-    (outdir / "sal_qat_prototype.json").write_text(json.dumps(payload, indent=2))
-    log(f"  metrics -> {outdir / 'sal_qat_prototype.json'}")
-    log(f"  table   -> {outdir / 'summary_table.txt'}")
+    # The measurements go to disk BEFORE anything that merely presents them.
+    # A formatting bug must never be able to destroy a finished run: twenty
+    # expF jobs died inside summary_table() after 35 minutes of training each
+    # and left nothing behind, because the table was written first.
+    dest = outdir / "sal_qat_prototype.json"
+    dest.write_text(json.dumps(payload, indent=2))
+    log(f"  metrics -> {dest}")
+
+    table = ""
+    try:
+        table = summary_table(results, budget, epochs, args.smoke)
+        (outdir / "summary_table.txt").write_text(table + "\n", encoding="utf-8")
+        log(f"  table   -> {outdir / 'summary_table.txt'}")
+        payload["figures"] = make_figures(outdir, results, budget)
+        dest.write_text(json.dumps(payload, indent=2))
+    except Exception as exc:  # presentation only; the metrics are already safe
+        log(f"  WARNING: table/figures failed ({type(exc).__name__}: {exc})")
+        log(f"  the measurements are intact in {dest}")
 
     rule("Summary")
     log(table)

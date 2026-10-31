@@ -144,3 +144,46 @@ def test_smoke_skips_int4_and_reuses_checkpoints(patched, tmp_path):
     again = patched.main(args + ["--reuse-models"])
     assert "reused_checkpoint" in again["training"]["baseline"]
     assert again["results"]["baseline"]["fp16"]["accuracy"] == r["fp16"]["accuracy"]
+
+
+# ------------------------------------------------------------ control variants
+def _results_for(keys, cell_acc=0.5):
+    """A minimal results dict covering every scored cell, for table formatting."""
+    return {k: {cell: {"accuracy": cell_acc + 0.01 * i}
+                for cell in ("fp16", "int8", "int4", "prune50", "prune50_int4")}
+            for i, k in enumerate(keys)}
+
+
+def test_summary_table_handles_three_control_arms_without_sal(mod):
+    """The expF regression: three deltas that are not sal/qat/sal_qat.
+
+    ``--variants baseline drophead progressive fi_drophead`` produces exactly
+    three non-baseline deltas, so a guard that counts them instead of naming
+    them walks into ``deltas["sal"]``. Twenty 35-minute jobs died this way.
+    """
+    results = _results_for(("baseline", "drophead", "progressive", "fi_drophead"))
+    table = mod.summary_table(results, {}, 1, False)
+    assert "additive prediction" not in table
+    assert "verdict" not in table
+
+
+def test_summary_table_still_reports_additive_prediction_for_sal_qat(mod):
+    results = _results_for(("baseline", "sal", "qat", "sal_qat"))
+    table = mod.summary_table(results, {}, 1, False)
+    assert "additive prediction" in table and "verdict" in table
+
+
+def test_metrics_survive_a_broken_summary_table(patched, tmp_path, monkeypatch):
+    """Presentation must never be able to destroy a finished run."""
+    def boom(*a, **k):
+        raise KeyError("sal")
+
+    monkeypatch.setattr(patched, "summary_table", boom)
+    payload = patched.main(["--epochs", "1", "--output", str(tmp_path),
+                            "--batch-size", "8", "--prune-seeds", "1",
+                            "--variants", "baseline", "--no-save-models",
+                            "--workers", "0"])
+    saved = json.loads((tmp_path / "sal_qat_prototype.json").read_text())
+    assert saved["results"]["baseline"]["fp16"]["accuracy"] == \
+        payload["results"]["baseline"]["fp16"]["accuracy"]
+    assert not (tmp_path / "summary_table.txt").exists()

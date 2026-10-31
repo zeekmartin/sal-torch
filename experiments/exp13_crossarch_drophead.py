@@ -342,19 +342,6 @@ def main(argv=None):
         if device.type == "cuda":
             torch.cuda.empty_cache()
 
-    rule("Summary")
-    cols = ["clean"] + [f"prune{int(r * 100)}" for r in args.prune_ratios]
-    log("  {:<10s}".format("arm") + "".join(f"{c:>11s}" for c in cols))
-    for arm in ARMS:
-        cells = []
-        for c in cols:
-            v = results[arm][c]
-            cells.append(f"{(v if c == 'clean' else v['mean']) * 100:10.2f}%")
-        log(f"  {arm:<10s}" + "".join(cells))
-    for c in cols[1:]:
-        d = (results["drophead"][c]["mean"] - results["sal"][c]["mean"]) * 100
-        log(f"  DropHead - SAL at {c}: {d:+.2f}pp")
-
     outdir = Path(args.output)
     outdir.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -379,9 +366,24 @@ def main(argv=None):
         },
         "wall_clock_s": round(time.time() - t_all, 1),
     }
+    # Measurements first, presentation second: a formatting bug must not be able
+    # to throw away a finished run (it cost twenty expF jobs).
     dest = outdir / f"exp13_{args.model.replace('/', '_')}_seed{args.seed}.json"
     dest.write_text(json.dumps(payload, indent=2))
     log(f"  results -> {dest}")
+
+    rule("Summary")
+    cols = ["clean"] + [f"prune{int(r * 100)}" for r in args.prune_ratios]
+    log("  {:<10s}".format("arm") + "".join(f"{c:>11s}" for c in cols))
+    for arm in ARMS:
+        cells = []
+        for c in cols:
+            v = results[arm][c]
+            cells.append(f"{(v if c == 'clean' else v['mean']) * 100:10.2f}%")
+        log(f"  {arm:<10s}" + "".join(cells))
+    for c in cols[1:]:
+        d = (results["drophead"][c]["mean"] - results["sal"][c]["mean"]) * 100
+        log(f"  DropHead - SAL at {c}: {d:+.2f}pp")
     return 0
 
 
