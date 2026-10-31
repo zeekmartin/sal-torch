@@ -64,8 +64,22 @@ def rule(title):
     log(f"=== {title} " + "=" * max(0, 66 - len(title)))
 
 
+_TEXT_HINTS = ("gpt2", "bert", "phi", "llama", "mistral", "qwen", "opt-",
+               "pythia", "falcon", "gemma")
+
+
 def is_text(model_id: str) -> bool:
-    return "gpt2" in model_id.lower() or "bert" in model_id.lower()
+    """True for the language models in this series, by name.
+
+    A name test rather than a config test because the dataset has to be chosen
+    before anything is downloaded. The failure mode is loud but wasteful: an
+    unlisted language model falls through to the image branch and dies in
+    ``AutoModelForImageClassification`` with "Unrecognized configuration class"
+    *after* encoding ImageNet-100 — which is how the first phi-2 job failed.
+    Add new families here.
+    """
+    mid = model_id.lower()
+    return any(h in mid for h in _TEXT_HINTS)
 
 
 # ------------------------------------------------------------------ data
