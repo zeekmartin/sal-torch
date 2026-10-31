@@ -219,6 +219,11 @@ the three shipped, `ExpertMasker`.
   code that reads it. Gate a batch with a *small non-smoke* run instead
   (`--epochs 1 --n-train 2000 --prune-seeds 2`), which costs ~4 min and covers
   the real table path.
+- **v0.6.0 defaults changed**: `prune_fraction` 0.33 -> 0.50 and `uniform_per_layer=True`
+  (exp14, `results/lumi_v060/PHASE2F.md`). The uniform draw makes SAL's trained set a
+  valid `slice_heads()` argument, so the retained accuracy becomes a 16.5% smaller
+  model; it costs nothing measured. `num_heads_to_prune` snaps to a multiple of the
+  layer count under that flag, since an equal quota is otherwise unreachable.
 - Smoke-test one job before submitting a batch, and submit the batch with
   `sbatch --dependency=afterok:<smoke-id>`. This caught the MIOpen failure with
   20 jobs held at `DependencyNeverSatisfied` and zero GPU-hours burned. Cancel

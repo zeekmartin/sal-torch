@@ -38,9 +38,11 @@ def _arm(masker):
         m.fill_(1.0)
 
 
-def test_default_stays_global_and_unconstrained(tiny_model):
-    """Cardinal rule: the shipped default is unchanged."""
-    assert _config().uniform_per_layer is False
+def test_uniform_is_the_shipped_default(tiny_model):
+    """As of v0.6.0 the constrained draw is the default, because it is the only
+    one whose trained set can be handed to slice_heads()."""
+    assert SALConfig(num_layers=4, num_heads_per_layer=8).uniform_per_layer is True
+    assert _config().uniform_per_layer is True
 
 
 def test_uniform_draw_gives_every_layer_the_same_count(tiny_model):
@@ -105,9 +107,12 @@ def test_uniform_set_is_a_valid_slice_heads_argument(tiny_model):
     assert len(heads) == cfg.num_heads_to_prune
 
 
-def test_default_draw_is_typically_not_uniform(tiny_model):
-    """Contrast: the unconstrained draw is what exp12 measured as unsliceable."""
-    cfg = _config()
+def test_opting_out_gives_a_typically_non_uniform_draw(tiny_model):
+    """Contrast: the unconstrained draw is what exp12 measured as unsliceable.
+
+    Still reachable with uniform_per_layer=False, and still unsliceable.
+    """
+    cfg = _config(uniform_per_layer=False)
     seen_nonuniform = False
     for seed in range(10):
         m = HeadMasker(tiny_model, cfg, seed=seed)
@@ -164,7 +169,8 @@ def test_target_is_snapped_to_a_multiple_of_the_layer_count():
     Without snapping, --uniform-per-layer would silently produce a set that is
     still unsliceable, which is the whole thing the option exists to fix.
     """
-    loose = SALConfig(num_layers=12, num_heads_per_layer=12, prune_fraction=0.33)
+    loose = SALConfig(num_layers=12, num_heads_per_layer=12, prune_fraction=0.33,
+                      uniform_per_layer=False)
     assert loose.num_heads_to_prune == 47          # 0.33 * 144, floored
 
     tight = SALConfig(num_layers=12, num_heads_per_layer=12, prune_fraction=0.33,

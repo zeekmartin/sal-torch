@@ -7,6 +7,20 @@
 
 Training-time sparsification that makes neural networks structurally resilient to compression.
 
+> **v0.6.0 changes two defaults.** `SALConfig.prune_fraction` is now **0.50**
+> (was 0.33) and head selection is **uniform per layer** by default
+> (`uniform_per_layer=True`). The first follows the monotone dose-response: train
+> at the ratio you will deploy at. The second is what makes the set of heads SAL
+> trained without expressible as a `slice_heads()` argument, so the accuracy it
+> retains becomes a smaller model rather than a mask. Pass
+> `uniform_per_layer=False` for the pre-v0.6.0 global draw.
+>
+> v0.6.0 also adds a second method, **DropHead**, which is the one to use when
+> you do not control which heads get removed — it beats a standard fine-tune by
+> **+49.8pp** at 50% pruning + INT4 on 10/10 seeds, where SAL on an arbitrary
+> set does not. See [v0.6.0 — two methods, two deployment
+> regimes](#v060--two-methods-two-deployment-regimes).
+
 ## Install
 
 ```bash
@@ -47,8 +61,10 @@ from sal import CompressionPipeline
 pipe = CompressionPipeline(model, eval_dataset, metric="accuracy")
 
 print(pipe.scan().recommendation)      # fragility, absorption map, projected sizes
-pipe.sal_train(train_dataset, epochs=3, prune_fraction=0.33)
-pipe.compress(pruning=0.33, quantization="int4", slice_heads=True)
+# Train at the ratio you intend to deploy at — the gain is monotone in it, and
+# the best cells are the matched ones. Both default to 0.50 since v0.6.0.
+pipe.sal_train(train_dataset, epochs=3, prune_fraction=0.50)
+pipe.compress(pruning=0.50, quantization="int4", slice_heads=True)
 
 report = pipe.validate()
 print(report.table)
@@ -85,6 +101,23 @@ for a SAL-trained one — a small weight norm turns out to be a poor proxy for a
 head the model can spare. `fi_guided` — spend the budget where the fragility scan
 says it is cheap — is much worse than either, because concentrating removal does
 more damage than spreading it.
+
+> **FI does not select heads, and no result in this project suggests it should.**
+> It is a diagnostic: it tells you how fragile a model is, not which head to
+> remove. The `fi_guided` row above is the evidence *against* using it that way,
+> and v0.6.0 added a much better-powered replication at training time. A
+> fragility-weighted *training* draw (`fi_drophead`: fragile heads dropped at
+> 2x the base rate, resilient at 0.5x, same expected rate overall) was measured
+> against a plain uniform draw on ViT-B/16 / ImageNet-100, 10 seeds, 20 head
+> selections per cell:
+>
+> | | mask_ratio 0.3 | mask_ratio 0.5 |
+> |---|---|---|
+> | fragility-weighted − uniform | **−5.02pp**, CI [−5.64, −4.40], **0/10 seeds** | **−4.77pp**, CI [−5.15, −4.39], **0/10 seeds** |
+>
+> Uniform random wins on every seed at both ratios, with ±0.4pp intervals. Use
+> `FIScanner` to decide *whether* to compress and how much; use random selection
+> to decide *which* heads. Full trail in `results/lumi_v060/PHASE2E.md`.
 
 That grid was one seed, and under `random` its two arms landed 0.0039 apart —
 a tie. The five-seed run in [What we measured](#what-we-measured) settles it
@@ -474,8 +507,9 @@ Three things came out of it that the thinner studies could not show.
   *deployment* ratio, and the cost is also monotone and small — 0.3 to 1.5pp of
   clean accuracy. A monotone response across five levels is much stronger
   evidence that the mechanism is real than any single cell. Practical rule:
-  **train at the ratio you intend to deploy at.** The shipped default of 0.33
-  leaves most of the effect unused if you are targeting 50%.
+  **train at the ratio you intend to deploy at.** This is why the shipped
+  default changed from 0.33 to **0.50** in v0.6.0 — at 0.33 most of the effect
+  goes unused against a 50% target.
 - **At 50% pruning SAL is robust; at 33% on this setup it is weak and
   inconsistent.** The 33% mean is small (+2 to +7pp depending on mask ratio)
   and one recurring seed sits *below* baseline at four of the five mask ratios,
@@ -494,6 +528,95 @@ Three things came out of it that the thinner studies could not show.
   1.6pp. Head-selection sampling, not the training seed, was the dominant noise
   term — and it is the cheapest to remove, since it costs evaluation passes and
   no retraining.
+
+#### v0.6.0 — two methods, two deployment regimes
+
+The v0.6.0 campaign on LUMI (AMD MI250X, ~85 GPU-hours) added the control arms
+that had never been run, and they changed the picture. Everything below is
+ViT-B/16 / ImageNet-100, 5 epochs, **10 seeds**, **20 shared head selections per
+cell**, full trail in `results/lumi_v060/PHASE2{C,D,E,F}.md`.
+
+**DropHead** — per-step resampled head dropout, the full ratio from step 0, no
+accumulation — is the strong general method. At 50% head pruning + INT4:
+
+| arm | P50+I4, mask_ratio 0.3 | vs baseline | P50+I4, mask_ratio 0.5 | vs baseline |
+|---|---|---|---|---|
+| standard fine-tune | 31.06% | — | 30.62% | — |
+| **DropHead** | **72.26%** | **+41.20pp**, CI [+40.44, +41.96], 10/10 | **80.39%** | **+49.77pp**, CI [+48.68, +50.86], 10/10 |
+| fragility-weighted draw | 67.24% | +36.18pp, 10/10 | 75.62% | +45.00pp, 10/10 |
+| ramped ratio | 63.38% | +32.31pp, 10/10 | 72.35% | +41.72pp, 10/10 |
+
+Both attempts to improve the draw **lose to plain uniform random on 0/10 seeds**
+(see the FI note above). What matters is total exposure to the perturbation, not
+which heads get hit — a ramp simply delivers less of it.
+
+**SAL** — accumulate heads during a window and hold them to the end — behaves
+differently: it specialises. It is far worse than DropHead on an *arbitrary* head
+set, and better than it on the *one set it trained without*. Scored at
+mask_ratio 0.5 with `uniform_per_layer=True`, every cell a perturbation of
+identical size:
+
+| arm | clean | **its own trained set** | a random set | sliced, trained set | sliced, random set |
+|---|---|---|---|---|---|
+| standard fine-tune | 93.77% | 31.56% | 36.70% | 31.55% | 34.92% |
+| **SAL** | 91.32% | **83.62%** | 54.56% | **83.61%** | 53.33% |
+| DropHead | 92.36% | 81.60% | 82.16% | 81.59% | 82.25% |
+
+The sliced model is **85.9M → 71.7M parameters, 16.5% smaller**, and masked and
+sliced accuracy agree to **±0.01pp over 10 seeds** — so the retained accuracy is
+a genuinely smaller model, not a masking artifact.
+
+| comparison | result |
+|---|---|
+| SAL on its own set vs a random set | **+29.06pp**, CI [+26.78, +31.33], 10/10 |
+| **standard fine-tune** on that same set vs a random set | −5.14pp, CI [−12.79, **+2.51**], 2/10 |
+| SAL vs DropHead, **identical** head set | **+2.02pp**, CI [+1.54, +2.50], 10/10 |
+| **sliced** SAL on its set vs **sliced** DropHead on a random set | **+1.36pp**, CI [+0.53, +2.18], 8/10 |
+| the same, **with INT4 on top** | +0.49pp, CI [−0.39, **+1.37**], 6/10 — **not established** |
+
+The second row is the control that matters and it is why this is adaptation
+rather than selection: a model that never trained with masking does **not** find
+SAL's head set easy, and the point estimate is negative at both ratios. The set
+is not made of unimportant heads; the trained model's relationship to it is.
+
+The last row is the honest limit. SAL's edge over DropHead is established in
+FP16 and after slicing, but **once INT4 is stacked on top the interval spans
+zero**. Against the standard fine-tune both methods are worth roughly the same
+there (+50.78pp for SAL-aligned, +50.30pp for DropHead-random, both 10/10).
+
+**So: which one you want depends on whether you control the head set.**
+
+| your deployment | use | measured |
+|---|---|---|
+| You choose which heads to remove, and can keep a list | **SAL** with `uniform_per_layer=True` (the default), saving `pruned_heads()` with the checkpoint and slicing exactly that set | 16.5% smaller, **+1.4pp** over the best alternative at the same size, 8–10/10 seeds |
+| The pruning is out of your hands, or varies per deployment | **DropHead** (`mask_mode="drophead"` in the prototype script) | **+49.8pp** over a standard fine-tune at 50% + INT4, 10/10 seeds |
+
+SAL costs ~1pp of clean accuracy (91.32% vs DropHead's 92.36%), so its net
+advantage at deployment is ~1.4pp, not ~2pp. And SAL scored on a set it did not
+train for is **27.6pp behind** DropHead. That gap is the price of specialisation
+and nothing in v0.6.0 reduced it.
+
+#### Cross-architecture — does DropHead's advantage travel?
+
+Three architectures and two training objectives, same masking protocol
+(`experiments/exp13_crossarch_drophead.py`, 3 seeds each for the two new ones):
+
+| model / task | arm | clean | prune 33% | prune 50% |
+|---|---|---|---|---|
+| **ViT-B/16** / ImageNet-100 (supervised, 10 seeds) | baseline | 93.8% | 69.0% | 35.3% |
+| | DropHead | 92.7% | **88.4%** | **82.2%** |
+| **DINOv2-base** / ImageNet-100 (self-supervised, 3 seeds) | baseline | 92.7% | 17.2% | 1.6% |
+| | DropHead | 89.5% | **82.1%** (+64.9pp, 3/3) | **60.1%** (+58.6pp, 3/3) |
+| **GPT-2 Medium** / SST-2 (causal LM, 3 seeds) | baseline | 92.7% | 89.4% | 84.1% |
+| | DropHead | 92.1% | **90.7%** (+1.3pp, 3/3) | **88.4%** (+4.3pp, 3/3) |
+
+The ordering holds everywhere, but the margins differ by an order of magnitude —
+and the baseline row says why. **GPT-2 on SST-2 keeps 84.1% at 50% head pruning**
+where DINOv2 collapses to 1.6%. There is almost no damage to repair, so there is
+almost nothing to win. This is the clearest statement yet of the scope rule:
+these methods pay off in proportion to how much compression actually hurts your
+model. A binary sentiment task on a 24-layer model is a poor benchmark for them,
+whichever way it points.
 
 #### The earlier single-seed runs
 
@@ -544,6 +667,23 @@ the adaptation cannot.
 
 #### What is not established
 
+- **That SAL's accumulating schedule beats plain DropHead in general.** It does
+  not. On an arbitrary head set DropHead is ahead by **27.6pp** (82.16% vs
+  54.56% at mask_ratio 0.5, 10 seeds). SAL's advantage exists only on the
+  specific set it trained without, which means you must record that set and
+  prune exactly it. If you cannot, use DropHead.
+- **That SAL's edge survives INT4.** Sliced and in FP16 it is +1.36pp, CI
+  [+0.53, +2.18], 8/10 seeds. With INT4 weights stacked on top the same
+  comparison is +0.49pp with the interval spanning zero, 6/10. The deployment
+  claim holds for slicing; it is unproven for slicing *plus* 4-bit weights.
+- **That the smaller model is a faster model.** Slicing 50% of heads from
+  ViT-B/16 removes 16.5% of parameters, but attention is roughly a third of a
+  transformer block: v0.5.1 measured only 1.1x GPU / 1.2x CPU. A size reduction
+  is reported here; a latency reduction is not. The joint head+MLP path is where
+  that work lives and it is not in this package.
+- **That the aligned/sliced result travels.** It has been measured on **one
+  architecture** (ViT-B/16 / ImageNet-100). The cross-architecture table covers
+  DropHead on DINOv2 and GPT-2, not the aligned-pruning path.
 - **Quantization-only resilience.** Five seeds put `int4` at +0.21pp on 3/5 —
   no consistent effect. `int8` is consistent but small (+0.73pp), and measured
   on a different backend than v0.4.0's. If you never prune, do not assume SAL
@@ -579,6 +719,8 @@ the adaptation cannot.
 
 | your setup | recommendation |
 |---|---|
+| **You know exactly which heads you will remove** | **SAL, with `uniform_per_layer=True` (the default).** Save `pruned_heads()` with the checkpoint and slice that set. 16.5% fewer parameters and +1.4pp over the best alternative at the same size, 8–10/10 seeds. Without the saved set the advantage is unrecoverable. |
+| **You do not control the pruning, or it varies** | **DropHead, not SAL.** Per-step resampled head dropout: +49.8pp over a standard fine-tune at 50% pruning + INT4, 10/10 seeds, and it holds on DINOv2 and GPT-2 too. SAL on an arbitrary set is 27.6pp *behind* it. |
 | **Full fine-tuning, and you prune heads** | **Yes.** The strongest and best-replicated case: +2.45pp at 33% pruning on 5/5 seeds of GPT-2 Medium, at no cost to clean accuracy. |
 | **Vision transformers, pruning at ≥50%** | **Yes.** The best-measured case in the project: ViT-B/16/ImageNet-100, 15 seeds, 20 head selections per cell, **+14.5pp ± 4.3** at 50% pruning + INT4 (95% CI [+12.4, +16.7], 15/15 seeds). Costs 0.3–1.5pp of clean accuracy, rising with `prune_fraction`. |
 | **Vision transformers, pruning at 33%** | **Measure first.** On ViT-B/16/ImageNet-100 the benefit is weak and inconsistent (one recurring seed below baseline), while on ViT-base/CIFAR-10 it was +14 to +20pp on 3/3 and on GPT-2 Medium +2.45pp on 5/5. Same ratio, three different answers — this is where your model and task decide. |

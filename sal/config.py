@@ -7,12 +7,12 @@ from typing import Optional
 class SALConfig:
     num_layers: int = 0
     num_heads_per_layer: int = 0
-    prune_fraction: float = 0.33
+    prune_fraction: float = 0.50
     prune_start_ratio: float = 0.10
     prune_end_ratio: float = 0.80
     prune_interval: int = 1
     schedule: str = "random"
-    uniform_per_layer: bool = False
+    uniform_per_layer: bool = True
     fi_interval: int = 0
     attention_pattern: Optional[str] = None
     head_dim: Optional[int] = None

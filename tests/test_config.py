@@ -6,12 +6,22 @@ class TestSALConfig:
     def test_basic(self):
         c = SALConfig(num_layers=12, num_heads_per_layer=12)
         assert c.total_heads == 144
-        assert c.num_heads_to_prune == 47
+        # 0.50 of 144 is 72, already 6 per layer, so the uniform default does
+        # not have to round it.
+        assert c.num_heads_to_prune == 72
+        assert c.effective_prune_fraction == 0.5
 
     def test_defaults(self):
         c = SALConfig(num_layers=4, num_heads_per_layer=8)
-        assert c.prune_fraction == 0.33
+        assert c.prune_fraction == 0.50
         assert c.schedule == "random"
+        assert c.uniform_per_layer is True
+
+    def test_global_draw_is_still_available(self):
+        """Opting out restores the pre-v0.6.0 behaviour, rounding included."""
+        c = SALConfig(num_layers=12, num_heads_per_layer=12, prune_fraction=0.33,
+                      uniform_per_layer=False)
+        assert c.num_heads_to_prune == 47
 
     def test_invalid_schedule(self):
         with pytest.raises(ValueError):
