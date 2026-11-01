@@ -235,6 +235,24 @@ neuron pruning was measured and is a bad trade: at a matched 57.5M, neurons alon
 lose 7.2pp while heads-33%+neurons-33% lose 14.3pp and heads-50%+neurons-25% lose
 20.3pp, for 0.04x–0.12x of extra speed.
 
+And the smaller model is faster, measured the same way as the head results above
+— ViT-B/16 at batch 32 on one MI250X, median of 50 runs after 10 warmup,
+`max-autotune`:
+
+| neurons pruned | params | retention | eager | compiled | **total** | throughput |
+|---|---|---|---|---|---|---|
+| none (dense) | 85.9M | — | 47.72 ms | 42.63 ms | 1.12x | 751 img/s |
+| 25% | 71.7M | −3.1pp | 41.61 ms | 37.42 ms | **1.28x** | 855 img/s |
+| 33% | 67.2M | −4.3pp | 40.16 ms | 36.01 ms | **1.33x** | 889 img/s |
+| 50% | 57.5M | −7.2pp | 35.46 ms | 31.89 ms | **1.50x** | 1004 img/s |
+
+At batch 1 none of this helps: slicing measures 0.98x and 0.93x for the 25% and
+33% cells, and the speedup there is the compiler's — 2.2x with
+`reduce-overhead`, at any size. Roughly half the parameters have to go before
+slicing moves a batch-1 number at all. The two regimes are the same ones the
+head results run into, in [Does the smaller model actually run
+faster?](#does-the-smaller-model-actually-run-faster).
+
 **This package masks attention heads.** MLP neuron pruning is in
 [sal-torch-pro](#sal-torch-pro), the commercial extension (license required; not
 on public PyPI). At equal parameter count (−16.5%), MLP pruning costs −3pp

@@ -1,6 +1,11 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.1] — 2026-11-01
+
+A documentation and routing release: no change to the mechanism, the defaults or
+any trained artifact. Everything here comes from two LUMI campaigns — a
+six-architecture routing sweep and an FFN-pruning grid — with the trail in
+`results/lumi_v060/PHASE2{G,H}.md`.
 
 ### Added
 - **`CompressionPipeline.probe()` and `ProbeSummary` — the router.** Two
@@ -18,10 +23,13 @@
   extension adds (MLP neuron pruning, `torch.compile`/ONNX, QAT, compliance
   reports, fleet monitoring) and stating explicitly that everything else
   documented in the README needs nothing but this package.
-- **README section comparing FFN-neuron pruning with head pruning.** At an
-  identical 71.7M parameters on ViT-B/16, 25% of neurons costs 3.1pp against
-  10.2-12.2pp for 50% of heads. Neuron masking is not part of this package; the
-  numbers are reported because they change how much the head decision is worth.
+- **README section comparing FFN-neuron pruning with head pruning**, now with
+  measured latency. At an identical 71.7M parameters on ViT-B/16, 25% of neurons
+  costs 3.1pp against 10.2-12.2pp for 50% of heads. The matching batch-32
+  speedups are **1.28x** at 25% of neurons (855 img/s), **1.33x** at 33% (889)
+  and **1.50x** at 50% (1004), against 1.12x for the compiled dense model. At
+  batch 1 slicing measures 0.98x and 0.93x and the speedup is the compiler's
+  (2.2x at any size), the same two regimes the head results run into.
 
 ### Changed
 - **The fragility index is no longer a router, in the code or the docs.** It was
