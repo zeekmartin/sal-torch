@@ -60,9 +60,13 @@ from sal import CompressionPipeline
 
 pipe = CompressionPipeline(model, eval_dataset, metric="accuracy")
 
+# Step 1. Probe before you train anything. Two eval sweeps, no training, nothing
+# modified — it removes half the heads at random and measures what that costs.
+print(pipe.probe().recommendation)     # -> sal_aligned / drophead / skip_heads
+
 print(pipe.scan().recommendation)      # fragility, absorption map, projected sizes
-# Train at the ratio you intend to deploy at — the gain is monotone in it, and
-# the best cells are the matched ones. Both default to 0.50 since v0.6.0.
+# Step 2. Train at the ratio you intend to deploy at — the gain is monotone in it,
+# and the best cells are the matched ones. Both default to 0.50 since v0.6.0.
 pipe.sal_train(train_dataset, epochs=3, prune_fraction=0.50)
 pipe.compress(pruning=0.50, quantization="int4", slice_heads=True)
 
@@ -147,6 +151,95 @@ refuses grouped-query attention — architectures store one head count, and
 removing query heads without whole KV groups corrupts the mapping. It raises in
 both cases rather than returning something quietly wrong.
 
+## Start with the probe, not with a guess
+
+**The single most useful thing you can measure about your model costs two
+evaluation sweeps and no training: remove half the heads at random and see how
+far it falls.** That number decides which method is worth paying for, and nothing
+cheaper predicts it — not the architecture, not the parameter count, and not the
+fragility index.
+
+```python
+pr = pipe.probe()            # or probe(fraction=0.33) to match your target
+print(pr.drop_pp, pr.route)  # 62.21  sal_aligned
+print(pr.recommendation)
+```
+
+| probe drop at 50% of heads | route | what to do |
+|---|---|---|
+| **> 30pp** — fragile | `sal_aligned` | **SAL.** Accumulate-and-hold, save `pruned_heads()`, prune exactly that set. This is where SAL's advantage is large. |
+| **10–30pp** — intermediate | `drophead` | **Either.** SAL if you choose the deployed head set, **DropHead** if you don't — it is robust on any set of that size. |
+| **< 10pp** — robust | `skip_heads` | **Skip head training.** It buys nothing measurable here. Go straight to compression. |
+
+Then, in order:
+
+3. **Prune FFN neurons.** This is where the bulk of the compression is — see
+   [MLP neurons vs. attention heads](#mlp-neurons-vs-attention-heads) below.
+4. **`torch.compile`.** Measured 1.12x on a dense ViT-B/16 at batch 32, 1.50x on
+   a pruned one, and 2.2x at batch 1 where pruning alone buys almost nothing.
+
+### Where the thresholds come from
+
+Six architectures, probed and then trained both ways, scored on an **identical**
+head set so neither arm gets a perturbation the other did not face. Sorted by
+probe drop:
+
+| model | params | FI | **probe drop** | SAL gain | DropHead gain | **SAL − DropHead** | route |
+|---|---|---|---|---|---|---|---|
+| DINOv2-large | 304.6M | 0.0062 | **−94.0pp** | +90.4 | +59.3 | **+31.0** | SAL |
+| DeiT-small | 21.7M | 0.1563 | −76.3pp | +68.2 | +55.5 | **+12.7** | SAL |
+| ViT-B/16 | 85.9M | 0.0660 | −62.2pp | — | — | **+2.0** | SAL |
+| I-JEPA ViT-H/14 | 630.8M | 0.0040 | −18.9pp | +3.0 | +0.5 | +2.6 | either |
+| BERT-base | 109.5M | 0.0935 | −5.2pp | +2.9 | +2.9 | +0.1 | skip |
+| phi-2 | 2648.6M | 0.0008 | −4.4pp | +2.1 | +2.0 | +0.1 | skip |
+
+Gains are against a standard fine-tune on that same set, in points. ViT-B/16 is
+the 10-seed protocol from the tables further down; the rest are 3 seeds (phi-2,
+1) with 20 random draws per cell, 5 epochs, `mask_ratio 0.5`, on MI250X.
+
+**SAL's lead over DropHead tracks the probe almost monotonically** — +31.0pp at a
+94pp drop down to +0.1pp at 4pp, two adjacent inversions across two modalities
+and a 122x range of parameter count. The two quantities share no measurement:
+the probe comes from the standard fine-tune alone, and the margin contains no
+baseline term.
+
+> **The fragility index does *not* order that table, and it was the original
+> hypothesis.** BERT-base has a *higher* FI than ViT-B/16 (0.094 vs 0.066) and
+> loses 5pp where ViT-B/16 loses 62; DINOv2-large has an FI 25x lower than
+> DeiT-small and collapses to chance on the same task, protocol and class count.
+> Parameter count does not order it either (−76, −62, −5, −94, −19, −4 by size).
+> **FI stays in the product for diagnosis and certification. It is not a router,
+> and `scan()` no longer presents it as one.**
+
+Caveats worth carrying: six points make a usable heuristic, not a calibrated
+boundary, and nothing here gives a principled threshold. The two text models sit
+at a 50.9% majority-class floor, so their small drops are partly a ceiling
+effect — DINOv2-large is the case that falsifies FI without that excuse.
+
+### MLP neurons vs. attention heads
+
+Head pruning is the *small* half of the compression. At an **identical parameter
+count**, pruning FFN neurons costs about a third of what pruning heads costs:
+
+| ViT-B/16 at 71.7M parameters (−16.5%) | retention vs. the dense model |
+|---|---|
+| 50% of heads, DropHead | −12.2pp |
+| 50% of heads, SAL aligned | −10.2pp |
+| **25% of FFN neurons** | **−3.1pp** |
+
+The FFN has redundancy the attention block does not: 3072 neurons per layer give
+a random draw far more room than 12 heads do. At 50% of neurons the reduction is
+33.0% of all parameters — twice what 50% of heads removes — for −7.2pp, still
+less than heads cost at half the reduction. Adding head pruning *on top of*
+neuron pruning was measured and is a bad trade: at a matched 57.5M, neurons alone
+lose 7.2pp while heads-33%+neurons-33% lose 14.3pp and heads-50%+neurons-25% lose
+20.3pp, for 0.04x–0.12x of extra speed.
+
+**Neuron masking is not part of sal-torch** — this package masks attention heads.
+See `ROADMAP.md`. The numbers are reported here because they change how you
+should budget the head-pruning decision above: it is worth doing when the probe
+says your model is fragile, and it is not where your compression comes from.
+
 ## Know your model before you touch it
 
 ### FIScanner — how fragile is this model?
@@ -157,11 +250,24 @@ compared by their activation signatures; an edge between two heads is *fragile*
 when they share no common neighbour, i.e. the function it carries has no backup.
 FI is the fraction of such edges.
 
-- **Low FI** → heavily triangulated graph, lots of redundancy → robust.
-- **High FI** → many unsupported edges → fragile under compression.
+- **Low FI** → heavily triangulated graph, lots of redundancy.
+- **High FI** → many unsupported edges.
 
 FI is purely diagnostic — it measures, it never perturbs. You can use it with or
 without SAL training.
+
+> **Do not use FI to predict how much compression will cost, and do not use it to
+> choose a method.** That was the hypothesis and it was tested on six
+> architectures and refuted in both directions: a model with a *higher* FI lost
+> twelve times less accuracy than one with a lower FI, and the lowest-FI vision
+> model in the set collapsed to chance. `probe()` is the router — it measures the
+> model's loss under the pruning you intend, which is the quantity that actually
+> orders the outcomes. See [Start with the
+> probe](#start-with-the-probe-not-with-a-guess).
+>
+> What FI is for: structural reporting and certification, tracking a model's
+> graph over training with `FIMonitor`, and locating layers to leave alone with
+> `classify_layers()`. Those uses are untouched by the routing result.
 
 ```python
 from sal import FIScanner
@@ -771,10 +877,18 @@ the adaptation cannot.
 
 ### When to use SAL
 
+**Run `probe()` first.** The old advice here was "use DropHead by default"; six
+architectures later, the default is to spend two eval sweeps measuring your own
+model instead of inheriting someone else's regime. The table below is what to do
+once you have that number.
+
 | your setup | recommendation |
 |---|---|
-| **You know exactly which heads you will remove** | **SAL, with `uniform_per_layer=True` (the default).** Save `pruned_heads()` with the checkpoint and slice that set. 16.5% fewer parameters and +1.4pp over the best alternative at the same size, 8–10/10 seeds. Without the saved set the advantage is unrecoverable. |
-| **You do not control the pruning, or it varies** | **DropHead, not SAL.** Per-step resampled head dropout: +49.8pp over a standard fine-tune at 50% pruning + INT4, 10/10 seeds, and it holds on DINOv2 and GPT-2 too. SAL on an arbitrary set is 27.6pp *behind* it. |
+| **Any model, before anything else** | **`pipe.probe()`.** Two eval sweeps, no training. Drop > 30pp → SAL on the set you will deploy; 10–30pp → either, DropHead if the set is not yours; < 10pp → skip head training. See [Start with the probe](#start-with-the-probe-not-with-a-guess). |
+| **The probe says > 30pp, and you know which heads you will remove** | **SAL, with `uniform_per_layer=True` (the default).** Save `pruned_heads()` with the checkpoint and slice that set. 16.5% fewer parameters and +1.4pp over the best alternative at the same size, 8–10/10 seeds. Without the saved set the advantage is unrecoverable. SAL's lead over DropHead on the identical set reached +31.0pp on the most fragile model measured. |
+| **The probe says > 10pp and the pruning is out of your hands** | **DropHead, not SAL.** Per-step resampled head dropout: +49.8pp over a standard fine-tune at 50% pruning + INT4 on ViT-B/16, 10/10 seeds, and it holds on DINOv2 and GPT-2. SAL on an arbitrary set is 27.6pp *behind* it. |
+| **The probe says < 10pp** | **Skip head training.** On BERT-base and phi-2 both methods landed within 0.1pp of a standard fine-tune, and on I-JEPA DropHead cost 1.1pp of clean accuracy for no gain. Compress and quantize directly. |
+| **Where your compression actually comes from** | **FFN neurons, not heads** — a third of the accuracy cost at equal size. Not in this package; see [MLP neurons vs. attention heads](#mlp-neurons-vs-attention-heads). |
 | **Full fine-tuning, and you prune heads** | **Yes.** The strongest and best-replicated case: +2.45pp at 33% pruning on 5/5 seeds of GPT-2 Medium, at no cost to clean accuracy. |
 | **Vision transformers, pruning at ≥50%** | **Yes.** The best-measured case in the project: ViT-B/16/ImageNet-100, 15 seeds, 20 head selections per cell, **+14.5pp ± 4.3** at 50% pruning + INT4 (95% CI [+12.4, +16.7], 15/15 seeds). Costs 0.3–1.5pp of clean accuracy, rising with `prune_fraction`. |
 | **Vision transformers, pruning at 33%** | **Measure first.** On ViT-B/16/ImageNet-100 the benefit is weak and inconsistent (one recurring seed below baseline), while on ViT-base/CIFAR-10 it was +14 to +20pp on 3/3 and on GPT-2 Medium +2.45pp on 5/5. Same ratio, three different answers — this is where your model and task decide. |

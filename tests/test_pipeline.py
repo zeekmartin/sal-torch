@@ -271,3 +271,77 @@ def test_mask_survives_quantization(tiny_model):
     assert all(len(p._forward_pre_hooks) > 0 for p in live)
     # The mask context must point at the modules the model is actually using.
     assert [id(p) for p in pipe._mask_ctx.projs] == [id(p) for p in live]
+
+
+# ------------------------------------------------------------------ the router
+def test_probe_measures_a_drop_and_leaves_the_model_alone(pipe, tiny_model):
+    """Two eval sweeps, no training, and nothing changed afterwards."""
+    before = [p.detach().clone() for p in tiny_model.parameters()]
+    was_training = tiny_model.training
+    pr = pipe.probe(fraction=0.5)
+    assert pr.heads_removed == 16            # 4 layers x 8 heads, half of them
+    assert pr.fraction == 0.5
+    assert pr.route in ("sal_aligned", "drophead", "skip_heads")
+    assert tiny_model.training is was_training
+    for p0, p1 in zip(before, tiny_model.parameters()):
+        assert torch.equal(p0, p1), "probe must not modify weights"
+
+
+def test_probe_hooks_are_removed(pipe, tiny_model):
+    """A leaked pre-hook would silently mask every later stage."""
+    pipe.probe()
+    hooks = sum(len(m._forward_pre_hooks) for m in tiny_model.modules())
+    assert hooks == 0
+
+
+def test_probe_routes_by_the_drop_not_by_fi():
+    """The thresholds, exercised directly on the three bands."""
+    from sal.pipeline import FRAGILE_DROP_PP, ROBUST_DROP_PP, ProbeSummary
+
+    def route_for(drop_pp):
+        clean, pruned = 0.95, 0.95 - drop_pp / 100
+        drop = (clean - pruned) * 100
+        return ("sal_aligned" if drop > FRAGILE_DROP_PP
+                else "skip_heads" if drop < ROBUST_DROP_PP else "drophead")
+
+    assert route_for(94.0) == "sal_aligned"      # DINOv2-large
+    assert route_for(62.0) == "sal_aligned"      # ViT-B/16
+    assert route_for(18.9) == "drophead"         # I-JEPA ViT-H/14
+    assert route_for(5.2) == "skip_heads"        # BERT-base
+    for drop, route in ((94.0, "sal_aligned"), (18.9, "drophead"), (5.2, "skip_heads")):
+        ps = ProbeSummary(clean=0.95, pruned=0.95 - drop / 100, fraction=0.5,
+                          heads_removed=16, route=route)
+        assert f"{drop:.2f}pp lost" in ps.recommendation
+        assert "fragility index" not in ps.recommendation.lower()
+
+
+def test_probe_drop_sign_follows_the_metric():
+    """With metric='loss', a *higher* number is worse, so the sign flips."""
+    from sal.pipeline import ProbeSummary
+
+    acc = ProbeSummary(clean=0.90, pruned=0.40, fraction=0.5, heads_removed=16,
+                       route="sal_aligned", metric="accuracy")
+    loss = ProbeSummary(clean=0.40, pruned=0.90, fraction=0.5, heads_removed=16,
+                        route="sal_aligned", metric="loss")
+    assert acc.drop_pp == pytest.approx(50.0)
+    assert loss.drop_pp == pytest.approx(50.0)
+
+
+def test_probe_rejects_degenerate_fractions(pipe):
+    for bad in (0.0, 1.0, -0.1, 1.5):
+        with pytest.raises(ValueError, match="fraction"):
+            pipe.probe(fraction=bad)
+
+
+def test_scan_no_longer_presents_fi_as_a_router(pipe):
+    rec = pipe.scan().recommendation
+    assert "diagnostic only" in rec
+    assert "probe()" in rec
+    for word in ("robust attention graph", "fragile attention graph"):
+        assert word not in rec
+
+
+def test_probe_result_serialises(pipe):
+    d = pipe.probe().to_dict()
+    assert set(d) >= {"clean", "pruned", "drop_pp", "route", "heads_removed"}
+    json.dumps(d)

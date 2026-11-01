@@ -47,6 +47,15 @@ logger = logging.getLogger(__name__)
 
 SMALL_MODEL_PARAMS = 100_000_000
 
+# Routing thresholds for probe(), in points of accuracy lost when half the heads
+# are removed from the untrained model. Drawn from a six-architecture sweep
+# (DeiT-small, ViT-B/16, BERT-base, DINOv2-large, I-JEPA ViT-H/14, phi-2) in
+# which SAL's lead over DropHead on an identical head set tracked the probe
+# almost monotonically: +31.0pp at a 94pp drop down to +0.1pp at 4pp. The bands
+# are a usable heuristic on six points, not a calibrated boundary.
+FRAGILE_DROP_PP = 30.0
+ROBUST_DROP_PP = 10.0
+
 
 class PipelineError(Exception):
     """Raised when the pipeline is asked to do something unsafe or out of order."""
@@ -110,8 +119,8 @@ class ScanSummary:
         lines = [
             f"{self.num_layers} layers x {self.num_heads} heads, "
             f"{self.total_params / 1e6:.1f}M parameters",
-            f"fragility index: {self.fi_score:.3f} "
-            f"({'robust' if self.fi_score < 0.3 else 'fragile'} attention graph)",
+            f"fragility index: {self.fi_score:.3f} (diagnostic only -- FI does "
+            f"not predict how much pruning costs; run probe() for that)",
         ]
         elastic = [l for l, c in self.absorption_map.items() if c == "ELASTIC"]
         hub = [l for l, c in self.absorption_map.items() if c == "HUB"]
@@ -126,8 +135,9 @@ class ScanSummary:
             lines.append(f"note: under {SMALL_MODEL_PARAMS / 1e6:.0f}M parameters, "
                          "SAL's benefit is marginal.")
         else:
-            lines.append("recommended: sal_train(prune_fraction=0.33) then "
-                         "compress(pruning=0.33, quantization='int4', slice_heads=True)")
+            lines.append("next: probe() -- it measures what pruning actually costs "
+                         "this model and routes to the right method. Nothing in this "
+                         "scan can tell you that.")
         return "\n".join(lines)
 
     def to_dict(self) -> dict:
@@ -136,6 +146,89 @@ class ScanSummary:
                 "num_layers": self.num_layers, "num_heads": self.num_heads,
                 "total_params": self.total_params, "quantization": self.quantization,
                 "adapters": self.adapters, "recommendation": self.recommendation}
+
+
+@dataclass
+class ProbeSummary:
+    """How far the model falls when half its heads are removed, and what to do.
+
+    This is the router. It replaces the fragility index in that role, because a
+    six-architecture sweep showed FI does not predict the regime: BERT-base has a
+    *higher* FI than ViT-B/16 and loses 5pp where ViT-B/16 loses 62, while
+    DINOv2-large has an FI 25x lower than DeiT-small and collapses to chance.
+    Parameter count does not order it either. What does order it is this
+    measurement — the model's own loss under the pruning you intend.
+
+    FI remains in the product for diagnosis and certification. It is not a
+    router.
+    """
+    clean: float
+    pruned: float
+    fraction: float
+    heads_removed: int
+    route: str
+    metric: str = "accuracy"
+
+    @property
+    def drop_pp(self) -> float:
+        """Points lost, positive meaning worse. Sign-corrected for ``loss``."""
+        delta = (self.clean - self.pruned) * 100
+        return delta if self.metric == "accuracy" else -delta
+
+    @property
+    def recommendation(self) -> str:
+        lines = [
+            f"probe: {self.heads_removed} heads removed "
+            f"({self.fraction:.0%}), {self.metric} "
+            f"{self.clean:.4f} -> {self.pruned:.4f}, "
+            f"{self.drop_pp:.2f}pp lost",
+        ]
+        if self.route == "sal_aligned":
+            lines += [
+                f"FRAGILE (drop > {FRAGILE_DROP_PP:.0f}pp). Train with SAL and prune "
+                "the set it trained without:",
+                "  sal_train(train_dataset, prune_fraction=0.5)  # uniform_per_layer "
+                "is the default",
+                "  compress(pruning=0.5, slice_heads=True)       # pass pruned_heads()",
+                "measured: SAL led DropHead on the identical head set by +31.0pp "
+                "(DINOv2-large, -94pp probe), +12.7pp (DeiT-small, -76pp) and "
+                "+2.0pp (ViT-B/16, -62pp).",
+            ]
+        elif self.route == "drophead":
+            lines += [
+                f"INTERMEDIATE ({ROBUST_DROP_PP:.0f}-{FRAGILE_DROP_PP:.0f}pp). Either "
+                "method works and the choice is about control of the head set:",
+                "  you choose the deployed set  -> SAL, and prune exactly "
+                "pruned_heads()",
+                "  the set is out of your hands -> DropHead, which is robust on any "
+                "set of that size",
+                "measured on the one model in this band (I-JEPA ViT-H/14, -18.9pp "
+                "probe): SAL led by +2.6pp on the identical set.",
+            ]
+        else:
+            lines += [
+                f"ROBUST (drop < {ROBUST_DROP_PP:.0f}pp). Skip head training "
+                "altogether — it buys nothing here:",
+                "  compress(pruning=0.5, quantization='int4', slice_heads=True)",
+                "measured: SAL and DropHead were indistinguishable on models in this "
+                "band (+0.08pp on BERT-base, +0.11pp on phi-2), and DropHead cost "
+                "1.1pp of clean accuracy on I-JEPA for no gain.",
+            ]
+        lines.append(
+            "then: head pruning is the small half of the compression. Pruning FFN "
+            "neurons removes twice the parameters for less accuracy — at an "
+            "identical -16.5%, 25% of neurons cost 3.1pp against 10-12pp for 50% of "
+            "heads. Neuron masking is not part of sal-torch; see ROADMAP.md.")
+        lines.append("finally: torch.compile. Measured 1.12x on a dense ViT-B/16 at "
+                     "batch 32 and 1.50x on a pruned one, and 2.2x at batch 1 where "
+                     "pruning alone buys almost nothing.")
+        return "\n".join(lines)
+
+    def to_dict(self) -> dict:
+        return {"clean": self.clean, "pruned": self.pruned,
+                "drop_pp": round(self.drop_pp, 4), "fraction": self.fraction,
+                "heads_removed": self.heads_removed, "route": self.route,
+                "metric": self.metric, "recommendation": self.recommendation}
 
 
 @dataclass
@@ -268,6 +361,7 @@ class CompressionPipeline:
 
         self._stages: list = []
         self._scan: Optional[ScanSummary] = None
+        self._probe: Optional[ProbeSummary] = None
         self._sal_trained = False
         self._compressed = False
         self._pruned_heads: list = []
@@ -306,6 +400,64 @@ class CompressionPipeline:
     def _baseline_stage(self):
         if not self._stages:
             self._record("original", detail=f"{self._total_params / 1e6:.1f}M params")
+
+    # -------------------------------------------------------------------- probe
+    def probe(self, fraction: float = 0.5) -> ProbeSummary:
+        """Remove ``fraction`` of the heads at random and measure the damage.
+
+        **Run this first.** It costs two evaluation sweeps and no training, and it
+        decides which method is worth paying for — a question that cannot be
+        answered from the architecture, the parameter count or the fragility
+        index, all three of which were measured and found not to predict it.
+
+        Nothing is changed: the heads are masked inside a context manager and the
+        model comes back as it was. The draw is uniform per layer, matching what
+        ``slice_heads()`` can express, so the probe measures the perturbation you
+        would actually deploy.
+
+        Read ``ProbeSummary.recommendation`` for the route, or ``.route`` for one
+        of ``"sal_aligned"`` / ``"drophead"`` / ``"skip_heads"``.
+        """
+        if not 0.0 < fraction < 1.0:
+            raise ValueError(f"fraction must be in (0,1), got {fraction}")
+        from sal import SALConfig
+        from sal.masker import HeadMasker
+
+        # Captured before anything evaluates: the shared evaluation helper leaves
+        # the model in eval mode, and a probe is a read-only measurement that
+        # should hand the model back exactly as it was found.
+        was_training = self.model.training
+        self._baseline_stage()
+        clean = self._stages[0].accuracy
+        if clean is None:                       # metric was never measured
+            clean = self._accuracy()
+
+        cfg = SALConfig.auto(self.model, prune_fraction=fraction,
+                             uniform_per_layer=True)
+        masker = HeadMasker(self.model, cfg, seed=self.seed)
+        self.model.eval()
+        masker.install()
+        try:
+            # activate() prunes the full target in one go, which is what a probe
+            # wants: no schedule, no accumulation, just the end state.
+            masker.activate()
+            pruned = self._accuracy()
+            removed = len(masker.pruned_heads())
+        finally:
+            masker.remove()
+            self.model.train(was_training)
+
+        delta = (clean - pruned) * 100
+        drop = delta if self.metric == "accuracy" else -delta
+        route = ("sal_aligned" if drop > FRAGILE_DROP_PP
+                 else "skip_heads" if drop < ROBUST_DROP_PP
+                 else "drophead")
+        self._probe = ProbeSummary(clean=clean, pruned=pruned, fraction=fraction,
+                                   heads_removed=removed, route=route,
+                                   metric=self.metric)
+        logger.info("probe: %+.2fpp at %.0f%% of heads -> %s",
+                    drop, fraction * 100, route)
+        return self._probe
 
     # --------------------------------------------------------------------- scan
     def scan(self) -> ScanSummary:

@@ -1,5 +1,40 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **`CompressionPipeline.probe()` and `ProbeSummary` — the router.** Two
+  evaluation sweeps and no training: it removes half the heads at random,
+  uniformly per layer, measures what that costs, and returns one of
+  `sal_aligned` / `drophead` / `skip_heads` with the measured evidence for each
+  band. Thresholds are 30pp and 10pp of accuracy lost (`FRAGILE_DROP_PP`,
+  `ROBUST_DROP_PP`). The model is handed back exactly as it was found, training
+  mode included.
+- **Six-architecture routing table in the README** (DeiT-small, ViT-B/16,
+  BERT-base, DINOv2-large, I-JEPA ViT-H/14, phi-2), sorted by probe drop. SAL's
+  lead over DropHead on an identical head set tracks the probe almost
+  monotonically: +31.0pp at a 94pp drop down to +0.1pp at 4pp.
+- **README section comparing FFN-neuron pruning with head pruning.** At an
+  identical 71.7M parameters on ViT-B/16, 25% of neurons costs 3.1pp against
+  10.2-12.2pp for 50% of heads. Neuron masking is not part of this package; the
+  numbers are reported because they change how much the head decision is worth.
+
+### Changed
+- **The fragility index is no longer a router, in the code or the docs.** It was
+  the original hypothesis and six architectures refuted it in both directions:
+  BERT-base has a higher FI than ViT-B/16 (0.094 vs 0.066) and loses 5pp where
+  ViT-B/16 loses 62, while DINOv2-large has an FI 25x lower than DeiT-small and
+  collapses to chance on the same task and class count. Parameter count does not
+  order it either. `ScanSummary.recommendation` now labels FI "diagnostic only"
+  and points at `probe()`; the "robust/fragile attention graph" verdict is gone.
+  FI keeps its reporting, certification, `FIMonitor` and `classify_layers()`
+  uses, which this result does not touch.
+- **The default recommendation is no longer "use DropHead".** It is "probe
+  first, then route" — see `When to use SAL`.
+
+Defaults are unchanged: `prune_fraction` stays `0.50` and `uniform_per_layer`
+stays `True`.
+
 ## [0.6.0] — 2026-10-31
 
 Two shipped defaults change, and a second method joins SAL. Everything here was

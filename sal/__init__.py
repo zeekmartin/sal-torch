@@ -18,7 +18,8 @@ from sal.drift import DriftMonitor, DriftReport, StructuralSnapshot
 from sal.robustness import RobustnessTest, RobustnessReport, robustness_compare
 from sal.slicing import slice_heads, SlicingError
 from sal.quantize import quantize, quantize_info, QuantizationError
-from sal.pipeline import CompressionPipeline, CompressionReport, PipelineError
+from sal.pipeline import (CompressionPipeline, CompressionReport,
+                          PipelineError, ProbeSummary)
 from sal.evaluation import (linear_probe, knn_accuracy, cka_similarity,
                             representation_similarity, measure_latency,
                             count_params, extract_features, compression_report)
@@ -57,6 +58,7 @@ __all__ = ["SALConfig", "SALCallback", "SALTrainer", "HeadMasker",
            "slice_heads", "SlicingError",
            "quantize", "quantize_info", "QuantizationError",
            "CompressionPipeline", "CompressionReport", "PipelineError",
+           "ProbeSummary",
            "linear_probe", "knn_accuracy", "cka_similarity",
            "representation_similarity", "measure_latency", "count_params",
            "extract_features", "compression_report",
