@@ -235,10 +235,14 @@ neuron pruning was measured and is a bad trade: at a matched 57.5M, neurons alon
 lose 7.2pp while heads-33%+neurons-33% lose 14.3pp and heads-50%+neurons-25% lose
 20.3pp, for 0.04x–0.12x of extra speed.
 
-**Neuron masking is not part of sal-torch** — this package masks attention heads.
-See `ROADMAP.md`. The numbers are reported here because they change how you
-should budget the head-pruning decision above: it is worth doing when the probe
-says your model is fragile, and it is not where your compression comes from.
+**This package masks attention heads.** MLP neuron pruning is in
+[sal-torch-pro](#sal-torch-pro), the commercial extension (license required; not
+on public PyPI). At equal parameter count (−16.5%), MLP pruning costs −3pp
+against −10pp for head pruning.
+
+The numbers are reported here because they change how you should budget the
+head-pruning decision above: it is worth doing when the probe says your model is
+fragile, and it is not where your compression comes from.
 
 ## Know your model before you touch it
 
@@ -1112,6 +1116,29 @@ losses included. v0.5.0 shipped `CompressionPipeline`, `slice_heads()`,
 `quantize()`, and the five-seed validation above. v0.5.1 opened SAL to
 self-supervised encoders. Next up is SAL + quantization-aware training and MLP
 pruning (v0.6.0), aiming for a real 2× speedup.
+
+## sal-torch-pro
+
+A separate commercial extension, licensed and not on public PyPI. It adds, on top
+of everything above:
+
+- **MLP neuron pruning** — `MLPMasker`, `slice_mlp_neurons`. About a third of the
+  accuracy cost of head pruning at equal compression (−3pp against −10pp at
+  −16.5% of parameters), and it composes with `HeadMasker` for joint head+MLP
+  compression.
+- **`torch.compile` integration and latency benchmarking** — `benchmark_compile`
+  across modes and batch sizes, ONNX export and verification.
+- **Quantization-aware training** — `SALQATTrainer` and NF4 QAT, which added
+  +2.4pp ± 0.9 over post-hoc INT4 on ViT-B/16 (15/15 seeds).
+- **An extended `CompressionPipeline`** that wires those stages in, and
+  **compliance reports** and **fleet monitoring** for deployed models.
+
+Everything documented elsewhere in this README — SAL head masking, aligned
+pruning with `uniform_per_layer` and `slice_heads()`, `FIScanner`,
+`PlasticityScanner`, `RobustnessTest`, `StructuralGuard`, `probe()` and
+`CompressionPipeline` — is in this package and needs nothing else.
+
+Contact: david.martin@cognitive-engineering.dev
 
 ## License
 

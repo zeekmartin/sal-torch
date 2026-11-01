@@ -14,6 +14,10 @@
   BERT-base, DINOv2-large, I-JEPA ViT-H/14, phi-2), sorted by probe drop. SAL's
   lead over DropHead on an identical head set tracks the probe almost
   monotonically: +31.0pp at a 94pp drop down to +0.1pp at 4pp.
+- **A `sal-torch-pro` section in the README**, listing what the commercial
+  extension adds (MLP neuron pruning, `torch.compile`/ONNX, QAT, compliance
+  reports, fleet monitoring) and stating explicitly that everything else
+  documented in the README needs nothing but this package.
 - **README section comparing FFN-neuron pruning with head pruning.** At an
   identical 71.7M parameters on ViT-B/16, 25% of neurons costs 3.1pp against
   10.2-12.2pp for 50% of heads. Neuron masking is not part of this package; the
