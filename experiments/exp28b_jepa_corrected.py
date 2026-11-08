@@ -353,9 +353,11 @@ def train_one(arm, args, J, device, loaders, patch_size, use_amp, outdir,
                                          "drop_pp": round(drop, 2)})
                     passed = drop <= args.gate_pp
                     reason = (f"baseline probe {acc * 100:.2f}% after epoch "
-                              f"{epoch + 1}, {drop:+.2f}pp against the "
+                              f"{epoch + 1}, {abs(drop):.2f}pp "
+                              f"{'BELOW' if drop > 0 else 'above'} the "
                               f"pretrained reference {reference_probe * 100:.2f}% "
-                              f"(threshold {args.gate_pp}pp)")
+                              f"(abort threshold: 5pp below, here "
+                              f"{args.gate_pp}pp)")
                     write_gate(outdir, {
                         "passed": bool(passed), "reason": reason,
                         "epoch": epoch + 1, "linear_probe": acc,
@@ -402,6 +404,9 @@ def train_one(arm, args, J, device, loaders, patch_size, use_amp, outdir,
         "reference_probe": reference_probe,
         "epoch_probes": epoch_probes or None,
         "final_probe": final_probe,
+        # Positive = that many points BELOW the reference. Named _drop_ for
+        # that reason; the log prints the direction in words so the sign
+        # cannot be misread.
         "final_probe_drop_pp": round((reference_probe - final_probe) * 100, 2),
         "train_seconds": round(time.time() - t0, 1),
         "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu",
@@ -411,9 +416,11 @@ def train_one(arm, args, J, device, loaders, patch_size, use_amp, outdir,
                       losses, masks, args, with_optimizer=False)
     (outdir / f"{arm}.json").write_text(json.dumps(info, indent=2),
                                         encoding="utf-8")
+    _d = info["final_probe_drop_pp"]
     J.log(f"  {arm}: losses {[round(x, 6) for x in losses]} "
           f"| probe {final_probe * 100:.2f}% "
-          f"({info['final_probe_drop_pp']:+.2f}pp) "
+          f"({abs(_d):.2f}pp {'below' if _d > 0 else 'above'} the "
+          f"{reference_probe * 100:.2f}% reference) "
           f"| {info['train_seconds'] / 3600:.2f} GPU-h")
     return info
 
@@ -572,9 +579,11 @@ def main(argv=None):
     if args.gate:
         ok = info["final_probe_drop_pp"] <= args.gate_pp
         J.rule(f"GATE {'PASSED' if ok else 'FAILED'}")
+        _d = info["final_probe_drop_pp"]
         J.log(f"  control probe {info['final_probe'] * 100:.2f}% against the "
-              f"pretrained {reference * 100:.2f}% "
-              f"({info['final_probe_drop_pp']:+.2f}pp, threshold {args.gate_pp}pp)")
+              f"pretrained {reference * 100:.2f}% — {abs(_d):.2f}pp "
+              f"{'below' if _d > 0 else 'above'} it "
+              f"(abort threshold: {args.gate_pp}pp below)")
         J.log("  NOTE: this gate is ~31 optimizer steps. It proves the frozen "
               "target, the scheduler and the abort path run; it CANNOT prove "
               "the recipe survives two epochs of 1.28M images. The per-epoch "
