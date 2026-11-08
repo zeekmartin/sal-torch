@@ -108,7 +108,23 @@ measured against the same baseline on the same sets:
 | | on its own set | on an external fixed set | on random sets |
 |---|---|---|---|
 | SAL | **+56.18pp** | +8.14pp (P50), +0.89pp (P33) | −0.05pp (exp25) |
-| DropHead | n/a — has none | **+63.47pp** (P50), +26.45pp (P33) | +52.9pp (1a) |
+| DropHead | n/a — has none | **+63.47pp** (P50), +26.45pp (P33) | **+54.95pp** (P50, 1a) |
+
+Every cell in this table is FP against FP. **Correction:** the `on random sets`
+cell previously read `+52.9pp`, which was DropHead's **INT4** P50 accuracy
+(73.29) minus the baseline's **FP** P50 accuracy (20.38) — two different
+columns of 1a's table, so not a comparison of anything. The matched figures
+from `PHASE3_IMAGENET1K.md` are:
+
+| on random sets, 1a | DropHead | baseline | difference |
+|---|---|---|---|
+| P50, FP | 75.33 ± 0.61 | 20.38 ± 6.29 | **+54.95pp** |
+| P50 + INT4 | 73.29 ± 0.71 | 16.06 ± 5.39 | **+57.23pp** |
+| P33, FP | 77.74 ± 0.29 | 48.80 ± 7.55 | **+28.94pp** |
+
+No conclusion in this document changes: the point is that DropHead's advantage
+is of the same order on random sets as on fixed ones (+54.95 against +63.47 at
+P50), and the corrected figure is 2pp *larger* than the one it replaces.
 
 **SAL's adaptation is worth 56pp on one set and ~0 to 8pp anywhere else.
 DropHead's is worth 26–63pp everywhere, including on SAL's own set.**
