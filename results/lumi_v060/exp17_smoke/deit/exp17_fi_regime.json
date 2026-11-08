@@ -1,0 +1,456 @@
+{
+  "experiment": "exp17_fi_regime",
+  "model": "facebook/deit-small-patch16-224",
+  "dataset": "clane9/imagenet-100",
+  "seed": 42,
+  "mask_ratio": 0.5,
+  "epochs": 1,
+  "n_train": 256,
+  "n_eval": 128,
+  "num_classes": 100,
+  "batch_size": 32,
+  "draws": 2,
+  "skip_int4": false,
+  "smoke": true,
+  "device": "cuda",
+  "gpu": "AMD Instinct MI250X",
+  "fi_scan": {
+    "fi": 0.203125,
+    "graph_nodes": 72,
+    "edges": 256,
+    "scan_seconds": 55.3
+  },
+  "sal_pruned_heads": [
+    [
+      0,
+      1
+    ],
+    [
+      0,
+      3
+    ],
+    [
+      0,
+      5
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      1,
+      3
+    ],
+    [
+      1,
+      4
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      2,
+      3
+    ],
+    [
+      2,
+      5
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      3,
+      1
+    ],
+    [
+      3,
+      3
+    ],
+    [
+      4,
+      0
+    ],
+    [
+      4,
+      1
+    ],
+    [
+      4,
+      4
+    ],
+    [
+      5,
+      1
+    ],
+    [
+      5,
+      2
+    ],
+    [
+      5,
+      3
+    ],
+    [
+      6,
+      0
+    ],
+    [
+      6,
+      1
+    ],
+    [
+      6,
+      2
+    ],
+    [
+      7,
+      0
+    ],
+    [
+      7,
+      1
+    ],
+    [
+      7,
+      4
+    ],
+    [
+      8,
+      0
+    ],
+    [
+      8,
+      1
+    ],
+    [
+      8,
+      5
+    ],
+    [
+      9,
+      0
+    ],
+    [
+      9,
+      3
+    ],
+    [
+      9,
+      4
+    ],
+    [
+      10,
+      0
+    ],
+    [
+      10,
+      3
+    ],
+    [
+      10,
+      5
+    ],
+    [
+      11,
+      3
+    ],
+    [
+      11,
+      4
+    ],
+    [
+      11,
+      5
+    ]
+  ],
+  "sal_pruned_count": 36,
+  "sal_pruned_per_layer": [
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3
+  ],
+  "sal_set_is_uniform": true,
+  "metrics": {
+    "fi": 0.203125,
+    "baseline_drop": 1.1719,
+    "baseline_drop_aligned": 0.7812,
+    "sal_gain": 0.0,
+    "drophead_gain": 0.0,
+    "sal_vs_drophead_same_set": 0.0,
+    "drophead_gain_random": -0.3906,
+    "sal_aligned_vs_drophead_random": 0.0,
+    "control_aligned_minus_random": -0.3906,
+    "sal_aligned_minus_random": -0.3906,
+    "drophead_aligned_minus_random": 0.0,
+    "clean_cost_sal": 0.7812,
+    "clean_cost_drophead": 0.0,
+    "sal_gain_int4": 0.0,
+    "drophead_gain_int4": 0.7812,
+    "sal_vs_drophead_int4": -0.7812
+  },
+  "results": {
+    "baseline": {
+      "clean": 0.0,
+      "aligned": 0.0078125,
+      "random_per_draw": [
+        0.015625,
+        0.0078125
+      ],
+      "random_mean": 0.01171875,
+      "random_std": 0.005524271728019903,
+      "aligned_minus_random": -0.00390625,
+      "clean_int4": 0.0,
+      "aligned_int4": 0.0,
+      "random_int4_mean": 0.01171875,
+      "random_int4_per_draw": [
+        0.015625,
+        0.0078125
+      ]
+    },
+    "sal": {
+      "clean": 0.0078125,
+      "aligned": 0.0078125,
+      "random_per_draw": [
+        0.015625,
+        0.0078125
+      ],
+      "random_mean": 0.01171875,
+      "random_std": 0.005524271728019903,
+      "aligned_minus_random": -0.00390625,
+      "clean_int4": 0.0078125,
+      "aligned_int4": 0.0,
+      "random_int4_mean": 0.01953125,
+      "random_int4_per_draw": [
+        0.03125,
+        0.0078125
+      ]
+    },
+    "drophead": {
+      "clean": 0.0,
+      "aligned": 0.0078125,
+      "random_per_draw": [
+        0.0078125,
+        0.0078125
+      ],
+      "random_mean": 0.0078125,
+      "random_std": 0.0,
+      "aligned_minus_random": 0.0,
+      "clean_int4": 0.015625,
+      "aligned_int4": 0.0078125,
+      "random_int4_mean": 0.01171875,
+      "random_int4_per_draw": [
+        0.015625,
+        0.0078125
+      ]
+    }
+  },
+  "training": {
+    "baseline": {
+      "losses": [
+        4.663651704788208
+      ],
+      "masker_stats": null,
+      "pruned_heads": null,
+      "train_seconds": 13.4
+    },
+    "sal": {
+      "losses": [
+        4.687431216239929
+      ],
+      "masker_stats": {
+        "active": true,
+        "total_heads": 72,
+        "active_heads": 36,
+        "pruned_heads": 36,
+        "prune_events": 7,
+        "prune_fraction": 0.5
+      },
+      "pruned_heads": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          0,
+          5
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          1,
+          4
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          2,
+          5
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          3,
+          1
+        ],
+        [
+          3,
+          3
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          4,
+          1
+        ],
+        [
+          4,
+          4
+        ],
+        [
+          5,
+          1
+        ],
+        [
+          5,
+          2
+        ],
+        [
+          5,
+          3
+        ],
+        [
+          6,
+          0
+        ],
+        [
+          6,
+          1
+        ],
+        [
+          6,
+          2
+        ],
+        [
+          7,
+          0
+        ],
+        [
+          7,
+          1
+        ],
+        [
+          7,
+          4
+        ],
+        [
+          8,
+          0
+        ],
+        [
+          8,
+          1
+        ],
+        [
+          8,
+          5
+        ],
+        [
+          9,
+          0
+        ],
+        [
+          9,
+          3
+        ],
+        [
+          9,
+          4
+        ],
+        [
+          10,
+          0
+        ],
+        [
+          10,
+          3
+        ],
+        [
+          10,
+          5
+        ],
+        [
+          11,
+          3
+        ],
+        [
+          11,
+          4
+        ],
+        [
+          11,
+          5
+        ]
+      ],
+      "train_seconds": 0.6
+    },
+    "drophead": {
+      "losses": [
+        4.664721429347992
+      ],
+      "masker_stats": {
+        "active": true,
+        "total_heads": 72,
+        "active_heads": 36,
+        "pruned_heads": 36,
+        "prune_events": 0,
+        "prune_fraction": 0.5
+      },
+      "pruned_heads": null,
+      "train_seconds": 0.7
+    }
+  },
+  "num_layers": 12,
+  "num_heads_per_layer": 6,
+  "effective_prune_fraction": 0.5,
+  "params": 21704164,
+  "caveats": {
+    "fi_is_a_diagnostic": "FI is measured before training and never selects heads. Every pruned set here is a uniform random draw. The hypothesis is about triage, not selection.",
+    "fi_size_confound": "FI and parameter count are correlated across the models in this series, so a relationship between FI and the regime is also one between size and the regime. Only a dissociation (small+low-FI or large+high-FI) would separate them; the summary reports both columns for that reason.",
+    "quick_protocol": "fewer epochs than the ViT-B/16 and I-JEPA protocols, so cell values are not comparable to PHASE2F/PHASE2G in absolute terms. The regime marker and the signs are what this measures.",
+    "masking_not_slicing": "pruning is applied by masking, which removes no weight and no matmul. Sizes and latencies are not measured here.",
+    "draw_noise": "random-set sampling, not the training seed, was the dominant noise term in PHASE2A; --draws controls it and defaults to 20."
+  },
+  "wall_clock_s": 96.0
+}

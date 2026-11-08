@@ -1,0 +1,19 @@
+{
+  "arm": "baseline",
+  "epochs": 2,
+  "losses": [
+    0.14940786175206516,
+    0.03116160977489078
+  ],
+  "masker_stats": null,
+  "pruned_heads": null,
+  "mask_ratio": 0.5,
+  "seed": 456,
+  "batch_size": 64,
+  "n_train": 1281167,
+  "model": "facebook/ijepa_vith14_1k",
+  "dataset": "evanarlian/imagenet_1k_resized_256",
+  "train_seconds": 56672.3,
+  "gpu": "AMD Instinct MI250X",
+  "torch_version": "2.5.1+rocm6.2"
+}

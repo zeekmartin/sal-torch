@@ -94,6 +94,28 @@ import torch.nn as nn
 
 MODEL_ID = "google/vit-base-patch16-224"
 DATASET_ID = "clane9/imagenet-100"
+# Printed wherever a result names its data. ImageNet-1k here is the ungated
+# mirror: ILSVRC/imagenet-1k is gated and needs an accepted-terms token.
+DATASET_LABELS = {
+    "clane9/imagenet-100": "ImageNet-100",
+    "evanarlian/imagenet_1k_resized_256":
+        "ImageNet-1k (resized 256px, evanarlian/imagenet_1k_resized_256)",
+}
+
+
+# DataLoader workers for the training and evaluation loaders. 0 keeps the
+# in-RAM behaviour every earlier experiment ran with; main() raises it when the
+# split is memory-mapped, where the reads are the thing to overlap.
+LOADER_WORKERS = 0
+# Block size for _BlockShuffle, 0 for a full shuffle. Also set by main() only
+# for a memory-mapped split.
+LOADER_BLOCK = 0
+
+
+def dataset_label(dataset_id: str | None) -> str:
+    """How a result file should name this dataset."""
+    did = dataset_id or DATASET_ID
+    return DATASET_LABELS.get(did, did)
 IMAGE_SIZE = 224
 
 VARIANTS = (                      # (key, label, use_sal, use_qat)
@@ -235,19 +257,45 @@ def normalize(x_uint8: torch.Tensor) -> torch.Tensor:
     return (x_uint8.float() / 255.0 - 0.5) / 0.5
 
 
-def build_data(sizes: dict, seed: int, workers: int = 8):
-    """ImageNet-100 subsets as uint8 tensors held in memory.
+def _split_names(ds) -> tuple[str, str]:
+    """``(train_key, val_key)`` for this dataset.
 
-    Images are resized to 224x224 once, up front, and kept as uint8 (150KB each),
+    ImageNet-100 calls the held-out split ``validation``; the ImageNet-1k mirror
+    calls it ``val`` and also carries an unlabelled ``test``. Guessing wrong
+    here silently evaluates on the wrong data, so the keys are resolved
+    explicitly and the error names what was available.
+    """
+    train = "train" if "train" in ds else None
+    val = next((k for k in ("validation", "val", "valid") if k in ds), None)
+    if train is None or val is None:
+        raise SystemExit(f"dataset has splits {sorted(ds)}; need a train split and "
+                         "one of validation/val/valid")
+    return train, val
+
+
+def build_data(sizes: dict, seed: int, workers: int = 8,
+               dataset_id: str | None = None, cache_dir=None):
+    """Dataset subsets as uint8 tensors, in memory or memory-mapped.
+
+    Images are resized to 224x224 once, up front, and kept as uint8 (147KB each),
     so every arm trains on byte-identical inputs and no epoch waits on JPEG
     decoding. Returns ``(train, val, num_classes)`` with each split an
     ``(images_uint8, labels)`` pair.
+
+    ``cache_dir`` writes each split to a ``.npy`` there and memory-maps it back.
+    The full ImageNet-1k train split is 193 GB as uint8, which does not fit in a
+    small-g job's 60 GB, and re-decoding 1.28M JPEGs once per epoch per arm
+    would put JPEG decoding on the critical path of every measurement. An
+    existing cache file of the right shape is reused, so the arms of a sweep
+    decode the data once between them.
     """
     from datasets import load_dataset
     from torch.utils.data import DataLoader
 
-    ds = load_dataset(DATASET_ID)
-    log(f"  dataset: {len(ds['train'])} train / {len(ds['validation'])} val available")
+    ds = load_dataset(dataset_id or DATASET_ID)
+    train_key, val_key = _split_names(ds)
+    log(f"  dataset: {dataset_id or DATASET_ID} | "
+        f"{len(ds[train_key])} train / {len(ds[val_key])} {val_key} available")
 
     def collate(rows):
         imgs = [r["image"].convert("RGB").resize((IMAGE_SIZE, IMAGE_SIZE), 2)  # bilinear
@@ -257,33 +305,132 @@ def build_data(sizes: dict, seed: int, workers: int = 8):
         return x, torch.tensor([r["label"] for r in rows])
 
     def encode(split, n, label):
-        subset = split.shuffle(seed=seed).select(range(min(n, len(split))))
+        n = min(n, len(split))
+        # Always shuffle, including for a whole split. Skipping it leaves the
+        # cache in dataset order -- sorted by class -- which forces the training
+        # loader to read 193 GB randomly to get a mixed batch: measured 104 img/s
+        # against 376 on a subset that fit in the page cache. Shuffling here
+        # costs nothing that matters (the arrow source is 24 GB and cacheable;
+        # JPEG decoding dominates and is order-independent) and lets training
+        # read the cache in contiguous blocks.
+        subset = split.shuffle(seed=seed)
+        if n != len(split):
+            subset = subset.select(range(n))
         dl = DataLoader(subset, batch_size=64, num_workers=workers, collate_fn=collate)
-        xs, ys = [], []
         prog = Progress(len(dl), f"encoding {label}")
+        if cache_dir is None:
+            xs, ys = [], []
+            for x, y in dl:
+                xs.append(x)
+                ys.append(y)
+                prog.step()
+            prog.done()
+            return torch.cat(xs), torch.cat(ys)
+
+        import numpy as np
+
+        cache = Path(cache_dir)
+        cache.mkdir(parents=True, exist_ok=True)
+        # "-shuf" is a cache-format marker, not decoration: a file written by
+        # the earlier encoder is in class order and must not be reused.
+        tag = f"{(dataset_id or DATASET_ID).replace('/', '__')}-{label}-{n}-s{seed}-shuf"
+        xpath, ypath = cache / f"{tag}-x.npy", cache / f"{tag}-y.npy"
+        if xpath.exists() and ypath.exists():
+            mm = np.load(xpath, mmap_mode="r")
+            if mm.shape == (n, 3, IMAGE_SIZE, IMAGE_SIZE):
+                prog.done()
+                log(f"  reusing cache {xpath.name} ({mm.nbytes / 1e9:.1f} GB)")
+                return torch.from_numpy(mm), torch.from_numpy(np.load(ypath))
+            log(f"  cache {xpath.name} has shape {mm.shape}, expected "
+                f"{(n, 3, IMAGE_SIZE, IMAGE_SIZE)}; re-encoding")
+            del mm
+        # Written to a .part and renamed, so an interrupted encode cannot leave a
+        # half-filled cache that the shape check would happily accept.
+        part = xpath.with_suffix(".part.npy")
+        out = np.lib.format.open_memmap(part, mode="w+", dtype=np.uint8,
+                                        shape=(n, 3, IMAGE_SIZE, IMAGE_SIZE))
+        ys, i = [], 0
         for x, y in dl:
-            xs.append(x)
+            out[i:i + x.shape[0]] = x.numpy()
+            i += x.shape[0]
             ys.append(y)
             prog.step()
         prog.done()
-        return torch.cat(xs), torch.cat(ys)
+        out.flush()
+        del out
+        labels = torch.cat(ys)
+        np.save(ypath, labels.numpy())
+        part.replace(xpath)
+        mm = np.load(xpath, mmap_mode="r")
+        log(f"  cached {xpath.name} ({mm.nbytes / 1e9:.1f} GB)")
+        return torch.from_numpy(mm), labels
 
-    train = encode(ds["train"], sizes["n_train"], "train")
-    val = encode(ds["validation"], sizes["n_val"], "val")
-    num_classes = len(ds["train"].features["label"].names)
+    train = encode(ds[train_key], sizes["n_train"], "train")
+    val = encode(ds[val_key], sizes["n_val"], "val")
+    num_classes = len(ds[train_key].features["label"].names)
     return train, val, num_classes
 
 
-def batches(split, batch_size: int, shuffle: bool = False, seed: int = 0):
-    """A DataLoader over an in-memory ``(uint8 images, labels)`` split.
+class _BlockShuffle(torch.utils.data.Sampler):
+    """Shuffle in contiguous blocks, so a memory-mapped split reads sequentially.
+
+    Indices are cut into blocks of ``block`` consecutive rows; the block order is
+    shuffled and so is the order within each block. A full shuffle gives perfect
+    mixing and the worst possible access pattern on a 193 GB file; this gives
+    sequential runs of ``block`` rows, which is what Lustre is fast at.
+
+    It is only sound because the cache is **written in random order** -- see the
+    encoder. On a class-sorted file, blocks would be single-class batches.
+
+    The generator is created once and advances across epochs, so successive
+    passes differ, exactly as ``DataLoader(shuffle=True, generator=g)`` does.
+    """
+
+    def __init__(self, n: int, block: int, seed: int = 0):
+        self.n, self.block = int(n), max(1, int(block))
+        self.g = torch.Generator().manual_seed(seed)
+
+    def __len__(self) -> int:
+        return self.n
+
+    def __iter__(self):
+        starts = torch.arange(0, self.n, self.block)
+        for b in starts[torch.randperm(starts.numel(), generator=self.g)].tolist():
+            end = min(b + self.block, self.n)
+            inner = torch.randperm(end - b, generator=self.g) + b
+            yield from inner.tolist()
+
+
+def batches(split, batch_size: int, shuffle: bool = False, seed: int = 0,
+            workers: int = 0, block: int = 0):
+    """A DataLoader over a ``(uint8 images, labels)`` split.
 
     Shuffling uses its own seeded generator, so every arm sees the same order.
+
+    ``workers`` is 0 by default, which is right for a split held in RAM:
+    indexing a resident tensor is free and a worker process would only add
+    pickling. It matters for a memory-mapped split, where each row is a 147 KB
+    read from Lustre, and workers let those reads overlap the compute.
+
+    ``block`` > 0 replaces the full shuffle with :class:`_BlockShuffle`, which
+    is what makes a memory-mapped split affordable: a full shuffle of a 193 GB
+    file measured 3.6x slower than the same data cached. It requires a cache
+    written in random order, which the encoder now does. ``block`` is ignored
+    when ``shuffle`` is False, since an unshuffled pass is already sequential.
     """
     from torch.utils.data import DataLoader, TensorDataset
 
+    dataset = TensorDataset(*split)
+    kw = {}
+    if workers:
+        kw = {"num_workers": workers, "persistent_workers": True,
+              "prefetch_factor": 4}
+    if shuffle and block:
+        return DataLoader(dataset, batch_size=batch_size,
+                          sampler=_BlockShuffle(len(dataset), block, seed), **kw)
     g = torch.Generator().manual_seed(seed) if shuffle else None
-    return DataLoader(TensorDataset(*split), batch_size=batch_size,
-                      shuffle=shuffle, generator=g)
+    return DataLoader(dataset, batch_size=batch_size,
+                      shuffle=shuffle, generator=g, **kw)
 
 
 # ---------------------------------------------------------------- quantization
@@ -715,7 +862,8 @@ def train_variant(key, mask_mode, use_qat, num_classes, train_split, epochs, bat
         model, qat_backend = setup_qat(model, QAT_BITS, force_manual=force_manual_qat)
     model.to(device).train()
 
-    loader = batches(train_split, batch_size, shuffle=True, seed=seed)
+    loader = batches(train_split, batch_size, shuffle=True, seed=seed,
+                     workers=LOADER_WORKERS, block=LOADER_BLOCK)
     total = len(loader) * epochs
     optimizer, scheduler = make_optimizer(model, total)
     prog = Progress(total, f"{key} training")
@@ -799,7 +947,7 @@ def accuracy(model, val_split, device, use_amp: bool, batch_size: int = 128) -> 
     correct = n = 0
     autocast = (torch.autocast("cuda", dtype=torch.float16)
                 if (use_amp and dev.type == "cuda") else contextlib.nullcontext())
-    for x, y in batches(val_split, batch_size):
+    for x, y in batches(val_split, batch_size, workers=LOADER_WORKERS):
         with autocast:
             logits = model(pixel_values=normalize(x.to(dev))).logits
         correct += int((logits.argmax(-1).cpu() == y).sum())
@@ -967,11 +1115,12 @@ def _box():
         return "=", "-"
 
 
-def summary_table(results: dict, budget: dict, epochs: int, smoke: bool) -> str:
+def summary_table(results: dict, budget: dict, epochs: int, smoke: bool,
+                  dataset_id: str | None = None) -> str:
     heavy, light = _box()
     cols = [c for c in CONFIGS if any(c in results.get(v[0], {}) for v in ALL_VARIANTS)]
     w0, w = 12, 10
-    lines = [f"SAL+QAT Prototype - ViT-B/16 on ImageNet-100 "
+    lines = [f"SAL+QAT Prototype - ViT-B/16 on {dataset_label(dataset_id)} "
              f"({epochs} epoch{'s' if epochs != 1 else ''}{', SMOKE' if smoke else ''})",
              heavy * (w0 + w * len(cols)),
              "",
@@ -1149,6 +1298,26 @@ def parse_args(argv=None):
     p.add_argument("--reuse-models", action="store_true",
                    help="load <output>/models/<variant>.pt instead of retraining when present")
     p.add_argument("--workers", type=int, default=8, help="dataset decoding workers")
+    p.add_argument("--dataset", default=None,
+                   help=f"HF dataset id (default: {DATASET_ID})")
+    p.add_argument("--uniform-per-layer", action="store_true",
+                   help="equal head quota per layer in every draw, so the trained "
+                        "set is a valid slice_heads() argument and the retained "
+                        "accuracy becomes a physically smaller model (exp14, "
+                        "PHASE2F; the sal-torch v0.6.0 default)")
+    p.add_argument("--loader-block", type=int, default=512,
+                   help="read the memory-mapped split in contiguous blocks of "
+                        "this many rows, shuffling block order and within-block "
+                        "order. 0 for a full shuffle, which measured 3.6x slower "
+                        "on a 193 GB cache. Requires the shuffled cache the "
+                        "encoder writes")
+    p.add_argument("--loader-workers", type=int, default=6,
+                   help="DataLoader workers for the train/eval loaders when "
+                        "--data-cache is used (0 elsewhere, as before)")
+    p.add_argument("--data-cache", default=None,
+                   help="encode the splits to uint8 .npy here and memory-map them "
+                        "instead of holding them in RAM. Required for ImageNet-1k: "
+                        "its train split is 193 GB as uint8")
     return p.parse_args(argv)
 
 
@@ -1184,8 +1353,17 @@ def main(argv=None):
 
     rule("Data")
     log(f"  model:   {MODEL_ID}")
-    log(f"  dataset: {DATASET_ID}")
-    train_split, val_split, num_classes = build_data(sizes, args.seed, args.workers)
+    log(f"  dataset: {dataset_label(args.dataset)}")
+    if args.data_cache:
+        # A memory-mapped split is read from Lustre row by row; workers overlap
+        # those reads with the GPU step. An in-RAM split gains nothing and pays
+        # for pickling, so this stays 0 without --data-cache.
+        global LOADER_WORKERS, LOADER_BLOCK
+        LOADER_WORKERS = args.loader_workers
+        LOADER_BLOCK = args.loader_block
+    train_split, val_split, num_classes = build_data(
+        sizes, args.seed, args.workers,
+        dataset_id=args.dataset, cache_dir=args.data_cache)
     log(f"  {train_split[0].shape[0]} train / {val_split[0].shape[0]} val images, "
         f"{num_classes} classes")
     n_fi = min(sizes["n_fi"], val_split[0].shape[0])
@@ -1211,7 +1389,8 @@ def main(argv=None):
             model, training[key] = train_variant(
                 key, mask_mode, use_qat, num_classes, train_split, epochs,
                 args.batch_size, args.seed, device, use_amp, args.mask_ratio,
-                force_manual_qat=args.manual_qat, fi_batches=fi_batches)
+                force_manual_qat=args.manual_qat, fi_batches=fi_batches,
+                uniform_per_layer=args.uniform_per_layer)
             if not args.no_save_models:
                 models_dir.mkdir(parents=True, exist_ok=True)
                 torch.save({k: v.detach().cpu() for k, v in model.state_dict().items()},
@@ -1232,7 +1411,13 @@ def main(argv=None):
     # ------------------------------------------------------------------ save
     rule("Saving")
     payload = {
-        "model": MODEL_ID, "dataset": DATASET_ID, "smoke": args.smoke,
+        "model": MODEL_ID,
+        "dataset": args.dataset or DATASET_ID,
+        "dataset_label": dataset_label(args.dataset),
+        "loader_workers": LOADER_WORKERS,
+        "loader_block": LOADER_BLOCK,
+        "uniform_per_layer": args.uniform_per_layer,
+        "smoke": args.smoke,
         "seed": args.seed, "epochs": epochs, "batch_size": args.batch_size,
         "n_train": train_split[0].shape[0], "n_val": val_split[0].shape[0],
         "num_classes": num_classes, "mask_ratio": args.mask_ratio,
@@ -1267,7 +1452,7 @@ def main(argv=None):
 
     table = ""
     try:
-        table = summary_table(results, budget, epochs, args.smoke)
+        table = summary_table(results, budget, epochs, args.smoke, args.dataset)
         (outdir / "summary_table.txt").write_text(table + "\n", encoding="utf-8")
         log(f"  table   -> {outdir / 'summary_table.txt'}")
         payload["figures"] = make_figures(outdir, results, budget)

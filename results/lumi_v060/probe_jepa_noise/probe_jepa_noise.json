@@ -1,0 +1,108 @@
+{
+  "experiment": "probe_jepa_noise",
+  "model": "facebook/ijepa_vith14_1k",
+  "dataset": "evanarlian/imagenet_1k_resized_256",
+  "dataset_label": "ImageNet-1k (resized 256px, evanarlian/imagenet_1k_resized_256)",
+  "n_probe_train": 5000,
+  "n_probe_val": 2500,
+  "repeats": 5,
+  "num_classes": 1000,
+  "images_per_class": 5.0,
+  "disjoint_blocks": true,
+  "seed": 42,
+  "batch_size": 32,
+  "smoke": false,
+  "gpu": "AMD Instinct MI250X",
+  "torch_version": "2.5.1+rocm6.2",
+  "runs": [
+    {
+      "repeat": 0,
+      "train_rows": [
+        0,
+        5000
+      ],
+      "linear_probe": 0.4860000014305115,
+      "knn_accuracy": 0.45,
+      "seconds": 312.3
+    },
+    {
+      "repeat": 1,
+      "train_rows": [
+        5000,
+        10000
+      ],
+      "linear_probe": 0.48399999737739563,
+      "knn_accuracy": 0.4512,
+      "seconds": 227.6
+    },
+    {
+      "repeat": 2,
+      "train_rows": [
+        10000,
+        15000
+      ],
+      "linear_probe": 0.4984000027179718,
+      "knn_accuracy": 0.4504,
+      "seconds": 227.4
+    },
+    {
+      "repeat": 3,
+      "train_rows": [
+        15000,
+        20000
+      ],
+      "linear_probe": 0.4927999973297119,
+      "knn_accuracy": 0.4416,
+      "seconds": 227.5
+    },
+    {
+      "repeat": 4,
+      "train_rows": [
+        20000,
+        25000
+      ],
+      "linear_probe": 0.49320000410079956,
+      "knn_accuracy": 0.4532,
+      "seconds": 227.2
+    }
+  ],
+  "summary": {
+    "linear_probe": {
+      "values": [
+        0.4860000014305115,
+        0.48399999737739563,
+        0.4984000027179718,
+        0.4927999973297119,
+        0.49320000410079956
+      ],
+      "mean": 0.49088000059127807,
+      "min": 0.48399999737739563,
+      "max": 0.4984000027179718,
+      "range": 0.014400005340576172,
+      "sd": 0.005847394115701931
+    },
+    "knn_accuracy": {
+      "values": [
+        0.45,
+        0.4512,
+        0.4504,
+        0.4416,
+        0.4532
+      ],
+      "mean": 0.44928,
+      "min": 0.4416,
+      "max": 0.4532,
+      "range": 0.0116,
+      "sd": 0.004466766168045963
+    }
+  },
+  "sd_pp": 0.585,
+  "verdict": "PROBE IS STABLE ENOUGH",
+  "caveats": {
+    "only_the_probe_subset_varies": "Same frozen pretrained checkpoint, same validation images, same code path. The only thing that changes between repeats is which 5000 training images the linear classifier is fitted on, so the spread is the probe's and nothing else's.",
+    "disjoint_not_resampled": "The repeats are disjoint consecutive blocks of a cache written in random order, so they are independent samples. Resampling with replacement would share images between repeats and understate the spread.",
+    "not_the_whole_noise_budget": "This is the probe's contribution alone. 1b also carries head-selection noise, which exp04 measured as the dominant term on ViT-B/16 and which the 20 draws exist to average down, plus training-seed noise that one seed cannot estimate at all.",
+    "pretrained_not_trained": "Measured on the pretrained checkpoint. A checkpoint after two epochs of masked training may have a different feature geometry and so a different probe spread."
+  },
+  "wall_clock_s": 1222.4
+}

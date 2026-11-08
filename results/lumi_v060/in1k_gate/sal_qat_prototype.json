@@ -1,0 +1,680 @@
+{
+  "model": "google/vit-base-patch16-224",
+  "dataset": "clane9/imagenet-100",
+  "smoke": false,
+  "seed": 42,
+  "epochs": 1,
+  "batch_size": 64,
+  "n_train": 2000,
+  "n_val": 1000,
+  "num_classes": 1000,
+  "mask_ratio": 0.3,
+  "qat_bits": 4,
+  "prune_seeds": [
+    42,
+    43
+  ],
+  "device": "cuda",
+  "vram_gb": 68.7,
+  "lr": {
+    "backbone": 5e-05,
+    "head": 0.001,
+    "weight_decay": 0.05,
+    "warmup_fraction": 0.05,
+    "schedule": "linear warmup + cosine"
+  },
+  "caveats": {
+    "quantization": "int8/int4 accuracy = per-output-channel symmetric weight round-trip on every nn.Linear except the classifier; the same grid QAT trains against. *_nf4 = real bitsandbytes NF4.",
+    "size": "computed: fp16 non-quantized params, bits/8 bytes per quantized weight + one fp16 scale per output channel",
+    "latency": "measured once per setting (architecture-dependent only). int8 CPU latency is torch.ao dynamic INT8; no CPU INT4 kernel exists in stock PyTorch, so int4 latency is null.",
+    "pruning": "uniform random heads per layer, sliced with slice_heads(); mean over prune_seeds; identical selections for every variant",
+    "fi": "fi_score on the dense trained model only",
+    "seed": "one training seed; treat sub-1pp gaps as not shown"
+  },
+  "training": {
+    "baseline": {
+      "losses": [
+        0.48107661632820964
+      ],
+      "masker_stats": null,
+      "qat_backend": null,
+      "train_seconds": 59.3,
+      "steps": 32,
+      "pruned_heads": null
+    },
+    "sal": {
+      "losses": [
+        1.251434160862118
+      ],
+      "masker_stats": {
+        "active": true,
+        "total_heads": 144,
+        "active_heads": 101,
+        "pruned_heads": 43,
+        "prune_events": 23,
+        "prune_fraction": 0.3
+      },
+      "qat_backend": null,
+      "train_seconds": 5.6,
+      "steps": 32,
+      "pruned_heads": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          6
+        ],
+        [
+          0,
+          7
+        ],
+        [
+          0,
+          8
+        ],
+        [
+          0,
+          9
+        ],
+        [
+          1,
+          4
+        ],
+        [
+          1,
+          6
+        ],
+        [
+          1,
+          11
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          2,
+          4
+        ],
+        [
+          2,
+          5
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          3,
+          1
+        ],
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          9
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          4,
+          8
+        ],
+        [
+          4,
+          10
+        ],
+        [
+          4,
+          11
+        ],
+        [
+          5,
+          2
+        ],
+        [
+          5,
+          3
+        ],
+        [
+          5,
+          4
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          5,
+          10
+        ],
+        [
+          6,
+          0
+        ],
+        [
+          6,
+          2
+        ],
+        [
+          6,
+          3
+        ],
+        [
+          6,
+          5
+        ],
+        [
+          7,
+          0
+        ],
+        [
+          7,
+          9
+        ],
+        [
+          8,
+          2
+        ],
+        [
+          8,
+          9
+        ],
+        [
+          8,
+          10
+        ],
+        [
+          9,
+          7
+        ],
+        [
+          9,
+          8
+        ],
+        [
+          10,
+          2
+        ],
+        [
+          10,
+          8
+        ],
+        [
+          10,
+          11
+        ],
+        [
+          11,
+          1
+        ],
+        [
+          11,
+          4
+        ],
+        [
+          11,
+          10
+        ]
+      ]
+    },
+    "qat": {
+      "losses": [
+        0.5223716902546585
+      ],
+      "masker_stats": null,
+      "qat_backend": "torch.ao",
+      "train_seconds": 7.9,
+      "steps": 32,
+      "pruned_heads": null
+    },
+    "sal_qat": {
+      "losses": [
+        1.3412056183442473
+      ],
+      "masker_stats": {
+        "active": true,
+        "total_heads": 144,
+        "active_heads": 101,
+        "pruned_heads": 43,
+        "prune_events": 23,
+        "prune_fraction": 0.3
+      },
+      "qat_backend": "torch.ao",
+      "train_seconds": 6.8,
+      "steps": 32,
+      "pruned_heads": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          6
+        ],
+        [
+          0,
+          7
+        ],
+        [
+          0,
+          8
+        ],
+        [
+          0,
+          9
+        ],
+        [
+          1,
+          4
+        ],
+        [
+          1,
+          6
+        ],
+        [
+          1,
+          11
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          2,
+          4
+        ],
+        [
+          2,
+          5
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          3,
+          1
+        ],
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          9
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          4,
+          8
+        ],
+        [
+          4,
+          10
+        ],
+        [
+          4,
+          11
+        ],
+        [
+          5,
+          2
+        ],
+        [
+          5,
+          3
+        ],
+        [
+          5,
+          4
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          5,
+          10
+        ],
+        [
+          6,
+          0
+        ],
+        [
+          6,
+          2
+        ],
+        [
+          6,
+          3
+        ],
+        [
+          6,
+          5
+        ],
+        [
+          7,
+          0
+        ],
+        [
+          7,
+          9
+        ],
+        [
+          8,
+          2
+        ],
+        [
+          8,
+          9
+        ],
+        [
+          8,
+          10
+        ],
+        [
+          9,
+          7
+        ],
+        [
+          9,
+          8
+        ],
+        [
+          10,
+          2
+        ],
+        [
+          10,
+          8
+        ],
+        [
+          10,
+          11
+        ],
+        [
+          11,
+          1
+        ],
+        [
+          11,
+          4
+        ],
+        [
+          11,
+          10
+        ]
+      ]
+    }
+  },
+  "results": {
+    "baseline": {
+      "fp16": {
+        "accuracy": 0.804,
+        "std": null,
+        "per_seed": [
+          0.804
+        ],
+        "fi_score": 0.14951456310679612
+      },
+      "prune33": {
+        "accuracy": 0.4145,
+        "std": 0.05250000000000002,
+        "per_seed": [
+          0.362,
+          0.467
+        ],
+        "heads_removed_per_layer": 4
+      },
+      "prune50": {
+        "accuracy": 0.21650000000000003,
+        "std": 0.0505,
+        "per_seed": [
+          0.166,
+          0.267
+        ],
+        "heads_removed_per_layer": 6
+      },
+      "int8": {
+        "accuracy": 0.806,
+        "std": null,
+        "per_seed": [
+          0.806
+        ]
+      },
+      "int4": {
+        "accuracy": 0.796,
+        "std": null,
+        "per_seed": [
+          0.796
+        ]
+      },
+      "prune50_int4": {
+        "accuracy": 0.1815,
+        "std": 0.052500000000000005,
+        "per_seed": [
+          0.129,
+          0.234
+        ]
+      }
+    },
+    "sal": {
+      "fp16": {
+        "accuracy": 0.805,
+        "std": null,
+        "per_seed": [
+          0.805
+        ],
+        "fi_score": 0.1533980582524272
+      },
+      "prune33": {
+        "accuracy": 0.4185,
+        "std": 0.03950000000000001,
+        "per_seed": [
+          0.379,
+          0.458
+        ],
+        "heads_removed_per_layer": 4
+      },
+      "prune50": {
+        "accuracy": 0.22200000000000003,
+        "std": 0.053000000000000005,
+        "per_seed": [
+          0.169,
+          0.275
+        ],
+        "heads_removed_per_layer": 6
+      },
+      "int8": {
+        "accuracy": 0.805,
+        "std": null,
+        "per_seed": [
+          0.805
+        ]
+      },
+      "int4": {
+        "accuracy": 0.797,
+        "std": null,
+        "per_seed": [
+          0.797
+        ]
+      },
+      "prune50_int4": {
+        "accuracy": 0.187,
+        "std": 0.047,
+        "per_seed": [
+          0.14,
+          0.234
+        ]
+      }
+    },
+    "qat": {
+      "fp16": {
+        "accuracy": 0.805,
+        "std": null,
+        "per_seed": [
+          0.805
+        ],
+        "fi_score": 0.1553398058252427
+      },
+      "prune33": {
+        "accuracy": 0.3925,
+        "std": 0.0655,
+        "per_seed": [
+          0.327,
+          0.458
+        ],
+        "heads_removed_per_layer": 4
+      },
+      "prune50": {
+        "accuracy": 0.1985,
+        "std": 0.0475,
+        "per_seed": [
+          0.151,
+          0.246
+        ],
+        "heads_removed_per_layer": 6
+      },
+      "int8": {
+        "accuracy": 0.804,
+        "std": null,
+        "per_seed": [
+          0.804
+        ]
+      },
+      "int4": {
+        "accuracy": 0.802,
+        "std": null,
+        "per_seed": [
+          0.802
+        ]
+      },
+      "prune50_int4": {
+        "accuracy": 0.16799999999999998,
+        "std": 0.046,
+        "per_seed": [
+          0.122,
+          0.214
+        ]
+      }
+    },
+    "sal_qat": {
+      "fp16": {
+        "accuracy": 0.803,
+        "std": null,
+        "per_seed": [
+          0.803
+        ],
+        "fi_score": 0.15436893203883495
+      },
+      "prune33": {
+        "accuracy": 0.395,
+        "std": 0.05000000000000002,
+        "per_seed": [
+          0.345,
+          0.445
+        ],
+        "heads_removed_per_layer": 4
+      },
+      "prune50": {
+        "accuracy": 0.20400000000000001,
+        "std": 0.046,
+        "per_seed": [
+          0.158,
+          0.25
+        ],
+        "heads_removed_per_layer": 6
+      },
+      "int8": {
+        "accuracy": 0.8,
+        "std": null,
+        "per_seed": [
+          0.8
+        ]
+      },
+      "int4": {
+        "accuracy": 0.798,
+        "std": null,
+        "per_seed": [
+          0.798
+        ]
+      },
+      "prune50_int4": {
+        "accuracy": 0.16649999999999998,
+        "std": 0.0475,
+        "per_seed": [
+          0.119,
+          0.214
+        ]
+      }
+    }
+  },
+  "budget": {
+    "fp16": {
+      "size_mb": 173.135312,
+      "latency_cpu_ms": 95.38008500385331,
+      "latency_gpu_ms": 8.101782004814595
+    },
+    "prune33": {
+      "size_mb": 154.242512,
+      "latency_cpu_ms": 84.24621549784206,
+      "latency_gpu_ms": 8.048648494877852
+    },
+    "prune50": {
+      "size_mb": 144.796112,
+      "latency_cpu_ms": 78.26750700041885,
+      "latency_gpu_ms": 8.086186491709668
+    },
+    "int8": {
+      "size_mb": 88.366544,
+      "latency_cpu_ms": 74.66588300303556,
+      "latency_gpu_ms": null
+    },
+    "int4": {
+      "size_mb": 45.899216,
+      "latency_cpu_ms": null,
+      "latency_gpu_ms": null
+    },
+    "prune50_int4": {
+      "size_mb": 38.766032,
+      "latency_cpu_ms": null,
+      "latency_gpu_ms": null
+    },
+    "prune50_int8_cpu_reference": {
+      "size_mb": 74.155472,
+      "latency_cpu_ms": 62.339145501027815,
+      "latency_gpu_ms": null
+    }
+  },
+  "figures": [
+    "accuracy_by_compression.png",
+    "size_vs_accuracy.png"
+  ],
+  "wall_clock_s": 167.6
+}

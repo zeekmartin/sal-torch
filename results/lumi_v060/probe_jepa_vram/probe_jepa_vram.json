@@ -1,0 +1,77 @@
+{
+  "experiment": "probe_jepa_vram",
+  "model": "facebook/ijepa_vith14_1k",
+  "gpu": "AMD Instinct MI250X",
+  "vram_gb": 68.7,
+  "image_size": 224,
+  "patch_size": 14,
+  "patch_mask_ratio": 0.4,
+  "grad_ckpt": false,
+  "steps_per_candidate": 2,
+  "heuristic_batch": 16,
+  "max_batch_that_fits": 64,
+  "probes": [
+    {
+      "batch_size": 64,
+      "grad_ckpt": false,
+      "steps_attempted": 2,
+      "params": 630762240,
+      "weights_gb": 2.59,
+      "peak_gb": 32.31,
+      "reserved_gb": 34.68,
+      "steps_done": 2,
+      "loss": 0.7651190161705017,
+      "fits": true,
+      "step_seconds": [
+        84.52,
+        1.4
+      ],
+      "steady_step_s": 1.4,
+      "img_per_s": 45.7
+    },
+    {
+      "batch_size": 32,
+      "grad_ckpt": false,
+      "steps_attempted": 2,
+      "params": 630762240,
+      "weights_gb": 2.59,
+      "peak_gb": 18.08,
+      "reserved_gb": 19.35,
+      "steps_done": 2,
+      "loss": 0.7562777400016785,
+      "fits": true,
+      "step_seconds": [
+        1.1,
+        0.72
+      ],
+      "steady_step_s": 0.72,
+      "img_per_s": 44.4
+    },
+    {
+      "batch_size": 16,
+      "grad_ckpt": false,
+      "steps_attempted": 2,
+      "params": 630762240,
+      "weights_gb": 2.59,
+      "peak_gb": 10.98,
+      "reserved_gb": 11.71,
+      "steps_done": 2,
+      "loss": 0.7616229057312012,
+      "fits": true,
+      "step_seconds": [
+        0.57,
+        0.38
+      ],
+      "steady_step_s": 0.38,
+      "img_per_s": 42.1
+    }
+  ],
+  "torch_version": "2.5.1+rocm6.2",
+  "wall_clock_s": 118.8,
+  "caveats": {
+    "random_pixels": "The probe feeds torch.randn rather than real images. VRAM does not depend on pixel values, but the loss numbers here are meaningless and the throughput excludes data loading.",
+    "no_sal_masker": "SAL's HeadMasker is not installed. It is a forward pre-hook that zeroes slices of an existing activation and allocates only the mask vectors, so its cost is negligible -- but it is not zero and it is not measured here.",
+    "peak_is_allocated": "peak_gb is max_memory_allocated; reserved_gb is the allocator's larger reservation, which is what actually has to fit alongside fragmentation.",
+    "first_step_compiles": "Step 1 includes MIOpen kernel compilation for the patch-embedding convolution, so only steady_step_s should feed a GPU-hour estimate."
+  }
+}

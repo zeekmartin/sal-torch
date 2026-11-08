@@ -1,0 +1,364 @@
+{
+  "experiment": "exp16_compile_bench",
+  "model": "google/vit-base-patch16-224",
+  "num_classes": 100,
+  "checkpoint": "results/exp04_sal_qat_vitb16/seed42/models/sal.pt",
+  "smoke": false,
+  "device": "cuda",
+  "gpu": "AMD Instinct MI250X",
+  "torch_version": "2.5.1+rocm6.2",
+  "modes": [
+    "default",
+    "reduce-overhead",
+    "max-autotune"
+  ],
+  "batch_sizes": [
+    1,
+    32
+  ],
+  "runs": 50,
+  "warmup": 10,
+  "results": {
+    "dense": {
+      "params": 85875556,
+      "by_batch": {
+        "1": {
+          "device": "cuda:0",
+          "torch_version": "2.5.1+rocm6.2",
+          "eager": {
+            "label": "eager",
+            "mean_ms": 8.312125890515745,
+            "median_ms": 8.310456527397037,
+            "p90_ms": 8.352953009307384,
+            "runs": 50,
+            "compile_s": null,
+            "error": null
+          },
+          "compiled": {
+            "default": {
+              "label": "default",
+              "mean_ms": 5.648954878561199,
+              "median_ms": 5.645123892463744,
+              "p90_ms": 5.68018201738596,
+              "runs": 50,
+              "compile_s": 24.82256786711514,
+              "error": null
+            },
+            "reduce-overhead": {
+              "label": "reduce-overhead",
+              "mean_ms": 3.8540854956954718,
+              "median_ms": 3.856207593344152,
+              "p90_ms": 3.882013028487563,
+              "runs": 50,
+              "compile_s": 7.204272561008111,
+              "error": null
+            },
+            "max-autotune": {
+              "label": "max-autotune",
+              "mean_ms": 3.8910360587760806,
+              "median_ms": 3.8862605579197407,
+              "p90_ms": 3.9128330536186695,
+              "runs": 50,
+              "compile_s": 174.30758542311378,
+              "error": null
+            }
+          },
+          "speedups": {
+            "default": 1.4721477660555014,
+            "reduce-overhead": 2.155085359445108,
+            "max-autotune": 2.1384198006130357
+          },
+          "throughput_eager": 120.33033284071765,
+          "throughput_compiled": {
+            "default": 177.14403068017742,
+            "reduce-overhead": 259.32213860218747,
+            "max-autotune": 257.31676636094767
+          }
+        },
+        "32": {
+          "device": "cuda:0",
+          "torch_version": "2.5.1+rocm6.2",
+          "eager": {
+            "label": "eager",
+            "mean_ms": 46.92730726208538,
+            "median_ms": 46.928607509471476,
+            "p90_ms": 46.95777897723019,
+            "runs": 50,
+            "compile_s": null,
+            "error": null
+          },
+          "compiled": {
+            "default": {
+              "label": "default",
+              "mean_ms": 44.22347890678793,
+              "median_ms": 44.22940197400749,
+              "p90_ms": 44.259105110540986,
+              "runs": 50,
+              "compile_s": 9.816289281006902,
+              "error": null
+            },
+            "reduce-overhead": {
+              "label": "reduce-overhead",
+              "mean_ms": 44.279709197580814,
+              "median_ms": 44.28592149633914,
+              "p90_ms": 44.31997309438884,
+              "runs": 50,
+              "compile_s": 7.65631144400686,
+              "error": null
+            },
+            "max-autotune": {
+              "label": "max-autotune",
+              "mean_ms": 42.028236370533705,
+              "median_ms": 42.028937954455614,
+              "p90_ms": 42.054443154484034,
+              "runs": 50,
+              "compile_s": 186.9302720320411,
+              "error": null
+            }
+          },
+          "speedups": {
+            "default": 1.061027402926457,
+            "reduce-overhead": 1.059673275926996,
+            "max-autotune": 1.1165784764850675
+          },
+          "throughput_eager": 681.8868425520942,
+          "throughput_compiled": {
+            "default": 723.5006256427704,
+            "reduce-overhead": 722.5772642586934,
+            "max-autotune": 761.3801717920303
+          }
+        }
+      }
+    },
+    "sliced-33 (4/12 heads cut)": {
+      "params": 76429156,
+      "by_batch": {
+        "1": {
+          "device": "cuda:0",
+          "torch_version": "2.5.1+rocm6.2",
+          "eager": {
+            "label": "eager",
+            "mean_ms": 8.6652369517833,
+            "median_ms": 8.64218093920499,
+            "p90_ms": 8.754573063924909,
+            "runs": 50,
+            "compile_s": null,
+            "error": null
+          },
+          "compiled": {
+            "default": {
+              "label": "default",
+              "mean_ms": 5.94550896435976,
+              "median_ms": 5.915633635595441,
+              "p90_ms": 6.080178078263998,
+              "runs": 50,
+              "compile_s": 7.15936242393218,
+              "error": null
+            },
+            "reduce-overhead": {
+              "label": "reduce-overhead",
+              "mean_ms": 3.8006426114588976,
+              "median_ms": 3.8011714350432158,
+              "p90_ms": 3.829160938039422,
+              "runs": 50,
+              "compile_s": 7.711361980065703,
+              "error": null
+            },
+            "max-autotune": {
+              "label": "max-autotune",
+              "mean_ms": 3.8704642606899142,
+              "median_ms": 3.8697095587849617,
+              "p90_ms": 3.8949688896536827,
+              "runs": 50,
+              "compile_s": 84.29547692509368,
+              "error": null
+            }
+          },
+          "speedups": {
+            "default": 1.460905368987596,
+            "reduce-overhead": 2.273557266986759,
+            "max-autotune": 2.2332892967601743
+          },
+          "throughput_eager": 115.71153242852512,
+          "throughput_compiled": {
+            "default": 169.04359897861465,
+            "reduce-overhead": 263.07679542704733,
+            "max-autotune": 258.41732688434297
+          }
+        },
+        "32": {
+          "device": "cuda:0",
+          "torch_version": "2.5.1+rocm6.2",
+          "eager": {
+            "label": "eager",
+            "mean_ms": 41.66103380732238,
+            "median_ms": 41.668371995911,
+            "p90_ms": 41.692472994327545,
+            "runs": 50,
+            "compile_s": null,
+            "error": null
+          },
+          "compiled": {
+            "default": {
+              "label": "default",
+              "mean_ms": 38.94191992469132,
+              "median_ms": 38.949014036916196,
+              "p90_ms": 38.97306113503873,
+              "runs": 50,
+              "compile_s": 6.861572008114308,
+              "error": null
+            },
+            "reduce-overhead": {
+              "label": "reduce-overhead",
+              "mean_ms": 38.91705988906324,
+              "median_ms": 38.92729489598423,
+              "p90_ms": 38.95795508287847,
+              "runs": 50,
+              "compile_s": 7.56073909602128,
+              "error": null
+            },
+            "max-autotune": {
+              "label": "max-autotune",
+              "mean_ms": 37.2243740176782,
+              "median_ms": 37.22165059298277,
+              "p90_ms": 37.24325797520578,
+              "runs": 50,
+              "compile_s": 87.8115727759432,
+              "error": null
+            }
+          },
+          "speedups": {
+            "default": 1.0698184030131643,
+            "reduce-overhead": 1.0704152987576216,
+            "max-autotune": 1.1194659917571348
+          },
+          "throughput_eager": 767.9685686577873,
+          "throughput_compiled": {
+            "default": 821.5869076857796,
+            "reduce-overhead": 822.0453048562885,
+            "max-autotune": 859.7146953507971
+          }
+        }
+      }
+    },
+    "sliced-50 (6/12 heads cut)": {
+      "params": 71705956,
+      "by_batch": {
+        "1": {
+          "device": "cuda:0",
+          "torch_version": "2.5.1+rocm6.2",
+          "eager": {
+            "label": "eager",
+            "mean_ms": 8.649568511173129,
+            "median_ms": 8.623165427707136,
+            "p90_ms": 8.79829004406929,
+            "runs": 50,
+            "compile_s": null,
+            "error": null
+          },
+          "compiled": {
+            "default": {
+              "label": "default",
+              "mean_ms": 5.9656267846003175,
+              "median_ms": 5.942232091911137,
+              "p90_ms": 6.014971993863583,
+              "runs": 50,
+              "compile_s": 7.176150614162907,
+              "error": null
+            },
+            "reduce-overhead": {
+              "label": "reduce-overhead",
+              "mean_ms": 3.7481575505807996,
+              "median_ms": 3.747718525119126,
+              "p90_ms": 3.7752781063318253,
+              "runs": 50,
+              "compile_s": 7.447216378059238,
+              "error": null
+            },
+            "max-autotune": {
+              "label": "max-autotune",
+              "mean_ms": 3.727434305474162,
+              "median_ms": 3.7280955584719777,
+              "p90_ms": 3.7547871470451355,
+              "runs": 50,
+              "compile_s": 84.24844575393945,
+              "error": null
+            }
+          },
+          "speedups": {
+            "default": 1.4511660423774795,
+            "reduce-overhead": 2.3009106393423817,
+            "max-autotune": 2.3130215662287057
+          },
+          "throughput_eager": 115.96669556945933,
+          "throughput_compiled": {
+            "default": 168.28693065712628,
+            "reduce-overhead": 266.829003645148,
+            "max-autotune": 268.23346781643835
+          }
+        },
+        "32": {
+          "device": "cuda:0",
+          "torch_version": "2.5.1+rocm6.2",
+          "eager": {
+            "label": "eager",
+            "mean_ms": 39.024248723872006,
+            "median_ms": 39.027667487971485,
+            "p90_ms": 39.05706410296261,
+            "runs": 50,
+            "compile_s": null,
+            "error": null
+          },
+          "compiled": {
+            "default": {
+              "label": "default",
+              "mean_ms": 36.291314577683806,
+              "median_ms": 36.296676960773766,
+              "p90_ms": 36.33124707266688,
+              "runs": 50,
+              "compile_s": 6.845519769005477,
+              "error": null
+            },
+            "reduce-overhead": {
+              "label": "reduce-overhead",
+              "mean_ms": 36.289749732241035,
+              "median_ms": 36.29265341442078,
+              "p90_ms": 36.34070581756532,
+              "runs": 50,
+              "compile_s": 7.832236796151847,
+              "error": null
+            },
+            "max-autotune": {
+              "label": "max-autotune",
+              "mean_ms": 34.18983391486108,
+              "median_ms": 34.18793040327728,
+              "p90_ms": 34.21935113146901,
+              "runs": 50,
+              "compile_s": 86.03120219008997,
+              "error": null
+            }
+          },
+          "speedups": {
+            "default": 1.075240786646919,
+            "reduce-overhead": 1.0753599920711212,
+            "max-autotune": 1.1415627394698997
+          },
+          "throughput_eager": 819.9311426915932,
+          "throughput_compiled": {
+            "default": 881.6234068640158,
+            "reduce-overhead": 881.721147103697,
+            "max-autotune": 936.0028414277004
+          }
+        }
+      }
+    }
+  },
+  "caveats": {
+    "dynamo_reset": "torch._dynamo.reset() runs before every benchmark_compile call; without it the dynamo cache limit (8 variants) silently returns eager timings for later arms.",
+    "weights": "latency depends on shapes and dtypes, not weight values, so which arm the checkpoint came from does not affect these numbers.",
+    "compile_cost": "compile_s is reported separately and excluded from the per-call timings; it is paid once per process.",
+    "slicing": "sliced arms remove a uniform head count per layer, the only shape slice_heads() can express. The accuracy of these particular head sets is not the subject here.",
+    "reduce_overhead": "uses CUDA graphs, which may be unavailable on ROCm; a failed mode is recorded with its error."
+  },
+  "wall_clock_s": 888.8
+}

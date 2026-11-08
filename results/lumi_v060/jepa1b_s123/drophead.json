@@ -1,0 +1,26 @@
+{
+  "arm": "drophead",
+  "epochs": 2,
+  "losses": [
+    0.5343475010352294,
+    0.2436828244410705
+  ],
+  "masker_stats": {
+    "active": true,
+    "total_heads": 512,
+    "active_heads": 256,
+    "pruned_heads": 256,
+    "prune_events": 0,
+    "prune_fraction": 0.5
+  },
+  "pruned_heads": null,
+  "mask_ratio": 0.5,
+  "seed": 123,
+  "batch_size": 64,
+  "n_train": 1281167,
+  "model": "facebook/ijepa_vith14_1k",
+  "dataset": "evanarlian/imagenet_1k_resized_256",
+  "train_seconds": 71332.7,
+  "gpu": "AMD Instinct MI250X",
+  "torch_version": "2.5.1+rocm6.2"
+}

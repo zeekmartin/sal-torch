@@ -82,6 +82,16 @@ from pathlib import Path
 
 import torch
 
+# The DropHead arm, the INT4 columns and the memmap data path all reuse
+# ``run_sal_qat_prototype`` -- deliberately, so the control differs from the
+# treatment in exactly one respect and the INT4 grid is the campaign's. That
+# module sits beside this one and is importable when this file is *run*, but not
+# when it is imported by path (the CPU test suite does exactly that), so its
+# directory goes on sys.path here rather than inside each call site.
+_HERE = str(Path(__file__).resolve().parent)
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
 MODEL_ID = "facebook/ijepa_vith14_1k"
 DATASET_ID = "clane9/imagenet-100"
 
@@ -181,6 +191,86 @@ def load_model(device, grad_ckpt: bool):
 
 
 # --------------------------------------------------------------------- data
+class _NormalizedSplit(torch.utils.data.Dataset):
+    """A ``(uint8 images, labels)`` split served as normalized float pixels.
+
+    The memmap cache written by ``run_sal_qat_prototype`` holds uint8 rows,
+    147KB each, while every consumer here -- ``make_step``, ``linear_probe``,
+    ``knn_accuracy``, ``cka_similarity``, ``FIScanner`` -- expects what an
+    image processor returns. Normalizing per row rather than per split is what
+    keeps a 193GB file usable: the whole point of the cache is that it is never
+    resident.
+
+    ``(x / 255 - 0.5) / 0.5`` is exactly I-JEPA's own preprocessing. Its
+    ``preprocessor_config.json`` and ViT-B/16's were compared before this path
+    was wired: both are ViTImageProcessor at 224x224 with mean and std 0.5 and
+    rescale 1/255, so the cache encoded for ViT-B/16 is byte-correct for
+    ViT-H/14. A model whose processor differs must not reuse it.
+    """
+
+    def __init__(self, images, labels=None):
+        self.images, self.labels = images, labels
+
+    def __len__(self) -> int:
+        return int(self.images.shape[0])
+
+    def __getitem__(self, i):
+        import run_sal_qat_prototype as P
+        x = P.normalize(self.images[i])
+        return (x,) if self.labels is None else (x, self.labels[i])
+
+
+def build_data_memmap(sizes: dict, batch_size: int, seed: int, dataset_id: str,
+                      cache_dir: str, loader_workers: int, loader_block: int):
+    """The same contract as :func:`build_data`, off the memmap ImageNet-1k cache.
+
+    Reuses ``run_sal_qat_prototype.build_data`` so the cache files, their
+    ``-shuf`` format marker and the block-shuffle sampler are shared with the
+    ViT-B/16 experiments rather than reimplemented. An existing cache of the
+    right shape is reused, which is what makes three arms affordable: the 1.28M
+    JPEGs are decoded once, not once per arm.
+
+    The linear probe trains on the first ``n_probe_train`` rows of the *same*
+    train split the encoder trains on. That is ordinary linear-probe practice --
+    the probe is fit on train features and scored on held-out validation -- but
+    it does mean the probe's train rows are not disjoint from the encoder's.
+    """
+    import run_sal_qat_prototype as P
+    from torch.utils.data import DataLoader
+
+    P.LOADER_WORKERS, P.LOADER_BLOCK = loader_workers, loader_block
+    train, val, num_classes = P.build_data(
+        {"n_train": sizes["n_train"], "n_val": sizes["n_val"], "n_fi": sizes["n_fi"]},
+        seed, loader_workers, dataset_id=dataset_id, cache_dir=cache_dir)
+    xtr, ytr = train
+    xva, yva = val
+    n_pt = min(sizes["n_probe_train"], xtr.shape[0])
+    n_pv = min(sizes["n_probe_val"], xva.shape[0])
+    n_fi = min(sizes["n_fi"], n_pv)
+    log(f"  memmap: {xtr.shape[0]} train / {xva.shape[0]} val rows; "
+        f"probe {n_pt}/{n_pv}, fi {n_fi}")
+
+    kw = ({"num_workers": loader_workers, "persistent_workers": True,
+           "prefetch_factor": 4} if loader_workers else {})
+    loaders = {
+        # Block shuffle, not a full shuffle: a full shuffle of the 193GB train
+        # cache measured 3.6x slower. Sound only because the cache is written in
+        # random order -- see the encoder in run_sal_qat_prototype.build_data.
+        "train": DataLoader(_NormalizedSplit(xtr, ytr), batch_size=batch_size,
+                            sampler=P._BlockShuffle(xtr.shape[0], loader_block, seed),
+                            **kw),
+        # No shuffling outside training: CKA pairs features example by example.
+        "probe_train": DataLoader(_NormalizedSplit(xtr[:n_pt], ytr[:n_pt]),
+                                  batch_size=32, **kw),
+        "probe_val": DataLoader(_NormalizedSplit(xva[:n_pv], yva[:n_pv]),
+                                batch_size=32, **kw),
+        "cka": DataLoader(_NormalizedSplit(xva[:n_fi]), batch_size=16),
+    }
+    fi_batches = [{"pixel_values": P.normalize(xva[i:i + 16])}
+                  for i in range(0, n_fi, 16)]
+    return loaders, fi_batches, num_classes
+
+
 def build_data(sizes: dict, batch_size: int, seed: int):
     """ImageNet-100 as (pixel_values, label) tensors, cached under ~/.cache."""
     from datasets import load_dataset
@@ -305,6 +395,51 @@ def train_control(model, loader, epochs, patch_size, device, use_amp):
         losses.append(total / max(len(loader), 1))
         log(f"    epoch {epoch + 1} mean loss {losses[-1]:.6f}")
     return {"losses": losses}
+
+
+def train_drophead(model, loader, epochs, patch_size, device, use_amp,
+                   mask_ratio: float, seed: int):
+    """DropHead control: the same hook and ratio, resampled every step.
+
+    ``ResampleMasker`` is imported from ``run_sal_qat_prototype`` rather than
+    reimplemented, because the point of the control is that it differ from SAL
+    in exactly one respect -- whether the dropped set accumulates. A second
+    implementation would add differences nobody intended. It wraps the real
+    ``HeadMasker``, so the hook, the projection finding and the mask semantics
+    are byte-for-byte SAL's.
+
+    No ``pruned_heads`` is returned. These arms resample every step, so the
+    final mask is the last draw and not a set the model was trained to live
+    without; recording it would invite a meaningless "aligned" comparison.
+    """
+    import run_sal_qat_prototype as P
+    from sal import SALConfig
+
+    cfg = SALConfig.auto(model, prune_fraction=mask_ratio, uniform_per_layer=True)
+    masker = P.ResampleMasker(model, cfg, seed=seed, mode="drophead")
+    masker.install()
+    opt = torch.optim.AdamW(model.parameters(), lr=LR)
+    model.train()
+    losses, gstep = [], 0
+    total = len(loader) * epochs
+    try:
+        for epoch in range(epochs):
+            prog = Progress(len(loader), f"drophead epoch {epoch + 1}/{epochs}")
+            step = make_step(patch_size, use_amp, prog)
+            running = 0.0
+            for batch in loader:
+                batch = [b.to(device) if torch.is_tensor(b) else b for b in batch]
+                masker.step(gstep, total)
+                running += step(model, batch, opt, masker)
+                gstep += 1
+            prog.done()
+            losses.append(running / max(len(loader), 1))
+            log(f"    epoch {epoch + 1} mean loss {losses[-1]:.6f} "
+                f"| masker: {masker.stats}")
+        stats = dict(masker.stats)
+    finally:
+        masker.remove()
+    return {"losses": losses, "masker_stats": stats, "pruned_heads": None}
 
 
 # ------------------------------------------------------------------ pruning
@@ -513,12 +648,21 @@ def remap_window(cfg, epochs_done: int, total_epochs: int):
 
 # ------------------------------------------------------------------ scoring
 def score(model, reference, loaders, fi_batches, num_classes, latency_runs,
-          device, image_size=224, want_fi=True):
+          device, image_size=224, want_fi=True, cheap=False):
     """Every metric for one variant.
 
     ``image_size`` comes from the model config rather than a 224 constant: a
     latency probe of the wrong shape throws, and the row would silently read
     ``n/a`` as though the measurement were unavailable rather than misconfigured.
+
+    ``cheap`` keeps only the linear probe and the parameter count. It exists for
+    the random-draw rows: PHASE2A measured head-selection sampling, not the
+    training seed, as the dominant noise term, so a credible pruned number needs
+    ~20 draws -- and 20 draws x 2 ratios x 2 precisions x 3 arms of the *full*
+    row would cost more GPU-hours than the training does, most of it in CPU
+    latency on a 631M-parameter encoder. The draws estimate accuracy and its
+    spread; CKA, FI and latency are properties of the architecture and are
+    measured once on the named rows instead.
     """
     from sal import (cka_similarity, count_params, knn_accuracy, linear_probe,
                      measure_latency)
@@ -527,12 +671,14 @@ def score(model, reference, loaders, fi_batches, num_classes, latency_runs,
     row = {
         "linear_probe": linear_probe(model, loaders["probe_train"],
                                      loaders["probe_val"], num_classes=num_classes),
-        "knn_accuracy": knn_accuracy(model, loaders["probe_train"],
-                                     loaders["probe_val"], k=20),
-        "cka_similarity": (1.0 if model is reference
-                           else cka_similarity(reference, model, loaders["cka"])),
         "params": count_params(model),
     }
+    if cheap:
+        return row
+    row["knn_accuracy"] = knn_accuracy(model, loaders["probe_train"],
+                                       loaders["probe_val"], k=20)
+    row["cka_similarity"] = (1.0 if model is reference
+                             else cka_similarity(reference, model, loaders["cka"]))
 
     image_shape = (1, 3, image_size, image_size)
     for dev in (["cuda", "cpu"] if device.type == "cuda" else ["cpu"]):
@@ -695,6 +841,30 @@ def parse_args(argv=None):
     p.add_argument("--control", action="store_true",
                    help="also train a no-SAL arm — the comparison that actually "
                         "tests SAL training rather than head selection")
+    p.add_argument("--drophead", action="store_true",
+                   help="also train a DropHead arm: the same hook and the same "
+                        "mask ratio, resampled every step instead of "
+                        "accumulated. It is the control that asks whether the "
+                        "gain is ordinary regularisation rather than "
+                        "adaptation to a fixed set. On ViT-B/16 it beat SAL on "
+                        "every cell scored on sets neither had seen "
+                        "(PHASE3_IMAGENET1K.md, EXP27_DROPHEAD.md).")
+    p.add_argument("--dataset", default=None,
+                   help="HF dataset id; default is this script's ImageNet-100")
+    p.add_argument("--data-cache", default=None,
+                   help="memmap cache directory, required for ImageNet-1k: the "
+                        "193GB uint8 train split does not fit in a small-g "
+                        "job's memory and must be memory-mapped")
+    p.add_argument("--n-train", type=int, default=None,
+                   help="training images; default 8192, or the whole split when "
+                        "--data-cache is given and this is 0")
+    p.add_argument("--n-val", type=int, default=None,
+                   help="validation images the probe and FI rows are drawn from")
+    p.add_argument("--loader-workers", type=int, default=6,
+                   help="DataLoader workers; needed for a memory-mapped split, "
+                        "where each row is a 147KB Lustre read")
+    p.add_argument("--loader-block", type=int, default=512,
+                   help="block-shuffle size for the memory-mapped train split")
     p.add_argument("--no-space-check", action="store_true",
                    help="skip the pre-training probe that reserves checkpoint space")
     p.add_argument("--seed", type=int, default=42)
@@ -703,10 +873,245 @@ def parse_args(argv=None):
                         "e.g. facebook/dinov2-large")
     p.add_argument("--prune-ratios", type=float, nargs="+", default=list(PRUNE_RATIOS),
                    help="post-training pruning ratios to benchmark (default: 0.33 0.5)")
+    p.add_argument("--prune-seeds", type=int, default=1,
+                   help="random head selections to draw per ratio. 1 keeps the "
+                        "historical single-draw behaviour; exp04 measured "
+                        "head-selection sampling as the dominant noise term "
+                        "(sd 11.07 -> 4.28 on the same checkpoints), so a "
+                        "published cell wants 20. Draws are scored with the "
+                        "linear probe only -- see score(cheap=...).")
+    p.add_argument("--int4", action="store_true",
+                   help="also score an INT4 copy of every named row and every "
+                        "draw, using the same simulated per-channel round-trip "
+                        "as the ViT-B/16 experiments")
+    p.add_argument("--aligned", action="store_true",
+                   help="also score each arm on SAL's own trained-for head set. "
+                        "On ViT-B/16 this was the one configuration where SAL's "
+                        "mechanism showed an effect no control reproduced "
+                        "(+56pp over the matched baseline, EXP25_ALIGNED.md), "
+                        "and SAL's dense row understates it by 9.6pp.")
+    p.add_argument("--fixed-set-matrix", action="store_true",
+                   help="after training, score every arm on head sets pinned "
+                        "from ONE arm (the control if there is one), so "
+                        "cross-arm differences are differences in weights "
+                        "rather than in selection. exp27's protocol.")
     p.add_argument("--slice", action="store_true",
                    help="also physically remove the heads with slice_heads() and "
                         "score the smaller models — the rows with real latency")
     return p.parse_args(argv)
+
+
+def benchmark(original, model, control_model, drophead_model, loaders,
+              fi_batches, num_classes, lat_runs, device, image_size, args,
+              sal_pruned_heads):
+    """Score every arm on every configuration. Returns the table and its extras.
+
+    Lifted out of ``main`` unchanged so that a split run can call it: 1b trains
+    its three arms as separate SLURM jobs (53 GPU-hours in one job, with the
+    evaluation not checkpointed, is a bad bet) and then needs exactly this
+    orchestration over three *loaded* checkpoints. The alternative was a second
+    copy of the loops in the experiment script, which is the duplication that
+    makes two tables drift apart.
+
+    ``model`` is the SAL arm; ``control_model`` and ``drophead_model`` may be
+    ``None``. ``sal_pruned_heads`` is the set SAL trained without, or ``None``.
+    """
+    results, order = {}, []
+
+    def free():
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+
+    def add(name, m, reference, cheap=False, store=True):
+        """Score one variant. ``store=False`` returns the row without filing it.
+
+        Per-draw rows are not architectures and must not land in ``results``:
+        every downstream consumer -- summary_table, the figures, the payload --
+        reads that dict as one row per configuration. Only the aggregated
+        random row is filed.
+        """
+        log(f"  scoring {name} ...")
+        row = score(m, reference, loaders, fi_batches, num_classes,
+                    lat_runs, device, image_size=image_size, cheap=cheap)
+        if args.int4:
+            # The same simulated per-channel round-trip the ViT-B/16
+            # experiments use, so the INT4 columns are comparable across the
+            # campaign. Always cheap: quantization changes weights, not shape,
+            # so latency and FI are the unquantized row's.
+            import run_sal_qat_prototype as P
+            q = P.quantize_weights(m, 4)
+            row["int4_linear_probe"] = score(
+                q, reference, loaders, fi_batches, num_classes, lat_runs,
+                device, image_size=image_size, cheap=True)["linear_probe"]
+            del q
+            free()
+        if store:
+            results[name] = row
+            if not cheap:
+                order.append(name)
+        return row
+
+    def add_draws(name, trained, ratio, n_draws):
+        """``n_draws`` random selections, aggregated. Returns the summary row.
+
+        Draw 0 is scored in full so the architecture has CKA, FI and latency;
+        the rest are probe-only. The summary carries mean and sd because a
+        single draw is not a measurement of a random-selection cell -- that is
+        the correction PHASE2A had to make to three published readings.
+        """
+        probes, int4s, first = [], [], None
+        for d in range(n_draws):
+            pruned = prune(trained, ratio, "random", seed=args.seed + d)
+            row = add(f"{name}#{d}", pruned, trained, cheap=(d > 0), store=False)
+            if d == 0:
+                first = row
+            probes.append(row["linear_probe"])
+            if args.int4:
+                int4s.append(row["int4_linear_probe"])
+            del pruned
+            free()
+
+        def msd(xs):
+            m = sum(xs) / len(xs)
+            if len(xs) < 2:
+                return m, None
+            return m, (sum((x - m) ** 2 for x in xs) / (len(xs) - 1)) ** 0.5
+
+        pm, ps = msd(probes)
+        summary = dict(first)
+        summary.update(linear_probe=pm, linear_probe_sd=ps, draws=n_draws,
+                       linear_probe_draws=probes)
+        if int4s:
+            im, isd = msd(int4s)
+            summary.update(int4_linear_probe=im, int4_linear_probe_sd=isd,
+                           int4_linear_probe_draws=int4s)
+        results[name] = summary
+        order.append(name)
+        log(f"  {name}: probe {pm * 100:.2f}%"
+            + (f" +- {ps * 100:.2f}" if ps is not None else "")
+            + f" over {n_draws} draw(s)")
+        return summary
+
+    slicing, slicing_errors = {}, {}
+    verify_batch = fi_batches[0]
+
+    def aligned_arm(prefix, trained, pairs):
+        """``trained`` scored with ``pairs`` removed -- any arm, any set.
+
+        Masked rather than sliced, so the parameter count matches every other
+        row in the table and the comparison isolates function from size.
+        """
+        import copy as _copy
+
+        from sal import SALConfig, arch_support
+        from sal.masker import HeadMasker
+
+        m = _copy.deepcopy(trained)
+        cfg = SALConfig.auto(m, prune_fraction=0.5, prune_start_ratio=0.0)
+        masker = HeadMasker(m, cfg, seed=args.seed)
+        masker.install()
+        masker.apply_mask()
+        for layer_idx, head in pairs:
+            masker._masks[int(layer_idx)][int(head)] = 0.0
+        m._sal_masker = masker
+        row = add(prefix, m, trained)
+        row["head_set"] = sorted((int(a), int(b)) for a, b in pairs)
+        row["heads_removed"] = len(row["head_set"])
+        del m
+        free()
+        return row
+
+    def pruned_arm(prefix, trained):
+        for ratio in args.prune_ratios:
+            pct = int(round(ratio * 100))
+            add_draws(f"{prefix}+random-{pct}%", trained, ratio, args.prune_seeds)
+            pruned = prune(trained, ratio, "magnitude", seed=args.seed)
+            add(f"{prefix}+magnitude-{pct}%", pruned, trained)
+            del pruned
+            free()
+            if not args.slice:
+                continue
+            for method in SELECTION_METHODS:
+                label = "random-uniform" if method == "random" else method
+                name = f"{prefix}+{label}-{int(round(ratio * 100))}%-sliced"
+                try:
+                    sliced, info = slice_variant(trained, ratio, method, args.seed,
+                                                 verify_batch)
+                except Exception as e:
+                    slicing_errors[name] = f"{type(e).__name__}: {e}"
+                    log(f"  SLICING FAILED for {name}: {slicing_errors[name]}")
+                    continue
+                add(name, sliced, trained)
+                slicing[name] = info
+                del sliced
+                if device.type == "cuda":
+                    torch.cuda.empty_cache()
+
+    add("original", original, original)
+    add("sal-trained", model, original)
+    pruned_arm("sal", model)
+
+    if control_model is not None:
+        add("control-trained", control_model, original)
+        pruned_arm("ctrl", control_model)
+
+    if drophead_model is not None:
+        add("drophead-trained", drophead_model, original)
+        pruned_arm("dh", drophead_model)
+
+    # ---- aligned rows and the cross-arm fixed-set matrix -------------------
+    arms = {"sal": model}
+    if control_model is not None:
+        arms["control"] = control_model
+    if drophead_model is not None:
+        arms["drophead"] = drophead_model
+
+    aligned_rows, matrix_sets = {}, {}
+    if args.aligned:
+        if not sal_pruned_heads:
+            log("  --aligned: SAL reported no pruned_heads (resumed run, or a "
+                "schedule that never fired); skipping the aligned rows.")
+        else:
+            matrix_sets["aligned"] = [(int(a_), int(b_)) for a_, b_ in sal_pruned_heads]
+            log(f"  SAL's trained-for set: {len(matrix_sets['aligned'])} heads")
+
+    if args.fixed_set_matrix:
+        # Pinned on ONE arm, so a cross-arm difference is a difference in
+        # weights and not in which heads magnitude happens to pick. exp27
+        # measured that distinction as worth up to 6pp on a SAL checkpoint,
+        # whose own magnitude ranking is not a reliable object.
+        ref_name = "control" if "control" in arms else "sal"
+        ref = arms[ref_name]
+        for ratio in args.prune_ratios:
+            pct = int(round(ratio * 100))
+            matrix_sets[f"magnitude{pct}"] = uniform_heads(
+                ref, ratio, "magnitude", seed=args.seed)
+        log(f"  magnitude sets pinned on the {ref_name} arm: "
+            f"{sorted(matrix_sets)}")
+
+    if matrix_sets:
+        rule("Fixed-set matrix")
+        for set_name, pairs in sorted(matrix_sets.items()):
+            for arm_name, arm in arms.items():
+                row = aligned_arm(f"{arm_name}@{set_name}", arm, pairs)
+                aligned_rows[f"{arm_name}@{set_name}"] = {
+                    "linear_probe": row["linear_probe"],
+                    "int4_linear_probe": row.get("int4_linear_probe"),
+                    "heads_removed": row["heads_removed"]}
+        # Each arm's own ranking too, which is the reading exp24 used; the gap
+        # between the two is a measurement rather than a caveat.
+        if args.fixed_set_matrix:
+            for arm_name, arm in arms.items():
+                for ratio in args.prune_ratios:
+                    pct = int(round(ratio * 100))
+                    own = uniform_heads(arm, ratio, "magnitude", seed=args.seed)
+                    pinned = matrix_sets[f"magnitude{pct}"]
+                    shared = len(set(map(tuple, own)) & set(map(tuple, pinned)))
+                    key = f"{arm_name}:magnitude{pct}"
+                    aligned_rows.setdefault("_self_overlap", {})[key] = {
+                        "overlap": shared, "of": len(own),
+                        "identical": sorted(map(tuple, own)) == sorted(map(tuple, pinned))}
+    return results, order, slicing, slicing_errors, aligned_rows
 
 
 def main(argv=None):
@@ -728,6 +1133,12 @@ def main(argv=None):
     # that makes a resumed run look finished when it is not.
     if args.epochs is not None:
         sizes["epochs"] = args.epochs
+    # n_val sizes the *cached* validation split the probe and FI rows are drawn
+    # from, which the in-memory path never needed as a separate number.
+    sizes.setdefault("n_val", sizes["n_probe_val"])
+    for key in ("n_train", "n_val"):
+        if getattr(args, key) is not None:
+            sizes[key] = getattr(args, key)
     epochs = sizes["epochs"]
     args.epochs = epochs
 
@@ -744,7 +1155,8 @@ def main(argv=None):
 
     rule("Assets")
     log(f"  model:   {MODEL_ID}")
-    log(f"  dataset: {DATASET_ID}")
+    log(f"  dataset: {args.dataset or DATASET_ID}"
+        + (f"  (memmap cache {args.data_cache})" if args.data_cache else ""))
     log("  (cached under ~/.cache/huggingface — re-runs do not re-download)")
     model = load_model(device, grad_ckpt)
     patch_size = model.config.patch_size
@@ -753,7 +1165,14 @@ def main(argv=None):
         f"{model.config.num_hidden_layers} layers x "
         f"{model.config.num_attention_heads} heads, patch {patch_size}")
 
-    loaders, fi_batches, num_classes = build_data(sizes, batch_size, args.seed)
+    if args.data_cache:
+        loaders, fi_batches, num_classes = build_data_memmap(
+            sizes, batch_size, args.seed, args.dataset or DATASET_ID,
+            args.data_cache, args.loader_workers, args.loader_block)
+    else:
+        # Called positionally and without the new keywords, so a test that
+        # replaces build_data with a three-argument stub keeps working.
+        loaders, fi_batches, num_classes = build_data(sizes, batch_size, args.seed)
     fi_batches = [{k: v.to(device) for k, v in b.items()} for b in fi_batches]
     log(f"  classes: {num_classes}")
     # Read the size off the processed images, not the config: DINOv2's config
@@ -804,6 +1223,7 @@ def main(argv=None):
 
     remaining = max(0, epochs - epochs_done)
     masker_stats = {}
+    sal_pruned_heads = None
     if remaining == 0:
         log("  checkpoint is already complete — skipping training.")
     else:
@@ -836,6 +1256,10 @@ def main(argv=None):
         history = trainer.train(num_epochs=remaining)
         prog.done()
         masker_stats = history["masker_stats"]
+        # Which heads SAL trained *without*. Scoring SAL on an unrelated
+        # random set understates it by 9.6pp on ViT-B/16 (EXP25_ALIGNED.md),
+        # so this is the set the --aligned rows need.
+        sal_pruned_heads = history.get("pruned_heads")
         log(f"  losses: {[round(x, 6) for x in losses]}")
         log(f"  masker: {masker_stats}")
 
@@ -862,53 +1286,22 @@ def main(argv=None):
         control_hist = train_control(control_model, loaders["train"], epochs,
                                      patch_size, device, use_amp)
 
+    # optional DropHead arm --------------------------------------------------
+    drophead_model, drophead_hist = None, None
+    if args.drophead:
+        rule(f"DropHead arm ({epochs} epochs, mask_ratio={args.mask_ratio}, "
+             f"resampled every step)")
+        drophead_model = load_model(device, grad_ckpt)
+        drophead_hist = train_drophead(drophead_model, loaders["train"], epochs,
+                                       patch_size, device, use_amp,
+                                       args.mask_ratio, args.seed)
+
     # 7 ---------------------------------------------------------- benchmark
     rule("Compression benchmark")
     lat_runs = sizes["latency_runs"]
-    results, order = {}, []
-
-    def add(name, m, reference):
-        log(f"  scoring {name} ...")
-        results[name] = score(m, reference, loaders, fi_batches, num_classes,
-                              lat_runs, device, image_size=image_size)
-        order.append(name)
-
-    slicing, slicing_errors = {}, {}
-    verify_batch = fi_batches[0]
-
-    def pruned_arm(prefix, trained):
-        for ratio in args.prune_ratios:
-            for method in SELECTION_METHODS:
-                pruned = prune(trained, ratio, method, seed=args.seed)
-                add(f"{prefix}+{method}-{int(round(ratio * 100))}%", pruned, trained)
-                del pruned
-                if device.type == "cuda":
-                    torch.cuda.empty_cache()
-            if not args.slice:
-                continue
-            for method in SELECTION_METHODS:
-                label = "random-uniform" if method == "random" else method
-                name = f"{prefix}+{label}-{int(round(ratio * 100))}%-sliced"
-                try:
-                    sliced, info = slice_variant(trained, ratio, method, args.seed,
-                                                 verify_batch)
-                except Exception as e:
-                    slicing_errors[name] = f"{type(e).__name__}: {e}"
-                    log(f"  SLICING FAILED for {name}: {slicing_errors[name]}")
-                    continue
-                add(name, sliced, trained)
-                slicing[name] = info
-                del sliced
-                if device.type == "cuda":
-                    torch.cuda.empty_cache()
-
-    add("original", original, original)
-    add("sal-trained", model, original)
-    pruned_arm("sal", model)
-
-    if control_model is not None:
-        add("control-trained", control_model, original)
-        pruned_arm("ctrl", control_model)
+    results, order, slicing, slicing_errors, aligned_rows = benchmark(
+        original, model, control_model, drophead_model, loaders, fi_batches,
+        num_classes, lat_runs, device, image_size, args, sal_pruned_heads)
 
     base = results["original"]
     for name, info in slicing.items():
@@ -964,6 +1357,17 @@ def main(argv=None):
         "fi_before": scan_before.fi_score, "fi_after": scan_after.fi_score,
         "sal_losses": losses, "masker_stats": masker_stats,
         "control_losses": control_hist["losses"] if control_hist else None,
+        "drophead_losses": drophead_hist["losses"] if drophead_hist else None,
+        "sal_pruned_heads": (sorted((int(x), int(y)) for x, y in sal_pruned_heads)
+                             if sal_pruned_heads else None),
+        "fixed_set_matrix": aligned_rows or None,
+        "prune_seeds": args.prune_seeds, "int4": args.int4,
+        "drophead_masker_stats": (drophead_hist["masker_stats"]
+                                  if drophead_hist else None),
+        "dataset": args.dataset or DATASET_ID,
+        "data_cache": args.data_cache,
+        "n_train": sizes["n_train"], "n_val": sizes["n_val"],
+        "batch_size": batch_size, "grad_ckpt": grad_ckpt, "vram_gb": vram,
         "results": results, "figures": figures,
         "wall_clock_s": round(time.time() - started, 1),
     }

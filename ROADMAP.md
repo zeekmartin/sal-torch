@@ -1,8 +1,8 @@
 # Roadmap
 
-`sal-torch` makes transformers **survive compression** — by training them to
-reorganize around missing structure, and by telling you which structure you can
-afford to lose.
+`sal-torch` makes transformers **survive compression** — by measuring what a
+given model stands to lose, routing it to the method that suits it, and training
+it to reorganize around the structure you remove.
 
 This document is where the project is going. Dates are release dates, not
 promises about the future ones.
@@ -379,41 +379,202 @@ any arm that is not being perturbed.
 
 ---
 
+### v0.6.0 / v0.6.1 — two methods, two regimes, and the control arm that won · 2026-11
+
+Run on LUMI-G (AMD MI250X / ROCm 6.2) under a 5,000 GPU-hour EuroHPC
+allocation. The campaign that was meant to confirm SAL at scale instead
+reorganised the product around what the measurements said. Full trail in
+`results/lumi_v060/`.
+
+**The setting that settles things.** ViT-B/16 on **ImageNet-1k**
+(`evanarlian/imagenet_1k_resized_256`, the open mirror of the gated set —
+canonical 1000 classes, 256px shortest side), **three seeds, the full 50 000-image
+validation split**. Every earlier ImageNet-100 figure is superseded where the
+cells overlap.
+
+**DropHead — resampling the mask every step — is now the default method.** It
+entered as SAL's control arm, to test whether progressive accumulation was doing
+anything. It was, and the sign was negative:
+
+| at 50% of heads + INT4, vs the *same* baseline | |
+|---|---|
+| SAL, on sets it did not train for | +14.6pp |
+| **DropHead, on any set** | **+57.2pp** |
+| DropHead over SAL | **+42.7pp** |
+
+- **Pruning 33% of heads is free with DropHead**: 77.69% against its own dense
+  77.54%, and 76.12 vs 76.09 at INT4. At 50% it costs 5.0pp. On a fixed
+  magnitude-chosen set it is **+63.5pp** over a standard fine-tune, and
+  **+54.7pp** on SAL's own set — a set it has no more seen than any other.
+- **DropHead is also stable**: seed-to-seed sd of 0.02-0.92pp across six
+  measured rows, against SAL's 0.50-17.55pp. One SAL row reads
+  60.15 / 51.83 / 26.46% on three seeds of the same configuration.
+
+**SAL keeps a narrower, real claim: one head set, fixed at training time.** On
+its own trained-for set SAL reads **76.51%** — against **34.52%** on sets it
+never saw, and against **20.33%** for the baseline checkpoint on the identical
+set. So the adaptation is genuine (+56pp) and entirely set-specific (+0.05pp of
+it is the set being intrinsically easier). The honest cost is **−3.93pp** against
+the matched baseline, at a 16.5% smaller model — not the drop its dense row
+suggests. The ratio must be fixed too: at 33%, a subset of its own set, it falls
+to 72.76%.
+
+**SAL is not a pre-conditioner.** At a fixed head set, neither SAL's nor
+DropHead's weights beat the pretrained ones after a recovery fine-tune:
+**+0.05pp** and **+0.07pp**. What survives is a head-*selection* signal worth
++0.60pp, and nothing at 33%.
+
+**The probe routes compression. The fragility score does not.** Tested across six
+architectures (DeiT-small, BERT-base, ViT-B/16, DINOv2-large, I-JEPA ViT-H/14,
+phi-2), FI read off a pretrained checkpoint fails to predict the pruning regime
+at both ends: BERT-base has a higher FI than ViT-B/16 and loses 5pp where
+ViT-B/16 loses 62; DINOv2-large has an FI 25× lower than DeiT-small and collapses
+to chance on the same task and protocol. Parameter count does not order it
+either. What does is **how far an ordinary fine-tune falls when you prune it** —
+which `CompressionPipeline.probe()` measures directly in two evaluation sweeps
+and no training:
+
+| probe drop at 50% of heads | route |
+|---|---|
+| **> 30pp** | `sal_aligned` — SAL, if you control the deployed head set |
+| **10-30pp** | `drophead` — either; DropHead if you do not |
+| **< 10pp** | `skip_heads` — head training buys nothing measurable |
+
+**FI stays in the product for diagnosis and certification, not as a router** —
+and not as a head selector either: fragility-weighted selection loses to uniform
+random on 0/10 seeds at both mask ratios (−5.02pp and −4.77pp).
+
+**FFN pruning is where the compression actually is.** Measured against a matched
+control that saw the same five epochs with nothing pruned, at comparable size
+removed: **25% of FFN neurons costs 0.63pp** where **50% of heads costs 3.17pp**
+— heads are roughly five times more expensive per unit of size. At an identical
+32.7% of parameters removed, all-FFN beats head+FFN by 1.55pp.
+
+**On speedup, the honest numbers.** The **highest measured speedup is 1.74×**, at
+49.1% of parameters removed (50% heads + 50% FFN) and a cost of 6.82pp, **at
+batch 32**. **At batch 1 every configuration is 1.00×** — 8.09-8.37 ms against
+8.16 ms dense — because a ViT-B/16 at batch 1 is kernel-launch bound. The 2×
+target carried by earlier versions of this roadmap **is not reachable by
+magnitude pruning on this model and has been withdrawn.** Any latency figure
+here is a batch-32 figure.
+
+**What did not work, recorded so it is not rediscovered.** Scaling the campaign
+to I-JEPA ViT-H/14 (631M) on ImageNet-1k failed as an experiment: two epochs of
+continued self-supervised pretraining collapsed **every** arm including the
+unmasked control (linear probe 48.6% → 16.6% baseline, 3.0% DropHead, 2.3% SAL),
+with the training loss falling the whole way. The measurement chain was
+exonerated — the probe repeats to ±0.58pp and slicing agrees with masking to
+1e-06 — so the fault is the learning-rate/schedule/EMA recipe, which needs
+adapting for a self-supervised objective. ~181 GPU-hours, no method comparison
+obtained. The lesson is now a standing rule: **gate on the control arm, not on
+completion.**
+
+---
+
 ## Planned
 
-### v0.6.0 — SAL + quantization-aware training, and MLP pruning
+### v0.7.0 — diagnose, route, compress, recover
 
-v0.5.1 measured the ceiling of head removal: 1.2× on CPU at 50% of heads,
-because attention is only a third of a ViT block's parameters. A 2× real speedup
-needs the rest of the block.
+v0.6.x established that there is no single best method, and that the choice is
+measurable before any training happens. v0.7.0 makes that the shape of the
+product: one pipeline that measures a model, picks the method, compresses, and
+repairs.
 
-- **SAL + QAT** — combine training-time head pruning with INT4/INT8
-  quantization-aware training, so the model adapts to both at once rather than
-  meeting quantization after the fact.
-- **MLP pruning** — extend structural sparsification to the feed-forward
-  expansion, which holds two thirds of each block.
-- **Target: 2× real speedup**, measured on sliced, quantized models — not 1.2×.
-- Requires a EuroHPC GPU allocation.
+**The pipeline, in order:**
 
-### v0.7.0 — Topology-guided distillation and wider architectures
+1. **Diagnose** — `FIScanner` for structural fragility, reported and
+   certifiable. A diagnostic, not a decision.
+2. **Route** — `CompressionPipeline.probe()` returns `sal_aligned` /
+   `drophead` / `skip_heads` from measured accuracy loss. Already shipped in
+   v0.6.1; v0.7.0 adds routing for the FFN ratio, which currently has no
+   equivalent.
+3. **Compress** — **DropHead by default.** SAL when the deployed head set is
+   fixed at training time and the probe says the model is fragile. FFN neuron
+   pruning for the bulk of the size reduction.
+4. **Recover** — a short fine-tune after pruning, which is worth more than any
+   training-time masking when the deployment architecture is known.
 
-Distillation currently throws away the teacher's structure and hopes the student
-rediscovers it. If we know which of the teacher's heads are structurally
-critical and which are redundant, we can tell the student what to preserve.
-Targeted at the 21%.
+**Also in v0.7.0:**
 
-Alongside it: Mixture-of-Experts support (`ExpertMasker` — the same
-accumulate-and-hold idea applied to expert routing), and additional plasticity
-axes beyond the three shipped today.
+- **An FFN-ratio router**, so step 2 covers the component that carries most of
+  the compression rather than only the heads.
+- **A per-epoch control probe** in every experiment harness, failing loudly when
+  a control arm regresses against its own starting point — the exp28 lesson,
+  enforced in code.
+- **A corrected self-supervised recipe**, validated before any further 1B-scale
+  run. Until then, no SSL claim above ViT-L scale.
+- **Topology-guided distillation** — distillation throws away the teacher's
+  structure and hopes the student rediscovers it. If we know which of the
+  teacher's heads are structurally critical and which are redundant, we can tell
+  the student what to preserve.
+- **Mixture-of-Experts support** (`ExpertMasker`), and additional plasticity axes
+  beyond the three shipped today.
+
+### v0.8.0 — Edge deployment exports
+
+Making compressed models deployable on real edge hardware without requiring
+sal-torch on the target device.
+
+- **TensorRT export** (`sal.export.to_tensorrt()`) — for NVIDIA Jetson
+  (Orin NX, AGX Orin, Thor): a `.engine` file that runs natively on the Jetson's
+  GPU.
+- **OpenVINO export** (`sal.export.to_openvino()`) — for Intel edge hardware
+  (Movidius, Core Ultra NPU). Same principle: a deploy-ready artifact.
+- **`inference_benchmark()`** on `CompressionPipeline` — latency and throughput
+  on the target runtime (PyTorch, ONNX Runtime, TensorRT, OpenVINO) at every
+  compression stage, **reported per batch size**, since v0.6.x showed the
+  batch-1 and batch-32 pictures are entirely different.
+- **Batch optimization** — resolve the padding overhead identified in v0.4.0
+  (batched inference slower than single-sample on short texts). Fixed shapes +
+  dynamic batching + sequence bucketing.
+
+### sal-torch-pro — the commercial extension
+
+**Already measured and shipping:**
+
+- **FFN neuron pruning** (`sal_pro.mlp`) — **validated on ImageNet-1k**, three
+  seeds, full validation split (exp18, exp26; 97.2 GPU-hours). This is the
+  component that carries the compression: 25% of neurons costs 0.63pp against
+  3.17pp for 50% of heads at comparable size, and the measured batch-32 speedups
+  run 1.28× / 1.33× / 1.50× at 25 / 33 / 50% of neurons.
+- **`torch.compile` and ONNX export** (`sal_pro.deploy`) — **ONNX export
+  validated** (exp22), compiled inference benchmarked (exp16). The compiled dense
+  model is 1.12× at batch 32, which is the reference any pruning speedup has to
+  be read against.
+- **QAT**, compliance reports, and fleet monitoring.
+
+**Planned:**
+
+- **`edit_impact_bound()`** — given a proposed weight edit, bound how far it can
+  move the model's behaviour before the edit is applied. Intended as the
+  pre-flight check for compression and patching decisions.
+- **`compare_weights()`** — a structural diff between two checkpoints, reporting
+  what changed where rather than a scalar distance. The natural companion to
+  `DriftMonitor`, which measures the same thing over a training run.
+- **`DeployPipeline`** — scan → route → compress → recover → optimize → export →
+  benchmark. The customer provides a model ID and a target device; the pipeline
+  produces a `.onnx`, `.engine`, or `.xml` file with a benchmark report.
+- **`FleetMonitor`** — track which compressed model version is deployed on which
+  device. Integrates with sal-certify for structural verification of the
+  compressed artifact.
+- **Pro-only features** behind the `@require_pro` decorator: `DeployPipeline`,
+  `FleetMonitor`, multi-target export, batch optimization.
+
+Scope note: `edit_impact_bound()` and `compare_weights()` are named here as
+deliverables; their precise semantics are not yet fixed.
 
 ### v1.0.0 — Stable and production-ready
 
 - **API frozen** with semantic-versioning guarantees.
-- **Published benchmarks** across model families and compression methods, with
+- **Published benchmarks** across model families, compression methods, and
+  deployment targets (PyTorch, ONNX Runtime, TensorRT, OpenVINO), with
   reproduction scripts — no claim in the README without a script behind it.
 - **Compliance reporting** for regulated deployments: a signed, auditable record
-  of what was compressed, by how much, and what the structural impact was.
+  of what was compressed, by how much, what the structural impact was, and
+  which deployment artifact was produced.
 - Broad architecture coverage validated on real models, not just detected.
+- **sal-certify integration**: every exported artifact can be certified at
+  export time, with the structural certificate embedded alongside the model.
 
 ---
 

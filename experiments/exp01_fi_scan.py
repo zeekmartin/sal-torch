@@ -119,6 +119,7 @@ def main(argv=None):
         log("ERROR: no GPU visible - this experiment must run on a GPU node")
         return 1
 
+    started = time.time()
     device = torch.device("cuda")
     dev_name = torch.cuda.get_device_name(0)
     log("exp01 FI scan | {} | torch {} | sal {}".format(
@@ -155,6 +156,15 @@ def main(argv=None):
         "fi_summary": fi.summary,
         "layer_classification": {str(k): v.value for k, v in fi.layer_map.items()},
         "timing_s": {"load_and_probe": round(t_load, 1), "fi_scan": round(t_fi, 1)},
+        # Flat provenance keys under the names exp23-27 use, so one grep answers
+        # "which GPU, which torch, how long" across the whole campaign. The
+        # nested "env" block below is kept as it was: it carries more (python,
+        # transformers, sal, peak memory) and existing readers index into it.
+        # wall_clock_s is filled in after the optional plasticity scan, since
+        # until then it would report a fraction of the run.
+        "gpu": dev_name,
+        "torch_version": torch.__version__,
+        "wall_clock_s": None,
         "env": {
             "device": dev_name,
             "torch": torch.__version__,
@@ -184,6 +194,8 @@ def main(argv=None):
         out["timing_s"]["plasticity_scan"] = round(t_pl, 1)
         out["env"]["peak_gpu_mem_gb"] = round(
             torch.cuda.max_memory_allocated() / 1e9, 2)
+
+    out["wall_clock_s"] = round(time.time() - started, 1)
 
     # Automatic reproduction check against the published NVIDIA numbers.
     ref = REFERENCE.get(args.model)

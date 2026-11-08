@@ -1,0 +1,68 @@
+{
+  "experiment": "exp23_baselines",
+  "model": "google/vit-base-patch16-224",
+  "dataset": "evanarlian/imagenet_1k_resized_256",
+  "dataset_label": "ImageNet-1k (resized 256px, evanarlian/imagenet_1k_resized_256)",
+  "seed": 42,
+  "ratios": [
+    0.5
+  ],
+  "prune_seeds": 2,
+  "recover_epochs": 1,
+  "n_train": 2000,
+  "n_val": 1000,
+  "num_classes": 1000,
+  "smoke": true,
+  "gpu": "AMD Instinct MI250X",
+  "results": {
+    "dense": {
+      "accuracy": 0.781,
+      "trained": false
+    },
+    "prune50": {
+      "random": {
+        "accuracy": 0.21100000000000002,
+        "std": 0.053000000000000005,
+        "per_seed": [
+          0.158,
+          0.264
+        ],
+        "method": "uniform random heads, sliced, no training"
+      },
+      "magnitude": {
+        "accuracy": 0.082,
+        "heads": 72,
+        "method": "lowest-L2 heads, uniform per-layer quota, sliced, no training"
+      },
+      "magnitude_global": {
+        "accuracy": 0.003,
+        "heads": 72,
+        "per_layer_counts": {
+          "0": 12,
+          "1": 12,
+          "2": 12,
+          "3": 10,
+          "4": 9,
+          "5": 9,
+          "6": 7,
+          "7": 1
+        },
+        "method": "lowest-L2 heads ranked globally, MASKED (uneven per-layer counts are not sliceable)"
+      },
+      "magnitude_recovery": {
+        "accuracy": 0.391,
+        "epoch_losses": [
+          3.5343271121382713
+        ],
+        "epochs": 1,
+        "method": "magnitude, sliced, then 1 epochs of AdamW fine-tuning"
+      }
+    }
+  },
+  "caveats": {
+    "already_trained": "google/vit-base-patch16-224 ships a 1000-class classifier, so with num_labels=1000 nothing is reinitialised and the 'no training' arms start from a converged model at 78.10% top-1.",
+    "magnitude_quota": "The sliced magnitude arm uses a uniform per-layer quota, because slice_heads() requires one and the comparison holds size fixed. magnitude_global is the published global ranking, evaluated by masking.",
+    "recovery_is_the_strong_arm": "Most of what post-hoc pruning papers report comes from recovery fine-tuning, so it gets the same optimiser, schedule and data order as the SAL arms."
+  },
+  "wall_clock_s": 103.5
+}

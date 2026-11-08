@@ -1,0 +1,583 @@
+{
+  "experiment": "exp24_sal_recovery",
+  "model": "google/vit-base-patch16-224",
+  "dataset": "evanarlian/imagenet_1k_resized_256",
+  "dataset_label": "ImageNet-1k (resized 256px, evanarlian/imagenet_1k_resized_256)",
+  "seed": 456,
+  "ratios": [
+    0.33,
+    0.5
+  ],
+  "arms": [
+    "sal_aligned"
+  ],
+  "recover_epochs": 5,
+  "n_train": 1281167,
+  "n_val": 50000,
+  "num_classes": 1000,
+  "smoke": false,
+  "checkpoints": "results/in1k_a/seed456/models",
+  "compare": "results/exp23/seed456/exp23_baselines.json",
+  "gpu": "AMD Instinct MI250X",
+  "results": {
+    "prune33": {
+      "magnitude": {
+        "accuracy": 0.78894,
+        "epoch_losses": [
+          0.81963363460215,
+          0.5511609452015838,
+          0.3431685507175442,
+          0.17567214351541918,
+          0.08625136268493513
+        ],
+        "epochs": 5,
+        "method": "magnitude, sliced, then 5 epochs of AdamW fine-tuning",
+        "int4_accuracy": 0.77046,
+        "reused_from": "results/exp23/seed456/exp23_baselines.json"
+      },
+      "sal_aligned": {
+        "accuracy": 0.78896,
+        "accuracy_before_recovery": 0.7406,
+        "dense_accuracy": 0.61606,
+        "epoch_losses": [
+          0.42201841743864393,
+          0.3598617340182523,
+          0.22094826556868172,
+          0.10446462030080916,
+          0.04584930284011514
+        ],
+        "epochs": 5,
+        "heads": 48,
+        "head_set": [
+          [
+            0,
+            5
+          ],
+          [
+            0,
+            7
+          ],
+          [
+            0,
+            8
+          ],
+          [
+            0,
+            9
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            1,
+            8
+          ],
+          [
+            2,
+            6
+          ],
+          [
+            2,
+            8
+          ],
+          [
+            2,
+            10
+          ],
+          [
+            2,
+            11
+          ],
+          [
+            3,
+            3
+          ],
+          [
+            3,
+            5
+          ],
+          [
+            3,
+            9
+          ],
+          [
+            3,
+            11
+          ],
+          [
+            4,
+            2
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            4,
+            6
+          ],
+          [
+            4,
+            11
+          ],
+          [
+            5,
+            0
+          ],
+          [
+            5,
+            1
+          ],
+          [
+            5,
+            4
+          ],
+          [
+            5,
+            5
+          ],
+          [
+            6,
+            0
+          ],
+          [
+            6,
+            2
+          ],
+          [
+            6,
+            3
+          ],
+          [
+            6,
+            4
+          ],
+          [
+            7,
+            5
+          ],
+          [
+            7,
+            6
+          ],
+          [
+            7,
+            7
+          ],
+          [
+            7,
+            10
+          ],
+          [
+            8,
+            1
+          ],
+          [
+            8,
+            2
+          ],
+          [
+            8,
+            9
+          ],
+          [
+            8,
+            11
+          ],
+          [
+            9,
+            0
+          ],
+          [
+            9,
+            1
+          ],
+          [
+            9,
+            5
+          ],
+          [
+            9,
+            9
+          ],
+          [
+            10,
+            1
+          ],
+          [
+            10,
+            3
+          ],
+          [
+            10,
+            8
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            11,
+            1
+          ],
+          [
+            11,
+            2
+          ],
+          [
+            11,
+            7
+          ],
+          [
+            11,
+            10
+          ]
+        ],
+        "aligned_is_subset": true,
+        "checkpoint": "results/in1k_a/seed456/models/sal.pt",
+        "method": "sal checkpoint, lowest-magnitude subset of SAL's pruned set, sliced, then 5 epochs of AdamW fine-tuning",
+        "int4_accuracy": 0.76974
+      }
+    },
+    "prune50": {
+      "magnitude": {
+        "accuracy": 0.7716,
+        "epoch_losses": [
+          1.1078971342860868,
+          0.6682686133996769,
+          0.42445659845757777,
+          0.22573345042880516,
+          0.11544933600582521
+        ],
+        "epochs": 5,
+        "method": "magnitude, sliced, then 5 epochs of AdamW fine-tuning",
+        "int4_accuracy": 0.74966,
+        "reused_from": "results/exp23/seed456/exp23_baselines.json"
+      },
+      "sal_aligned": {
+        "accuracy": 0.77902,
+        "accuracy_before_recovery": 0.7697,
+        "dense_accuracy": 0.61606,
+        "epoch_losses": [
+          0.5247586376137328,
+          0.43456985867035675,
+          0.2631375783020402,
+          0.12506161150670703,
+          0.056064619964067725
+        ],
+        "epochs": 5,
+        "heads": 72,
+        "head_set": [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            0,
+            5
+          ],
+          [
+            0,
+            7
+          ],
+          [
+            0,
+            8
+          ],
+          [
+            0,
+            9
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            1,
+            7
+          ],
+          [
+            1,
+            8
+          ],
+          [
+            1,
+            10
+          ],
+          [
+            2,
+            5
+          ],
+          [
+            2,
+            6
+          ],
+          [
+            2,
+            7
+          ],
+          [
+            2,
+            8
+          ],
+          [
+            2,
+            10
+          ],
+          [
+            2,
+            11
+          ],
+          [
+            3,
+            3
+          ],
+          [
+            3,
+            5
+          ],
+          [
+            3,
+            6
+          ],
+          [
+            3,
+            7
+          ],
+          [
+            3,
+            9
+          ],
+          [
+            3,
+            11
+          ],
+          [
+            4,
+            2
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            4,
+            6
+          ],
+          [
+            4,
+            7
+          ],
+          [
+            4,
+            8
+          ],
+          [
+            4,
+            11
+          ],
+          [
+            5,
+            0
+          ],
+          [
+            5,
+            1
+          ],
+          [
+            5,
+            3
+          ],
+          [
+            5,
+            4
+          ],
+          [
+            5,
+            5
+          ],
+          [
+            5,
+            11
+          ],
+          [
+            6,
+            0
+          ],
+          [
+            6,
+            1
+          ],
+          [
+            6,
+            2
+          ],
+          [
+            6,
+            3
+          ],
+          [
+            6,
+            4
+          ],
+          [
+            6,
+            10
+          ],
+          [
+            7,
+            0
+          ],
+          [
+            7,
+            5
+          ],
+          [
+            7,
+            6
+          ],
+          [
+            7,
+            7
+          ],
+          [
+            7,
+            9
+          ],
+          [
+            7,
+            10
+          ],
+          [
+            8,
+            1
+          ],
+          [
+            8,
+            2
+          ],
+          [
+            8,
+            3
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            8,
+            9
+          ],
+          [
+            8,
+            11
+          ],
+          [
+            9,
+            0
+          ],
+          [
+            9,
+            1
+          ],
+          [
+            9,
+            3
+          ],
+          [
+            9,
+            5
+          ],
+          [
+            9,
+            9
+          ],
+          [
+            9,
+            11
+          ],
+          [
+            10,
+            1
+          ],
+          [
+            10,
+            3
+          ],
+          [
+            10,
+            4
+          ],
+          [
+            10,
+            5
+          ],
+          [
+            10,
+            8
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            11,
+            1
+          ],
+          [
+            11,
+            2
+          ],
+          [
+            11,
+            6
+          ],
+          [
+            11,
+            7
+          ],
+          [
+            11,
+            10
+          ],
+          [
+            11,
+            11
+          ]
+        ],
+        "aligned_is_subset": false,
+        "checkpoint": "results/in1k_a/seed456/models/sal.pt",
+        "method": "sal checkpoint, SAL's own pruned set, sliced, then 5 epochs of AdamW fine-tuning",
+        "int4_accuracy": 0.76052
+      }
+    }
+  },
+  "caveats": {
+    "no_random_draws": "Every arm is one sliced architecture that was then fine-tuned, so each reports a single deterministic accuracy -- the same protocol as exp23's magnitude_recovery, which it is compared with. 1a's 20 random draws prune a dense model, where a draw costs nothing; here a draw would mean a separate recovery run.",
+    "aligned_subset": "The 1a checkpoints trained at mask_ratio 0.5, so an aligned set below 50% is the lowest-magnitude subset of SAL's own set, flagged per arm as aligned_is_subset.",
+    "drophead_has_no_aligned_set": "DropHead resamples every step, so there is no set it was trained to live without; only a magnitude arm is defined for it.",
+    "magnitude_arm_is_reused": "The magnitude+recovery row is read from exp23 rather than retrained, so it is the identical number, not a replication."
+  },
+  "wall_clock_s": 48043.2
+}

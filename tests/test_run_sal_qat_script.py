@@ -37,7 +37,7 @@ def _tiny_model(num_classes=NC):
         num_labels=num_classes))
 
 
-def _fake_data(sizes, seed, workers=0):
+def _fake_data(sizes, seed, workers=0, dataset_id=None, cache_dir=None):
     g = torch.Generator().manual_seed(seed)
 
     def split(n):

@@ -1,0 +1,23 @@
+SAL+QAT Prototype - ViT-B/16 on ImageNet-100 (1 epoch)
+════════════════════════════════════════════════════════════════════════
+
+                  FP16  Prune33%  Prune50%      INT8      INT4    P50+I4
+              ────────  ────────  ────────  ────────  ────────  ────────
+Baseline         80.4%     41.4%     21.7%     80.6%     79.6%     18.1%
+SAL only         80.5%     41.9%     22.2%     80.5%     79.7%     18.7%
+QAT only         80.5%     39.2%     19.9%     80.4%     80.2%     16.8%
+SAL + QAT        80.3%     39.5%     20.4%     80.0%     79.8%     16.6%
+════════════════════════════════════════════════════════════════════════
+Size             173MB     154MB     145MB      88MB      46MB      39MB
+CPU latency       95ms      84ms      78ms      75ms       n/a       n/a
+
+Key cell - P50+I4 accuracy, change vs baseline:
+  SAL only    18.70%  (+0.55pp)
+  QAT only    16.80%  (-1.35pp)
+  SAL + QAT   16.65%  (-1.50pp)
+  additive prediction (SAL + QAT gains): -0.80pp; measured SAL+QAT: -1.50pp
+  verdict: SAL+QAT does not beat the better single method: not supported.
+
+Pruned cells are means over random head selections (same heads for every variant).
+INT8/INT4 = per-channel weight round-trip, the grid QAT trains against. Size is computed.
+CPU latency: INT8 is real torch.ao dynamic INT8. PyTorch has no CPU INT4 kernel, so INT4 is n/a.

@@ -9,14 +9,22 @@ transformer **compression-resilient** through training-time head masking. It is
 a **product**, not a research repo: clean API, clear errors, no research
 artifacts.
 
-Two independent, composable components:
+Three independent, composable components:
 
-- **SAL (Structurally Adaptive Learning)** — training-time random head masking
-  that forces functional redistribution. *Perturbs.*
+- **SAL (Structurally Adaptive Learning)** — training-time random head masking,
+  accumulate-and-hold. *Perturbs.* **Specific**: its resilience applies to the
+  one head set it trained for and nowhere else (exp25).
+- **DropHead** — the same quota, mask resampled every step. *Perturbs.*
+  **General**: its resilience holds on any head set of that size, including
+  SAL's own (exp27). Started life as SAL's control arm and outperforms it on the
+  product's actual promise.
 - **FI (Fragility Index)** — a post-hoc structural fragility diagnostic.
-  *Measures.*
+  *Measures.* Diagnosis and certification only — **not** a router and not a head
+  selector (exp17, PHASE2E).
 
-SAL and FI are **separate**. A user can use either without the other.
+They are **separate**. A user can use any one without the others. Which head
+method to use is decided by the **probe**, not by FI: see the routing table in
+`README.md` (>30pp drop → SAL, 10-30pp → either, <10pp → skip head training).
 
 ## Cardinal rules (do not violate)
 
@@ -35,6 +43,13 @@ SAL and FI are **separate**. A user can use either without the other.
    mechanism**. Keep the clean API, use the validated implementation details.
 6. Treat `pyproject.toml`, `LICENSE`, `README.md` as off-limits unless the task
    explicitly says otherwise. Local only — do not push to any remote.
+7. **Quote only numbers that are in `results/lumi_v060/*.md` or
+   `sal-torch-pro/results/*.md`.** The ImageNet-1k series (exp23-exp28,
+   3 seeds, full 50 000-image validation split) **supersedes** every
+   ImageNet-100 figure for the same cell. Several headline claims published
+   before it are retracted — see "What the ImageNet-1k series retracted" below.
+   Do not reinstate a retracted number from an older doc, a commit message or
+   the README.
 
 ## The validated mechanism (source of truth: reference research code)
 
@@ -147,38 +162,125 @@ the three shipped, `ExpertMasker`.
   I-JEPA ViT-H/14: SAL wins 35/36 over 3 seeds at 33/50% (+0.4 to +1.9pp); no
   effect at 70%. DINOv2 ViT-L/14 (1 seed): 13/18. Slicing 50% of heads: 1.1x GPU /
   1.2x CPU (attention is ~1/3 of a ViT block). 271 unit tests pass on CPU.
-- **v0.6.0 (in progress): validated on LUMI (AMD MI250X / ROCm 6.2).** Phase 1
+- **v0.6.0 / v0.6.1: validated on LUMI (AMD MI250X / ROCm 6.2).** Phase 1
   reproduced the published structural scans on ROCm exactly (I-JEPA ViT-H/14
   FI=0.003975 vs 0.0040 on NVIDIA, same 1/4/27 layer split). exp04 then
   re-measured SAL+QAT on ViT-B/16 / ImageNet-100 at **15 seeds and 20 random
-  head selections per cell**, which changed three things. Full trail in
-  `results/lumi_v060/PHASE1.md`, `PHASE2.md`, `PHASE2A.md`, `PHASE2B.md`.
-  - **The headline is +14.5pp ± 4.3** at 50% pruning + INT4 (95% CI
-    [+12.4, +16.7], 15/15 seeds), **not the +22pp** published from 3 seeds, and
-    QAT adds **+2.4pp ± 0.9** (15/15). Those three seeds were the most
-    favourable of five.
+  head selections per cell**. Full trail in `results/lumi_v060/PHASE1.md`
+  through `PHASE2H.md`.
   - **`--prune-seeds 3` is too few for any published cell.** Head-selection
     sampling, not the training seed, was the dominant noise term: sd 11.07 → 4.28
     on the same checkpoints. It is also the cheapest to remove (evaluation only,
     no retraining). Two readings in `PHASE2.md` — "unstable baseline" and "SAL
     actively harmful on seed 2024" — were artefacts of 3 selections and are
     retracted in `PHASE2A.md`. The baseline in fact spans 1.6pp.
-  - **Dose-response is monotone**: gain at P50+I4 rises +6.2 → +20.8pp as
-    `prune_fraction` goes 0.1 → 0.5, costing 0.3-1.5pp of clean accuracy. Best
-    when the training ratio matches the deployment ratio, so the **0.33 default
-    under-delivers against a 50% target** (default not yet changed — product
-    decision).
-  - **Scope**: robust at ≥50% pruning; **weak and inconsistent at 33% on
-    ViT-B/16/ImageNet-100**, though 33% is SAL's best row on GPT-2 Medium and
+  - **Dose-response is monotone** on ImageNet-100: gain at P50+I4 rises
+    +6.2 → +20.8pp as `prune_fraction` goes 0.1 → 0.5. Best when the training
+    ratio matches the deployment ratio. The clean-accuracy cost quoted with it
+    (0.3-1.5pp) **does not survive three seeds — see the retractions below.**
+  - **Scope**: robust at ≥50% pruning; weak and inconsistent at 33% on
+    ViT-B/16/ImageNet-100, though 33% is SAL's best row on GPT-2 Medium and
     ViT/CIFAR-10. Task difficulty is the obvious candidate and is confounded
     with architecture and dataset; nothing measured separates them.
-  - Control arms `drophead` and `nonaccum` are implemented in
-    `scripts/run_sal_qat_prototype.py` (opt-in via `--variants`, default
-    unchanged) but **not yet run**. They test whether the gain is ordinary
-    regularisation and whether accumulation is load-bearing.
-  - MLP pruning and the compile/ONNX paths live in **sal-torch-pro**
-    (`sal_pro.mlp`, `sal_pro.deploy`) — mechanism unit-tested, accuracy and
-    speedup not yet measured.
+  - **The probe routes compression; FI does not.** exp17 (`PHASE2H.md`) tested
+    whether FI read off a pretrained checkpoint predicts the pruning regime,
+    across **six architectures** (DeiT-small, BERT-base, ViT-B/16,
+    DINOv2-large, I-JEPA ViT-H/14, phi-2). **It fails at both ends**:
+    BERT-base has a *higher* FI than ViT-B/16 and loses 5.15pp where ViT-B/16
+    loses 62.21; DINOv2-large has an FI 25x *lower* than DeiT-small and
+    collapses to 0.96% — chance on a 100-class task — on the same dataset,
+    protocol, class count and seed count. Parameter count does not rescue it
+    either (drops run −76, −62, −5, −94, −19, −4 by size). What does order the
+    table is **the baseline's own drop under pruning**, measured directly by a
+    probe: >30pp → SAL, 10-30pp → either, <10pp → skip head training. FI stays
+    in the product for diagnosis and certification, **not** as a router.
+  - **FI-weighted head *selection* loses to uniform random on 0/10 seeds**, at
+    both mask ratios: −5.02pp (CI [−5.64, −4.40]) at 0.3 and −4.77pp
+    (CI [−5.15, −4.39]) at 0.5 (`PHASE2E.md`). This is cardinal rule 1,
+    measured at scale.
+
+### What the ImageNet-1k series retracted (exp23-exp28)
+
+**ViT-B/16, `evanarlian/imagenet_1k_resized_256`** (the gated `ILSVRC/imagenet-1k`
+is unavailable; this is the open mirror — canonical 1000 classes in canonical
+order, 256px shortest side; the pretrained checkpoint reads 78.44% on it against
+the 80.3% on its card, the difference being resize + centre crop). **Three seeds
+(42, 123, 456), full 50 000-image validation split, autocast bfloat16.** This is
+the most rigorous evidence the project has and it overrides ImageNet-100 for
+every shared cell. Docs: `PHASE3_IMAGENET1K.md`, `EXP24_SAL_RECOVERY.md`,
+`EXP25_ALIGNED.md`, `EXP27_DROPHEAD.md`, `EXP28_JEPA_1B.md`, and
+`sal-torch-pro/results/EXP26_MLP.md`.
+
+- **SAL's headline replicates — and loses to its own control.** SAL over its
+  own baseline at P50+INT4 is **+14.57pp** (30.63 vs 16.06), 3/3 seeds, which
+  matches the +14.5 ± 4.3 published from ImageNet-100. On the **same cell
+  DropHead reads 73.29% against the baseline's 16.06% — +57.23pp**, and beats
+  SAL by **+42.66pp**. SAL's dense accuracy (66.90%) is below DropHead's
+  *P50-pruned* accuracy (72.54%). **The +22pp figure published from 3 seeds is
+  retracted** (`PHASE2A.md`); so is any framing of accumulate-and-hold as the
+  causal mechanism — the non-accumulating control is simply better.
+- **SAL's clean-accuracy cost is not 0.3-1.5pp.** Across three seeds SAL's
+  clean accuracy is **71.53 / 67.57 / 61.61%** — a 9.92pp spread — against
+  DropHead's 77.60 / 77.32 / 77.71% (0.39pp). Across all six rows of exp27 SAL's
+  seed-to-seed sd spans **0.50-17.55pp** and DropHead's **0.02-0.92pp**, a 15x+
+  gap; one SAL row reads 60.15 / 51.83 / 26.46%. **A method whose accuracy moves
+  thirty points with the training seed cannot carry a sub-2pp cost claim.**
+  Note also that **SAL's dense row is not its operating point**: deployed on its
+  own set it reads 76.51%, i.e. **−3.93pp** against the matched baseline's
+  80.44% at a 16.5% smaller model (exp25). Quote that, not the dense row.
+- **exp25 — SAL's adaptation is real and entirely set-specific.** On its own
+  trained-for set: **76.51%** (sd 0.50). On sets it never saw: **34.52%**. The
+  same set removed from the matched baseline checkpoint: **20.33%**, against
+  20.38% for random sets — a **0.05pp** difference. So SAL's head set is worth
+  ~nothing to a model that did not train for it and **+56.18pp** to the one that
+  did. Both the set *and* the ratio must be fixed at training time: at P33 (a
+  subset of its own set, so an architecture it never trained for) SAL reads
+  72.76%, below magnitude+recovery's 78.85%.
+- **exp24 — SAL is NOT a pre-conditioner.** The PRIORITY 0 experiment, 117.6
+  GPU-hours. At a *fixed* head set, neither SAL's nor DropHead's weights beat the
+  pretrained ones after five epochs of recovery: **+0.05pp** and **+0.07pp** at
+  P50+INT4. What survives is a head-*selection* signal worth **+0.60pp** at
+  P50+INT4 (3/3 seeds) — and **nothing at P33**, where the sign flips (−0.17,
+  −0.30). Buying it costs ~6 GPU-hours of SAL training per seed and commits the
+  deployment to one head set chosen at training time.
+- **exp27 — DropHead validated on ImageNet-1k, and it is general.** Against the
+  baseline checkpoint on the **identical** head set: **+63.47pp** at P50
+  (+63.43 INT4), **+26.45pp** at P33, and **+54.70pp** on *SAL's own* aligned
+  set — 3/3 seeds, every cell. **Pruning 33% of heads is free for DropHead**:
+  77.69% against its own dense 77.54% (**+0.14pp**), and 76.12 vs 76.09 at INT4.
+  At P50 it costs 5.01pp. SAL on an external fixed set: +8.14pp (P50),
+  +0.89pp (P33). So **SAL's adaptation is worth 56pp on one set and 0-8pp
+  anywhere else; DropHead's is worth 26-63pp everywhere.**
+- **exp26 (sal-torch-pro) — MLP pruning is far cheaper than head pruning, and
+  2x is not reachable.** 22 jobs, 97.2 GPU-hours. Measured against the *matched*
+  control (1a's baseline, 80.44% / 79.01% INT4 — same 5 epochs, nothing pruned),
+  at comparable size: **MLP-25 costs −0.63pp at −16.4% params; head-50 costs
+  −3.17pp at −16.5%** — heads are **5x more expensive per unit of size removed**.
+  At matched −32.7%, all-MLP beats head+MLP by **1.55pp** (77.75 vs 76.20).
+  **Max measured speedup is 1.74x at −6.82pp** (head50+mlp50, **batch 32**).
+  **At batch 1 every arm is 1.00x** (8.09-8.37ms vs 8.16ms dense) because a
+  ViT-B/16 there is kernel-launch bound — *any* latency claim must state batch 32.
+  **The 2x joint target is not achievable by magnitude pruning on this model.**
+- **exp28 — I-JEPA ViT-H/14 at 1B: a recipe failure, not a SAL result.**
+  ~181 GPU-hours. Two epochs of continued I-JEPA pretraining on ImageNet-1k
+  collapse **every** arm including the unmasked control: linear probe
+  48.60% (pretrained) → **16.64% baseline, 3.04% DropHead, 2.32% SAL**. Losses
+  *fall* while features are destroyed (SAL ends lowest at 0.0137 and most
+  collapsed). The probe is exonerated — exp28 reads 48.60% on the original and
+  the standalone noise probe reads 49.09% ± 0.58 — and so is `slice_heads()`
+  (1e-06 against masking on all 12 sliced cells). **With a broken control the run
+  measures nothing about either method**; the LR/schedule/EMA recipe must be
+  adapted for SSL objectives first. Do not cite any `results/jepa1b*` number as
+  a method comparison. See `EXP28_JEPA_1B.md`.
+- **INT4 caveat, applies to every number above.** INT4 is
+  `quantize_weights(model, 4)`, a **simulated per-channel quantize/dequantize
+  round-trip in fp32**, not a 4-bit kernel. bitsandbytes NF4 is CUDA-only and
+  absent on the ROCm image, so native INT4 was never measured on LUMI. The
+  column is the accuracy cost of 4-bit weight rounding and says **nothing** about
+  speed or memory.
+- MLP pruning and the compile/ONNX paths live in **sal-torch-pro**
+  (`sal_pro.mlp`, `sal_pro.deploy`): MLP pruning is now measured (exp26,
+  exp18) and ONNX export is validated (exp22).
 - LUMI notes: compute nodes have no internet, so pre-fetch into
   `HF_HOME=/scratch/project_465003656/sal-torch/hf_cache` from a login node and
   run with `HF_HUB_OFFLINE=1`. Pin `OMP_NUM_THREADS` to `SLURM_CPUS_PER_TASK`.
@@ -228,14 +330,23 @@ the three shipped, `ExpertMasker`.
   `sbatch --dependency=afterok:<smoke-id>`. This caught the MIOpen failure with
   20 jobs held at `DependencyNeverSatisfied` and zero GPU-hours burned. Cancel
   held jobs by explicit job id, never `scancel --state=PENDING -u <user>`.
-- Next: finish v0.6.0 — control arms (drophead/nonaccum), MLP prune sweep and
-  joint head+MLP for the 2x real speedup target; v0.7.0 topology-guided
-  distillation; Phase 5 (license signing + compliance reports).
-  See `ROADMAP.md` (public).
+- **Gate on the control arm, not on completion.** exp28's smoke jobs (90s) and
+  gate (1:22:53) both passed while the real runs were destroying the model,
+  because neither can see a representational collapse that takes 16 hours of
+  training to produce. A cheap probe of the *control* checkpoint after ~1000
+  steps would have saved ~157 GPU-hours. This is the "fail loudly on a
+  non-finite loss" lesson one level up: **fail loudly when the control arm
+  regresses against its own starting point.**
+- Next: v0.7.0 on the new narrative — **diagnose (FI) → route (probe) → DropHead
+  by default, SAL when the deployed head set is fixed → MLP prune → recover**;
+  fix the SSL training recipe before re-running anything at 1B; Phase 5
+  (license signing + compliance reports). The `nonaccum` control arm is still
+  unrun, though exp27 largely answers what it was for. See `ROADMAP.md`
+  (public).
 
 ## Integration tests
 
-The CPU unit suite must stay all-green (**271 passed** as of v0.5.1, plus the
+The CPU unit suite must stay all-green (**319 passed** as of v0.6.1, plus the
 8 integration tests skipped); integration tests are marked
 `@pytest.mark.integration` and **skipped by default** (need network + model
 downloads):
