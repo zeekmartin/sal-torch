@@ -561,7 +561,11 @@ sal-torch on the target device.
   `FleetMonitor`, multi-target export, batch optimization.
 
 Scope note: `edit_impact_bound()` and `compare_weights()` are named here as
-deliverables; their precise semantics are not yet fixed.
+deliverables; **their precise semantics are deliberately left unfixed** until a
+real use case asks for them. Both are shaped by what the caller needs to decide
+— what counts as "behaviour", which bound is useful, what granularity a diff
+should report — and specifying that in the abstract tends to produce an API that
+fits nobody. They move from planned to specified when a concrete request arrives.
 
 ### v1.0.0 — Stable and production-ready
 
