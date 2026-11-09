@@ -262,16 +262,29 @@ every shared cell. Docs: `PHASE3_IMAGENET1K.md`, `EXP24_SAL_RECOVERY.md`,
   ViT-B/16 there is kernel-launch bound — *any* latency claim must state batch 32.
   **The 2x joint target is not achievable by magnitude pruning on this model.**
 - **exp28 — I-JEPA ViT-H/14 at 1B: a recipe failure, not a SAL result.**
-  ~181 GPU-hours. Two epochs of continued I-JEPA pretraining on ImageNet-1k
-  collapse **every** arm including the unmasked control: linear probe
-  48.60% (pretrained) → **16.64% baseline, 3.04% DropHead, 2.32% SAL**. Losses
-  *fall* while features are destroyed (SAL ends lowest at 0.0137 and most
-  collapsed). The probe is exonerated — exp28 reads 48.60% on the original and
-  the standalone noise probe reads 49.09% ± 0.58 — and so is `slice_heads()`
-  (1e-06 against masking on all 12 sliced cells). **With a broken control the run
-  measures nothing about either method**; the LR/schedule/EMA recipe must be
-  adapted for SSL objectives first. Do not cite any `results/jepa1b*` number as
-  a method comparison. See `EXP28_JEPA_1B.md`.
+  ~196 GPU-hours, **3/3 seeds scored**. Two epochs of continued I-JEPA
+  pretraining on ImageNet-1k collapse **every** arm including the unmasked
+  control: linear probe **46.07% pretrained → 15.32% baseline, 3.20% DropHead,
+  2.69% SAL** (three-seed means; each control drops 27–33pp against its *own*
+  `original`). Losses *fall* while features are destroyed. **The n=1 reading
+  "SAL ends lowest and most collapsed" is withdrawn**: across three seeds SAL's
+  epoch-2 loss is 0.0478 ± 0.0318, *above* the baseline's 0.0312, and the
+  baseline has both the lowest loss and the best features — loss progress on this
+  objective is simply **decoupled** from representation quality. `slice_heads()`
+  is exonerated (1e-06 against masking on all 12 sliced cells, all seeds). **The
+  probe's ±0.58pp figure is also corrected**: that was the spread within one
+  shuffle; across the three eval jobs the same untrained checkpoint reads
+  41.04–48.60% (7.56pp), so compare within a seed, never across. **With a broken
+  control the run measures nothing about either method.** Do not cite any
+  `results/jepa1b*` number as a method comparison. See `EXP28_JEPA_1B.md`.
+- **exp28b — the cause is the objective, not the hyperparameters.** `make_step`
+  computed its target from the **same live weights it was training**, an
+  objective with no fixed point. exp28b changed only that — a **frozen target
+  encoder**, LR 5e-6, 10% warmup, cosine decay — and its control arm reads
+  **47.52% after a full epoch of 1 281 167 images against the 48.60% reference,
+  a 1.08pp drop** (job `23540225`, gate sentinel
+  `results/jepa1b_corr/control_gate.json`). Whether the *gains* reproduce is a
+  separate, still-unmeasured question.
 - **INT4 caveat, applies to every number above.** INT4 is
   `quantize_weights(model, 4)`, a **simulated per-channel quantize/dequantize
   round-trip in fp32**, not a 4-bit kernel. bitsandbytes NF4 is CUDA-only and
