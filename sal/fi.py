@@ -120,13 +120,19 @@ def compute_fi(adjacency: np.ndarray) -> float:
     return float(np.sum(tri_support == 0) / total)
 
 
-def classify_layers(model: nn.Module, adjacency: np.ndarray, num_heads_per_layer: Optional[int] = None,
-                    immune_thr: float = 0.01, critical_thr: float = 0.05) -> dict[int, LayerClass]:
-    """Classify each layer by how much removing its heads changes FI.
+def layer_fi_deltas(model: nn.Module, adjacency: np.ndarray,
+                    num_heads_per_layer: Optional[int] = None) -> dict[int, float]:
+    """Relative FI change when each layer's heads are removed from the graph.
 
-    IMMUNE   : relative FI change < ``immune_thr`` (default 1%)
-    CRITICAL : relative FI change >= ``critical_thr`` (default 5%)
-    BUFFER   : in between
+    This is the quantity both classifiers rank and threshold, returned on its
+    own so it can be stored. Storing it is worth doing: it is a few hundred
+    floats, and with it in hand any threshold or any ``k`` can be evaluated
+    later without touching a GPU.
+
+    The value is ``|FI_without_layer - FI| / FI``, so it is a **magnitude**: a
+    layer whose removal makes the graph *less* fragile scores just as high as
+    one that makes it more fragile. Returns ``{layer_index: delta}``, and all
+    zeros when the graph's FI is zero (nothing to be relative to).
     """
     if num_heads_per_layer is None:
         num_heads_per_layer = _infer_num_heads(model)
@@ -134,13 +140,45 @@ def classify_layers(model: nn.Module, adjacency: np.ndarray, num_heads_per_layer
     nl = total // num_heads_per_layer
     base_fi = compute_fi(adjacency)
     if base_fi < 1e-10:
-        return {i: LayerClass.IMMUNE for i in range(nl)}
-    result = {}
+        return {i: 0.0 for i in range(nl)}
+    deltas = {}
     for li in range(nl):
         s, e = li * num_heads_per_layer, (li + 1) * num_heads_per_layer
         keep = np.ones(total, dtype=bool); keep[s:e] = False
         red_fi = compute_fi(adjacency[np.ix_(keep, keep)])
-        delta = abs(red_fi - base_fi) / max(base_fi, 1e-10)
+        deltas[li] = float(abs(red_fi - base_fi) / max(base_fi, 1e-10))
+    return deltas
+
+
+def classify_layers(model: nn.Module, adjacency: np.ndarray, num_heads_per_layer: Optional[int] = None,
+                    immune_thr: float = 0.01, critical_thr: float = 0.25) -> dict[int, LayerClass]:
+    """Classify each layer by how much removing its heads changes FI.
+
+    IMMUNE   : relative FI change < ``immune_thr`` (default 1%)
+    CRITICAL : relative FI change >= ``critical_thr`` (default 25%)
+    BUFFER   : in between
+
+    **``critical_thr`` was 0.05 and is now 0.25.** At 5% the classification
+    saturates: on ViT-B/16 / ImageNet-1k it called 11 / 10 / 11 of 12 layers
+    CRITICAL on three probes, which is not a classification. 5% of an FI of
+    0.0709 is 3.6 edges out of 1030 — barely above the two-edge resolution of
+    the graph itself, so almost every layer clears it. Sweeping the threshold
+    on stored deltas, every value in (0.205, 0.295] put all three probes in a
+    3-8 CRITICAL range, and 0.25 gave 7 / 6 / 5
+    (``sal-certify/results/EXP30_DRIFT.md``, exp30b).
+
+    That measurement is **one architecture**: 12 layers x 12 heads at FI 0.05-0.08.
+    A model with a very different graph may well want a different number, and
+    the deltas are not scale-free, so pass ``critical_thr`` explicitly rather
+    than assuming either default transfers. If you want a classification that
+    does not depend on picking a number at all, use
+    :func:`classify_layers_by_rank` — across those three probes the *ordering*
+    was stable (one layer most sensitive 3/3, another least 3/3) where no
+    absolute threshold was.
+    """
+    deltas = layer_fi_deltas(model, adjacency, num_heads_per_layer)
+    result = {}
+    for li, delta in deltas.items():
         if delta < immune_thr:
             result[li] = LayerClass.IMMUNE
         elif delta >= critical_thr:
@@ -148,6 +186,31 @@ def classify_layers(model: nn.Module, adjacency: np.ndarray, num_heads_per_layer
         else:
             result[li] = LayerClass.BUFFER
     return result
+
+
+def classify_layers_by_rank(fi_deltas: dict[int, float], k: int = 3) -> list[int]:
+    """The ``k`` layers whose removal moves FI most, ranked, no threshold.
+
+    Takes the mapping :func:`layer_fi_deltas` returns and gives back layer
+    indices, most sensitive first. Ties break on the lower layer index, so the
+    result is deterministic.
+
+    **Why a rank and not a threshold.** The deltas are not scale-free: they
+    depend on the model, the probe and the graph's edge density, so a number
+    that classifies one model sensibly saturates on another (see
+    ``critical_thr`` in :func:`classify_layers`). The *ordering* is the part
+    that held across probes in the only place it has been measured — exp30b,
+    three probes of the same ViT-B/16, where one layer ranked most sensitive
+    3/3 and another least 3/3 while no fixed threshold put all three probes in
+    a usable range. ``k`` is a budget the caller already has ("I can afford to
+    protect three layers"), not a property of the model that has to be guessed.
+
+    ``k`` is clamped to the number of layers; ``k <= 0`` returns ``[]``.
+    """
+    if k <= 0:
+        return []
+    ordered = sorted(fi_deltas.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [li for li, _ in ordered[:k]]
 
 
 # ------------------------------------------------------------------ internals

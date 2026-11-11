@@ -9,7 +9,8 @@ from sal.config import SALConfig
 from sal.masker import HeadMasker
 from sal.callback import SALCallback
 from sal.trainer import SALTrainer
-from sal.fi import compute_fi, extract_activation_graph, classify_layers, LayerClass
+from sal.fi import (compute_fi, extract_activation_graph, classify_layers,
+                    classify_layers_by_rank, layer_fi_deltas, LayerClass)
 from sal.scanner import FIScanner, FIMonitor, ScanResult
 from sal.plasticity import PlasticityScanner, PlasticityMap, Recommendation
 from sal.compare import compare
@@ -50,7 +51,8 @@ _check_env()
 
 __all__ = ["SALConfig", "SALCallback", "SALTrainer", "HeadMasker",
            "FIScanner", "FIMonitor", "ScanResult",
-           "compute_fi", "extract_activation_graph", "classify_layers", "LayerClass",
+           "compute_fi", "extract_activation_graph", "classify_layers",
+           "classify_layers_by_rank", "layer_fi_deltas", "LayerClass",
            "PlasticityScanner", "PlasticityMap", "Recommendation", "compare",
            "StructuralGuard", "StructuralGuardCallback",
            "DriftMonitor", "DriftReport", "StructuralSnapshot",
