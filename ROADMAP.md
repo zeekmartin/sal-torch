@@ -458,16 +458,33 @@ target carried by earlier versions of this roadmap **is not reachable by
 magnitude pruning on this model and has been withdrawn.** Any latency figure
 here is a batch-32 figure.
 
-**What did not work, recorded so it is not rediscovered.** Scaling the campaign
-to I-JEPA ViT-H/14 (631M) on ImageNet-1k failed as an experiment: two epochs of
-continued self-supervised pretraining collapsed **every** arm including the
-unmasked control (linear probe 48.6% → 16.6% baseline, 3.0% DropHead, 2.3% SAL),
-with the training loss falling the whole way. The measurement chain was
-exonerated — the probe repeats to ±0.58pp and slicing agrees with masking to
-1e-06 — so the fault is the learning-rate/schedule/EMA recipe, which needs
-adapting for a self-supervised objective. ~181 GPU-hours, no method comparison
-obtained. The lesson is now a standing rule: **gate on the control arm, not on
-completion.**
+**What did not work, recorded so it is not rediscovered.** The first attempt to
+scale the campaign to I-JEPA ViT-H/14 (631M) on ImageNet-1k failed as an
+experiment: two epochs of continued self-supervised pretraining collapsed
+**every** arm including the unmasked control (linear probe 46.07% pretrained
+→ 15.32% baseline, 3.20% DropHead, 2.69% SAL, three-seed means), with the
+training loss falling the whole way. **196.6 GPU-hours, no method comparison
+obtained.** The cause turned out to be neither the scale nor the
+hyperparameters but the objective itself: the step computed its target from the
+same live weights it was training, so an encoder drifting toward a low-variance
+output drags both sides of the loss down together. On that objective **loss
+progress is decoupled from representation quality**, which is why nothing being
+watched looked wrong. The lesson is now a standing rule: **gate on the control
+arm, not on completion** — see "Training harness" under v0.7.0.
+
+**What the corrected run then measured.** With a **frozen target encoder** (LR
+5e-6, 10% warmup, cosine decay) the control arm holds across two full
+ImageNet-1k epochs on **3/3 seeds**, and the comparison the collapsed run could
+not make goes through. On a 631M self-supervised encoder, **DropHead beats SAL
+on every cell and every seed**: **+29.02pp** over the control at 50% head
+pruning against SAL's +7.89pp, **+11.88pp** at 33% where SAL reads −0.22pp and
+changes sign with the seed, and **+0.67pp on SAL's own trained-for head
+set** — the one cell where SAL was still expected to win. SAL also gives up
+**12.35pp** of dense accuracy (3/3 seeds) and its best cell lands 5.11pp below
+the control's dense row. As on ViT-B/16, **pruning 33% of heads is free for
+DropHead** (−0.04pp) and 50% costs 1.14pp. 223.6 GPU-hours; 420.2 for the 1B
+campaign as a whole. This is why step 3 of v0.7.0 no longer carries an exception
+for SAL.
 
 ---
 
@@ -488,9 +505,13 @@ repairs.
    `drophead` / `skip_heads` from measured accuracy loss. Already shipped in
    v0.6.1; v0.7.0 adds routing for the FFN ratio, which currently has no
    equivalent.
-3. **Compress** — **DropHead by default.** SAL when the deployed head set is
-   fixed at training time and the probe says the model is fragile. FFN neuron
-   pruning for the bulk of the size reduction.
+3. **Compress** — **DropHead, with no exception.** The "SAL when the deployed
+   head set is fixed at training time" carve-out that stood here through v0.6.x
+   is **withdrawn**: exp28b measured exactly that cell on a 631M self-supervised
+   encoder and DropHead matched or beat SAL on 3/3 seeds, while costing nothing
+   at training time and leaving the head set free until deployment. SAL stays in
+   the package, documented and supported, but it is no longer the recommendation
+   anywhere. FFN neuron pruning carries the bulk of the size reduction.
 4. **Recover** — a short fine-tune after pruning, which is worth more than any
    training-time masking when the deployment architecture is known.
 
@@ -498,17 +519,86 @@ repairs.
 
 - **An FFN-ratio router**, so step 2 covers the component that carries most of
   the compression rather than only the heads.
-- **A per-epoch control probe** in every experiment harness, failing loudly when
-  a control arm regresses against its own starting point — the exp28 lesson,
-  enforced in code.
-- **A corrected self-supervised recipe**, validated before any further 1B-scale
-  run. Until then, no SSL claim above ViT-L scale.
+- **The training harness safeguard** — the control gate, promoted from
+  experiment script to library. Specced below.
+- **A corrected self-supervised recipe** — **done, validated** (exp28b): a
+  frozen target encoder, LR 5e-6, 10% warmup, cosine decay. The control arm holds
+  across two full ImageNet-1k epochs on 3/3 seeds, against the ~32pp collapse of
+  the uncorrected recipe. What remains for v0.7.0 is exposing it as a supported
+  path rather than an experiment file.
 - **Topology-guided distillation** — distillation throws away the teacher's
   structure and hopes the student rediscovers it. If we know which of the
   teacher's heads are structurally critical and which are redundant, we can tell
   the student what to preserve.
 - **Mixture-of-Experts support** (`ExpertMasker`), and additional plasticity axes
   beyond the three shipped today.
+
+#### Training harness — the control gate
+
+A long training run can destroy a model while every signal you are watching looks
+healthy. exp28 spent **196.6 GPU-hours** on three arms whose unmasked control arm
+lost 27–33pp of representation quality: the losses fell the whole way, the
+90-second smoke jobs passed, and a 1:22:53 gate job passed. The failure was only
+visible by measuring the *control* checkpoint's features against where it
+started.
+
+exp28b added that measurement as an ad-hoc block in
+`experiments/exp28b_jepa_corrected.py` and it ran clean on 3/3 seeds. v0.7.0
+promotes it to a supported safeguard in the library. **Specification only; not
+implemented yet.**
+
+**What it does.** Before training, measure the starting checkpoint on a cheap
+task-appropriate metric and keep it as the reference. After each epoch, measure
+the control arm again. If it has regressed by more than a threshold against that
+reference, abort loudly — and let the sibling arms of the same experiment abort
+with it, since they are measuring against a control that no longer means
+anything.
+
+**The five properties that made it work, each of which is a requirement:**
+
+1. **The reference is measured, not declared.** A hardcoded "48.6%" is wrong the
+   moment the probe size, the dataset or the model changes. exp28b measures the
+   untrained checkpoint in the same job, with the same probe, on the same data.
+2. **It gates the control arm, not the perturbed ones.** A masked arm is
+   *supposed* to score lower; only the control's own regression is unambiguous
+   evidence that the recipe is broken.
+3. **The verdict is a file, and siblings poll it.** The control arm writes a
+   pass/fail sentinel atomically; every arm re-reads it on a fixed step interval
+   and raises on fail. This is what lets one job's finding stop the other
+   arms — they are separate SLURM jobs with no shared memory. Optionally it
+   `scancel`s the named siblings outright.
+4. **Compare within a measurement job, never across.** exp28b's probe reads
+   41.04–48.60% on the *same untrained checkpoint* in three different jobs
+   (7.56pp). A gate that compared a fresh epoch-1 probe against a reference
+   measured in some earlier job would fire at random. The reference and the check
+   must share the job, the probe size and the data shuffle.
+5. **The threshold is generous.** exp28b used 5pp, and the real failure was
+   27–33pp. The gate is there to catch catastrophe cheaply, not to adjudicate
+   small differences; a tight threshold turns it into a source of false aborts.
+
+**Shape of the API** (indicative, not settled):
+
+```python
+from sal.harness import ControlGate
+
+gate = ControlGate(
+    reference=lambda m: linear_probe(m, probe_train, probe_val),
+    threshold_pp=5.0,
+    sentinel="runs/exp/control_gate.json",
+    role="control",          # or "sibling" — siblings only read
+    poll_every_steps=200,
+    siblings=["23567665", "23567667"],   # optional: scancel on abort
+)
+gate.establish(model)        # measures and stores the reference
+...
+gate.check(model, epoch=1)   # control arm: measure, write sentinel, raise on fail
+gate.poll()                  # every arm, inside the step loop: raise if failed
+```
+
+**Cost and benefit.** One probe per epoch per run — ~10 GPU-hours against the
+196.6 exp28 spent, i.e. about 5%. It belongs next to the existing "fail loudly on
+a non-finite loss" rule, one level up: a diverged loss is caught in seconds, a
+quietly collapsing control arm currently is not caught at all.
 
 ### v0.8.0 — Edge deployment exports
 

@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "reason": "baseline probe 49.28% after epoch 2, 0.72pp above the pretrained reference 48.56% (abort threshold: 5pp below, here 5.0pp)",
+  "epoch": 2,
+  "linear_probe": 0.4927999973297119,
+  "reference_probe": 0.48559999465942383,
+  "drop_pp": -0.72,
+  "threshold_pp": 5.0,
+  "seed": 123,
+  "target": "frozen",
+  "lr": 5e-06,
+  "written": "2026-11-10T10:27:27"
+}

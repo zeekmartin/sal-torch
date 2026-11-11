@@ -10,12 +10,19 @@ control being broken is what makes the experiment uninterpretable as a test of
 SAL or DropHead. Nothing here says either method is good or bad; it says the
 training recipe is wrong for this model.
 
-**The follow-up identifies the cause.** exp28b re-ran the same model and the same
-data with a **frozen target encoder**, LR 5e-6, 10% warmup and cosine decay. Its
-control arm reads **47.52% after a full epoch of 1 281 167 images, against the
-48.60% pretrained reference — a 1.08pp drop** where exp28's control lost ~32pp.
-The collapse documented here follows from the training objective taking its
-target from the live weights, not from the data, the scale or the masking.
+**The follow-up identifies the cause, and has since replaced this experiment.**
+[exp28b](EXP28B_JEPA_CORRECTED.md) re-ran the same model and the same data with a
+**frozen target encoder**, LR 5e-6, 10% warmup and cosine decay. Its control arm
+holds over **two** full epochs of 1 281 167 images on **3/3 seeds** (−0.64,
++0.72, +7.56pp against each seed's own pretrained reference) where exp28's
+control lost ~32pp. The collapse documented here follows from the training
+objective taking its target from the live weights, not from the data, the scale
+or the masking.
+
+**For the method comparison, read exp28b, not this document.** With a sound
+control it finds DropHead ahead of SAL on every cell and every seed — including
+SAL's own trained-for head set (+0.67pp, 3/3) — and SAL 12.35pp behind the
+control on the dense row.
 
 ## Protocol
 
@@ -196,8 +203,8 @@ against which the masked arms mean anything. The findings that survive are:
    the reason is structural rather than hyperparametric: `make_step` computes its
    target from the weights it is training. exp28b changed exactly that — a frozen
    target encoder, plus LR 5e-6 with warmup and cosine decay — and its control arm
-   holds to within **1.08pp** over a full epoch of the same data. That is the
-   controlled comparison this document could not make.
+   holds over two full epochs of the same data on 3/3 seeds. That is the
+   controlled comparison this document could not make, and exp28b makes it.
 2. **The measurement chain is sound, with one caveat now quantified.** Slicing
    (1e-06 against masking) and the dataset path check out. The probe is reliable
    *within* a data shuffle and moves by up to 7.6pp *across* shuffles; every
@@ -239,6 +246,7 @@ supports nor contradicts them.
   the scheduler and relaunched as `23516504`/`23516505`; nothing from them is in
   any table.
 - One model, one dataset, one recipe, one mask ratio (0.5), two epochs. Whether a
-  corrected recipe reproduces v0.5.1's I-JEPA *gains* at this scale is still
-  **not measured** — exp28b establishes that the control survives, which is a
-  precondition for that question, not an answer to it.
+  corrected recipe reproduces v0.5.1's I-JEPA *gains* at this scale **is now
+  measured**, in [exp28b](EXP28B_JEPA_CORRECTED.md): it does not. DropHead gains
+  +29.02pp over the control at 50% head pruning (3/3 seeds), SAL +7.89pp, and SAL
+  loses to DropHead everywhere including its own aligned set.

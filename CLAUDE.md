@@ -13,18 +13,24 @@ Three independent, composable components:
 
 - **SAL (Structurally Adaptive Learning)** — training-time random head masking,
   accumulate-and-hold. *Perturbs.* **Specific**: its resilience applies to the
-  one head set it trained for and nowhere else (exp25).
+  one head set it trained for and nowhere else (exp25). **It has no remaining
+  measured advantage over DropHead, on any cell, including that one set**
+  (exp27, exp28b). Shipped and supported; not the recommended default anywhere.
 - **DropHead** — the same quota, mask resampled every step. *Perturbs.*
   **General**: its resilience holds on any head set of that size, including
-  SAL's own (exp27). Started life as SAL's control arm and outperforms it on the
-  product's actual promise.
+  SAL's own (exp27, exp28b). Started life as SAL's control arm and outperforms it
+  on the product's actual promise. **This is the default head method.**
 - **FI (Fragility Index)** — a post-hoc structural fragility diagnostic.
   *Measures.* Diagnosis and certification only — **not** a router and not a head
   selector (exp17, PHASE2E).
 
 They are **separate**. A user can use any one without the others. Which head
 method to use is decided by the **probe**, not by FI: see the routing table in
-`README.md` (>30pp drop → SAL, 10-30pp → either, <10pp → skip head training).
+`README.md` (>30pp drop → train for it, 10-30pp → either, <10pp → skip head
+training). The probe decides **whether** to train for compression; **DropHead is
+what you train with** in every case (exp27, exp28b). `README.md` still prints
+"SAL" in the >30pp row and is out of date on this point; it is off-limits under
+cardinal rule 6 and needs an explicit task to fix.
 
 ## Cardinal rules (do not violate)
 
@@ -277,20 +283,48 @@ every shared cell. Docs: `PHASE3_IMAGENET1K.md`, `EXP24_SAL_RECOVERY.md`,
   41.04–48.60% (7.56pp), so compare within a seed, never across. **With a broken
   control the run measures nothing about either method.** Do not cite any
   `results/jepa1b*` number as a method comparison. See `EXP28_JEPA_1B.md`.
-- **exp28b — the cause is the objective, not the hyperparameters.** `make_step`
+- **exp28b — the cause was the objective, and with it fixed DropHead wins at
+  631M too.** 223.6 GPU-hours, **3/3 seeds**, two full ImageNet-1k epochs each;
+  the 1B campaign (exp28 + exp28b) comes to **420.2 GPU-hours**. `make_step`
   computed its target from the **same live weights it was training**, an
   objective with no fixed point. exp28b changed only that — a **frozen target
-  encoder**, LR 5e-6, 10% warmup, cosine decay — and its control arm reads
-  **47.52% after a full epoch of 1 281 167 images against the 48.60% reference,
-  a 1.08pp drop** (job `23540225`, gate sentinel
-  `results/jepa1b_corr/control_gate.json`). Whether the *gains* reproduce is a
-  separate, still-unmeasured question.
+  encoder**, LR 5e-6, 10% warmup, cosine decay — and **the control arm now
+  survives on 3/3 seeds** (−0.64, +0.72, +7.56pp against each seed's own
+  pretrained reference, gate sentinels in `results/lumi_v060/jepa1b_corr*/`).
+  With a sound control the method comparison runs, and **DropHead beats SAL on
+  every cell and every seed**: +29.02pp over the control at 50% head pruning
+  against SAL's +7.89pp, +11.88pp at 33% where SAL reads −0.22pp and flips sign
+  with the seed, and **+0.67pp on SAL's own trained-for head set (3/3)** — the
+  last cell where SAL could have been the right choice. SAL also pays **12.35pp
+  of dense accuracy** (3/3) and its best cell sits 5.11pp below the control's
+  dense row. Pruning 33% of heads is free for DropHead here too (−0.04pp) and
+  50% costs 1.14pp. Note `sal@aligned` is **+7.24pp above SAL's own dense row**:
+  as in exp25, SAL's dense row is not its operating point. See
+  `EXP28B_JEPA_CORRECTED.md`.
+- **The SSL recipe lesson: continued self-supervised pretraining needs a frozen
+  target encoder.** A target computed from the live weights has no fixed point,
+  so the encoder can drift toward a low-variance output, drag both sides of the
+  MSE down together and **destroy the representation while the loss falls**. That
+  is exp28 in one sentence, and `scripts/run_jepa_sal.py:make_step` still has the
+  broken form — use `experiments/exp28b_jepa_corrected.py` as the reference for
+  any continued-pretraining run. Corollary: on this objective **loss progress is
+  decoupled from representation quality**, so a loss curve is not a gate; probe
+  the features.
 - **INT4 caveat, applies to every number above.** INT4 is
   `quantize_weights(model, 4)`, a **simulated per-channel quantize/dequantize
   round-trip in fp32**, not a 4-bit kernel. bitsandbytes NF4 is CUDA-only and
   absent on the ROCm image, so native INT4 was never measured on LUMI. The
   column is the accuracy cost of 4-bit weight rounding and says **nothing** about
   speed or memory.
+- **INT4 robustness after continued pretraining (exp28b).** On the **dense**
+  rows of the I-JEPA table, 4-bit weight rounding costs **under 0.5pp for all
+  three arms** — control −0.16, DropHead −0.43, SAL −0.49pp, 3/3 seeds each.
+  On the **pruned** rows it grows to 1.4–3.9pp, so head pruning and quantization
+  are not independent and the cheap cell is dense-INT4, not pruned-INT4.
+  **Do not quote the pretrained row as the "before" figure**: the same untrained
+  checkpoint reads −9.20, −1.44 and −0.32pp of INT4 cost on the three seeds,
+  which is probe noise, not a quantization effect. There is no measured
+  "continued pretraining reduces the INT4 cost from −9.2pp" claim.
 - MLP pruning and the compile/ONNX paths live in **sal-torch-pro**
   (`sal_pro.mlp`, `sal_pro.deploy`): MLP pruning is now measured (exp26,
   exp18) and ONNX export is validated (exp22).
@@ -351,11 +385,15 @@ every shared cell. Docs: `PHASE3_IMAGENET1K.md`, `EXP24_SAL_RECOVERY.md`,
   non-finite loss" lesson one level up: **fail loudly when the control arm
   regresses against its own starting point.**
 - Next: v0.7.0 on the new narrative — **diagnose (FI) → route (probe) → DropHead
-  by default, SAL when the deployed head set is fixed → MLP prune → recover**;
-  fix the SSL training recipe before re-running anything at 1B; Phase 5
-  (license signing + compliance reports). The `nonaccum` control arm is still
-  unrun, though exp27 largely answers what it was for. See `ROADMAP.md`
-  (public).
+  by default, with no exception → MLP prune → recover**. The "SAL when the
+  deployed head set is fixed" carve-out is **gone**: exp28b measured that cell at
+  631M and DropHead matches or beats SAL there on 3/3 seeds, without having to
+  commit to a head set at training time. The SSL recipe is **fixed and validated**
+  (exp28b, frozen target encoder). Remaining: the epoch-1 control gate as a
+  shipped safeguard and an FFN-ratio router (both specced in `ROADMAP.md`), and
+  Phase 5 (license signing + compliance reports). The `nonaccum` control arm is
+  still unrun, and exp27 plus exp28b now largely answer what it was for. See
+  `ROADMAP.md` (public).
 
 ## Integration tests
 

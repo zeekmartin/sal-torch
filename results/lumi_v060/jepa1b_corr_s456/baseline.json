@@ -1,0 +1,45 @@
+{
+  "arm": "baseline",
+  "experiment": "exp28b_jepa_corrected",
+  "epochs": 2,
+  "losses": [
+    0.24611950826082762,
+    0.2133076342438787
+  ],
+  "masker_stats": null,
+  "pruned_heads": null,
+  "mask_ratio": 0.5,
+  "seed": 456,
+  "batch_size": 64,
+  "n_train": 1281167,
+  "model": "facebook/ijepa_vith14_1k",
+  "dataset": "evanarlian/imagenet_1k_resized_256",
+  "recipe": {
+    "target": "frozen",
+    "ema_decay": null,
+    "lr": 5e-06,
+    "warmup_frac": 0.1,
+    "schedule": "linear warmup + cosine decay",
+    "grad_clip": 1.0,
+    "patch_mask_ratio": 0.4,
+    "vs_exp28": "exp28 used lr=1e-5, no warmup, no scheduler, and a target computed from the live weights"
+  },
+  "reference_probe": 0.41040000319480896,
+  "epoch_probes": [
+    {
+      "epoch": 1,
+      "linear_probe": 0.4896000027656555,
+      "drop_pp": -7.92
+    },
+    {
+      "epoch": 2,
+      "linear_probe": 0.4860000014305115,
+      "drop_pp": -7.56
+    }
+  ],
+  "final_probe": 0.4860000014305115,
+  "final_probe_drop_pp": -7.56,
+  "train_seconds": 69786.4,
+  "gpu": "AMD Instinct MI250X",
+  "torch_version": "2.5.1+rocm6.2"
+}
