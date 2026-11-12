@@ -650,8 +650,7 @@ sal-torch on the target device.
   benchmark. The customer provides a model ID and a target device; the pipeline
   produces a `.onnx`, `.engine`, or `.xml` file with a benchmark report.
 - **`FleetMonitor`** — track which compressed model version is deployed on which
-  device. Integrates with sal-certify for structural verification of the
-  compressed artifact.
+  device, with structural verification of the compressed artifact.
 - **Pro-only features** behind the `@require_pro` decorator: `DeployPipeline`,
   `FleetMonitor`, multi-target export, batch optimization.
 
@@ -672,8 +671,6 @@ fits nobody. They move from planned to specified when a concrete request arrives
   of what was compressed, by how much, what the structural impact was, and
   which deployment artifact was produced.
 - Broad architecture coverage validated on real models, not just detected.
-- **sal-certify integration**: every exported artifact can be certified at
-  export time, with the structural certificate embedded alongside the model.
 
 ---
 

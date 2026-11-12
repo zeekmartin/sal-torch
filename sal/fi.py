@@ -164,8 +164,7 @@ def classify_layers(model: nn.Module, adjacency: np.ndarray, num_heads_per_layer
     0.0709 is 3.6 edges out of 1030 — barely above the two-edge resolution of
     the graph itself, so almost every layer clears it. Sweeping the threshold
     on stored deltas, every value in (0.205, 0.295] put all three probes in a
-    3-8 CRITICAL range, and 0.25 gave 7 / 6 / 5
-    (``sal-certify/results/EXP30_DRIFT.md``, exp30b).
+    3-8 CRITICAL range, and 0.25 gave 7 / 6 / 5.
 
     That measurement is **one architecture**: 12 layers x 12 heads at FI 0.05-0.08.
     A model with a very different graph may well want a different number, and

@@ -48,7 +48,12 @@ cardinal rule 6 and needs an explicit task to fix.
    (`H:\Structural Awareness Loss\`) is the **source of truth for the
    mechanism**. Keep the clean API, use the validated implementation details.
 6. Treat `pyproject.toml`, `LICENSE`, `README.md` as off-limits unless the task
-   explicitly says otherwise. Local only — do not push to any remote.
+   explicitly says otherwise. **The `sal-torch` remote is PUBLIC**
+   (`github.com/zeekmartin/sal-torch`), so a push needs a **pre-push scan**
+   first: secrets and tokens, references to private repos, and pro internals
+   beyond what is already documented as a pro feature. `sal-torch-pro` and
+   `sal-certify` are **private**; pushing them is allowed. `agent-certify` is
+   public (Apache-2.0, on PyPI).
 7. **Quote only numbers that are in `results/lumi_v060/*.md` or
    `sal-torch-pro/results/*.md`.** The ImageNet-1k series (exp23-exp28,
    3 seeds, full 50 000-image validation split) **supersedes** every

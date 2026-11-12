@@ -222,6 +222,8 @@ Then, in order — **probe → DropHead or magnitude + recovery → FFN neurons 
 3. **Prune FFN neurons.** This is where the bulk of the compression is, and it is
    roughly **five times cheaper per unit of size** than head pruning — see
    [MLP neurons vs. attention heads](#mlp-neurons-vs-attention-heads) below.
+   The tooling for it (`MLPMasker`, `slice_mlp_neurons`) ships in
+   [sal-torch-pro](#sal-torch-pro), not in this package.
 4. **`torch.compile`.** Measured 1.12x on a dense ViT-B/16 at batch 32, 1.50x on
    a pruned one, and 2.2x at batch 1 where pruning alone buys almost nothing.
 
@@ -306,6 +308,12 @@ validation split:
 | 50% of FFN neurons | −32.7% | 77.75% | −2.69pp | 1.36x |
 | 50% heads + 25% FFN | −32.7% | 76.20% | −4.24pp | 1.41x |
 | 50% heads + 50% FFN | −49.1% | 73.62% | −6.82pp | **1.74x** |
+
+**The FFN tooling is in `sal-torch-pro`, not in this package.** `MLPMasker` and
+`slice_mlp_neurons` are part of the commercial extension
+([sal-torch-pro](#sal-torch-pro)); every FFN number on this page was measured
+with them (exp26, 22 jobs, 97.2 GPU-hours). Head masking, `slice_heads()`, the
+probe and the Fragility Index are all in this package.
 
 **At comparable size removed, FFN pruning costs roughly five times less than head
 pruning** — 0.63pp at −16.4% against 3.17pp at −16.5%. At a matched −32.7%,
