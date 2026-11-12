@@ -59,6 +59,36 @@ Measured on an MI250X GCD (job `23669807`, torch 2.5.1+rocm6.2, raw in
 
 The ROCm image needs no workaround.
 
+## Comparison convention
+
+Every pruned arm is scored against **the dense control trained for the same
+number of epochs**, never against the pretrained checkpoint, and the two
+effects are reported separately:
+
+- **fine-tuning gain** = dense control − pretrained — what the epochs bought.
+- **pruning cost** = arm − matched dense control — what the compression cost.
+
+The checkpoint is not a control: an arm that was fine-tuned has had epochs the
+checkpoint never had, so scoring against it reports the sum of the two and can
+make a model that pruning damaged look improved. Where an arm has one seed it
+is scored against **that seed's own** control, not the three-seed mean (exp28
+measured a 7.56pp spread from evaluation shuffling alone).
+
+Full ladder and sources in `CONTROL_CONVENTION.md`. For ViT-B/16 on
+ImageNet-1k:
+
+| dense control | top-1 | INT4 | seeds | fine-tuning gain |
+|---|---|---|---|---|
+| 0 ep — pretrained | 78.44% | 77.23% | deterministic | — |
+| **2 ep** | **81.554%** | **80.273%** | 3, sd 0.11 | **+3.11pp** |
+| 5 ep | 80.44% | 79.01% | 3, sd 0.05 | +2.00pp |
+
+**This experiment mixes epoch counts on purpose**, so the convention is load
+bearing here: the one-shot arms pay 0 epochs and go against the **pretrained**
+row, the recovery arms pay 2 and go against the **2-epoch** control, and the
+DropHead rows quoted from exp27 paid 5 and go against the **5-epoch** one. Each
+row in the final table names its own epoch count for exactly this reason.
+
 ## Design
 
 | arm | what is pruned | matched how |
@@ -112,14 +142,19 @@ buy nothing as a pre-conditioner, the finding exp24 was run to establish.
 
 ### Row template
 
+Every row also names the control it is scored against, which is the row above
+it with the same epoch count.
+
 | row | training epochs | structure | speedup @ batch >= 32 | accuracy (P50) |
 |---|---|---|---|---|
-| dense control, nothing pruned | 5 | — | 1.00x | **80.556%** (exp31) |
-| pretrained checkpoint | 0 | — | 1.00x | 78.44% |
+| **control: pretrained** | **0** | — | 1.00x | **78.44%** |
+| **control: dense + 2 ep** | **2** | — | 1.00x | **81.554%** (3 seeds) |
+| **control: dense + 5 ep** | **5** | — | 1.00x | **80.44%** (exp25) / 80.556% (exp31) |
+| _fine-tuning gain_ | 2 ep | — | — | _+3.11pp_ (5 ep: +2.00pp) |
 | DropHead, **no recovery** | 5 (DropHead) | structured | **1.10x** | **72.54%** (exp27) |
 | DropHead → magnitude + recovery | 5 + 5 | structured | **1.10x** | **77.06%** (exp24 arm 4) |
-| magnitude + recovery, 5 ep | 5 | structured | **1.10x** | 77.265% (exp29) |
-| magnitude + recovery, **2 ep** | **2** | structured | **1.10x** | **77.570%** (exp29) |
+| magnitude + recovery, 5 ep | 5 | structured | **1.10x** | 77.265% (exp29) → **−3.17pp** |
+| magnitude + recovery, **2 ep** | **2** | structured | **1.10x** | **77.570%** (exp29) → **−3.98pp** |
 | SparseGPT attn, one-shot | **0** | unstructured | **none by construction** | _this run_ |
 | SparseGPT attn, + 2 ep | **2** | unstructured | **none by construction** | _this run_ |
 | Wanda attn, one-shot | **0** | unstructured | **none by construction** | _this run_ |
@@ -131,6 +166,15 @@ buy nothing as a pre-conditioner, the finding exp24 was run to establish.
 
 The whole-model unstructured arms join the same table at their own matched
 parameter count, and the P33 arms repeat it at that ratio.
+
+**The trap this closes, concretely.** Wanda attention-P33 plus 2 epochs reads
+**81.60%** on seed 42. Against the 5-epoch control (80.556%) that is +1.04pp
+and reads as "unstructured sparsity beats dense". Against its own matched
+2-epoch control (seed 42: 81.676%) it is **−0.08pp** — level with dense, which
+is a strong result for a method that removes 9.3M parameters, and a different
+claim entirely. The one-shot cell of the same arm reads 78.43% against the
+pretrained 78.44%, i.e. **free at zero epochs**, and that is the row the
+pretrained control belongs to.
 
 ### The three speedup entries are three different claims
 

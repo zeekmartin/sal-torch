@@ -60,6 +60,9 @@ EXP25_BASELINE = {"accuracy": 0.8044, "int4_accuracy": 0.7901,
 
 # exp29's ratio sweep, three-seed means at 5 epochs, for the restatement.
 EXP29_RATIOS = {"0.25": 0.79407, "0.33": 0.78845, "0.50": 0.77265}
+# exp29's Block B ratio sweep was measured at FIVE epochs of recovery. Any
+# pruning cost derived from it needs a five-epoch dense control.
+EXP29_RATIO_EPOCHS = 5
 
 
 def score(model, val_split, device, use_amp, P, skip_int4):
@@ -171,7 +174,15 @@ def main(argv=None):
     row = score(model, val_split, device, use_amp, P, args.skip_int4)
     row.update(epochs=args.epochs, epoch_losses=losses,
                train_seconds=train_seconds)
-    row["vs_pretrained_pp"] = (row["accuracy"] - dense["accuracy"]) * 100
+    # The fine-tuning gain: what the epochs bought, with nothing pruned. It is
+    # reported separately from any pruning cost, because an arm scored against
+    # the pretrained checkpoint reports the SUM of the two and can show a model
+    # pruning damaged as improved. See results/lumi_v060/CONTROL_CONVENTION.md.
+    row["fine_tuning_gain_pp"] = (row["accuracy"] - dense["accuracy"]) * 100
+    row["vs_pretrained_pp"] = row["fine_tuning_gain_pp"]   # same quantity
+    if "int4_accuracy" in row and "int4_accuracy" in dense:
+        row["fine_tuning_gain_int4_pp"] = (
+            row["int4_accuracy"] - dense["int4_accuracy"]) * 100
     row["vs_exp25_baseline_pp"] = (
         row["accuracy"] - EXP25_BASELINE["accuracy"]) * 100
     out["control"] = row
@@ -180,7 +191,7 @@ def main(argv=None):
     P.log(f"    dense + {args.epochs} ep:  {row['accuracy'] * 100:.2f}%"
           + (f" | INT4 {row['int4_accuracy'] * 100:.2f}%"
              if "int4_accuracy" in row else "")
-          + f" | {row['vs_pretrained_pp']:+.2f}pp over pretrained"
+          + f" | fine-tuning gain {row['fine_tuning_gain_pp']:+.2f}pp"
           + f" | {train_seconds / 60:.0f} min")
     P.log(f"    exp25 1a baseline: {EXP25_BASELINE['accuracy'] * 100:.2f}%"
           f" | this run {row['vs_exp25_baseline_pp']:+.3f}pp against it")
@@ -190,22 +201,49 @@ def main(argv=None):
     if not args.gate:
         P.rule("B — exp29's ratio sweep against the matched control")
         ref = row["accuracy"]
+        # EXP29_RATIOS are measured at FIVE epochs of recovery. Restating them
+        # against a control trained for a different number of epochs compares
+        # unlike things: the dense arm alone moves 1.11pp between 2 and 5
+        # epochs on this recipe, which is larger than most of the pruning
+        # costs being reported. So the restatement runs only when the epoch
+        # counts match, and says why when they do not.
+        matched = args.epochs == EXP29_RATIO_EPOCHS
         restated = {}
         for k, acc in EXP29_RATIOS.items():
-            restated[k] = {
+            cell = {
                 "exp29_mean": acc,
+                "arm_epochs": EXP29_RATIO_EPOCHS,
+                "control_epochs": args.epochs,
+                "epochs_matched": matched,
+                "fine_tuning_gain_pp": row["fine_tuning_gain_pp"],
                 "vs_pretrained_pp": (acc - dense["accuracy"]) * 100,
-                "vs_this_control_pp": (acc - ref) * 100,
             }
+            if matched:
+                cell["pruning_cost_pp"] = (acc - ref) * 100
+            restated[k] = cell
             P.log(f"    heads {float(k):.0%}: {acc * 100:.2f}%  "
-                  f"{restated[k]['vs_pretrained_pp']:+.2f}pp vs pretrained  "
-                  f"{restated[k]['vs_this_control_pp']:+.2f}pp vs this control")
+                  f"({EXP29_RATIO_EPOCHS} ep)  "
+                  + (f"pruning cost {cell['pruning_cost_pp']:+.2f}pp "
+                     f"vs this control" if matched else
+                     f"NOT COMPARABLE to this {args.epochs}-epoch control "
+                     f"-- use the {EXP29_RATIO_EPOCHS}-epoch control"))
+        if not matched:
+            P.log(f"    NOTE: exp29's ratio arms ran {EXP29_RATIO_EPOCHS} "
+                  f"epochs, this control {args.epochs}. No pruning cost is "
+                  f"reported; see results/lumi_v060/CONTROL_CONVENTION.md.")
         out["exp29_restated"] = {
             "control_accuracy": ref,
+            "control_epochs": args.epochs,
+            "arm_epochs": EXP29_RATIO_EPOCHS,
+            "epochs_matched": matched,
             "ratios": restated,
-            "note": "exp29 ratio means are three-seed at 5 epochs; this "
-                    "control is one seed. Treat the restated column as "
-                    "indicative to ~0.05pp, exp25's measured seed spread.",
+            "note": (
+                "exp29 ratio means are three-seed at "
+                f"{EXP29_RATIO_EPOCHS} epochs of recovery. A pruning cost is "
+                "reported only against a control trained for the SAME number "
+                "of epochs; this control ran "
+                f"{args.epochs}. Where they match, the column is still "
+                "indicative to ~0.05pp, exp25's measured seed spread."),
         }
         save()
 

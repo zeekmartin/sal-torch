@@ -12,6 +12,13 @@ GPU-hours (job 23659604, `COMPLETED 0:0`, 4:58:12), in `results/lumi_v060/exp31_
 80.44% to a tenth of a point; Block B's "vs control" column is quoted against exp25 and restated
 against it below.
 
+**Comparison convention** (`CONTROL_CONVENTION.md`): every arm here is scored against a dense control
+trained for the **same number of epochs**, and the fine-tuning gain (dense control − pretrained) is
+reported separately from the pruning cost (arm − matched control). exp32 has since measured the
+**2-epoch** dense control on 3 seeds — **81.554% / 80.273% INT4, fine-tuning gain +3.11pp** — which
+reframes Block A's headline and makes Block B's costs comparable at last. See "the 2-epoch peak
+belongs to the fine-tuning recipe" below.
+
 Magnitude head pruning plus recovery fine-tuning is the pipeline's cheapest compression path (exp24,
 exp26). It has only ever been measured at **5 epochs**, a number nobody chose. This run measures the
 curve.
@@ -27,6 +34,9 @@ not sampled from one trajectory. That is why the run costs 81.7 GPU-hours instea
 1. **The curve is not monotone. It peaks at 2 epochs and declines.** At 50% of heads removed,
    2 epochs beats 5 epochs by **+0.34 / +0.15 / +0.42pp** (3/3 seeds) and beats 10 epochs by
    **1.12pp** on the seed where 10 was run. Ten epochs (76.51%) is **below one epoch** (76.60%).
+   **This is a property of the fine-tuning recipe, not of recovery**: the dense control with nothing
+   pruned peaks at 2 epochs too, and by a *larger* margin (+1.11pp from 5→2 against the pruned arm's
+   +0.30pp). The measurement stands; the explanation changed. See the reframing below.
 2. **One epoch already reaches 98.8-99.1% of the 5-epoch gain, 3/3.** The question as posed — "if
    3 epochs reach 95% of the 5-epoch gain, that is the recommendation" — is answered one point
    earlier than expected: the 95% threshold is cleared at **epoch 1** on all three seeds.
@@ -114,6 +124,11 @@ of the 50% set), so these are not three independent architectures.
 | **control: dense + same 5 ep** | 0 | — | — | **80.44%** | **79.01%** | +2.00pp | — |
 | **exp31 control: dense + same 5 ep, this harness** | 0 | — | — | **80.56%** | **78.96%** | +2.12pp | — |
 
+The two control rows' "vs pretrained" entries are the **fine-tuning gain**: +2.00pp and +2.12pp for
+five epochs with nothing pruned. The "vs control" column is the **pruning cost**. Keeping them in
+separate columns is the whole point — their sum is what the "vs pretrained" column of the pruned rows
+reports, and that sum is not a pruning cost.
+
 Pre-recovery accuracies are identical across seeds to five figures (63.54 / 52.20 / 9.56), as they
 must be. The 25% row also beats dense at INT4 (77.69 vs 77.23); the 33% row does not (−0.12pp).
 
@@ -193,11 +208,64 @@ Note the INT4 side runs the other way — exp31's 78.956% is **0.05pp below** ex
 offset is not a uniform shift of both metrics.
 
 **A second point applies to this block specifically**: it was run at 5 epochs, and Block A shows that
-5 epochs is **past the peak**. The ratio costs above are therefore an *upper* bound on what pruning
-costs — each arm would likely read 0.2-0.4pp better at 2 epochs, and the control would also move, so
-the net is not predictable from here. The sweep's internal ordering (25 > 33 > 50) is unaffected, and
-the exp24 cross-check required 5 epochs to be comparable, so 5 was right for the cross-check. Redoing
-the sweep *and* its control at 2 epochs costs ~13 GPU-hours.
+5 epochs is **past the peak**. This block therefore predicted that the ratio costs above were an
+*upper* bound, that each arm would read 0.2-0.4pp better at 2 epochs, and that the control would move
+too so the net was not predictable from here. **exp32 has now measured all three, and the prediction
+was wrong in both parts.** The arms gained more than predicted (+0.99 / +0.77 / +0.30pp at 25 / 33 /
+50%), the control gained more still (+1.11pp), and so the costs **rose** rather than falling. The
+sweep's internal ordering (25 > 33 > 50) is unaffected, and the exp24 cross-check required 5 epochs to
+be comparable, so 5 was right for the cross-check. The redone sweep is `EXP32_RATIO_AT_2EP.md`; the
+reframing is the next section.
+
+### Reframed: the 2-epoch peak belongs to the fine-tuning recipe, not to recovery
+
+exp32 re-ran the matched control at 2 epochs on 3 seeds, and the **dense** arm — nothing pruned,
+nothing masked — peaks there as well:
+
+| dense control | top-1 | INT4 | seeds | fine-tuning gain |
+|---|---|---|---|---|
+| 0 ep — pretrained | 78.44% | 77.23% | deterministic | — |
+| **2 ep** | **81.554%** | **80.273%** | 3 — 81.676 / 81.524 / 81.462, sd 0.11 | **+3.11pp** |
+| 5 ep — exp31, this harness | 80.556% | 78.956% | 1 | +2.12pp |
+| 5 ep — exp25 1a | 80.44% | 79.01% | 3, sd 0.05 | +2.00pp |
+
+Shortening the schedule from 5 epochs to 2 is worth **+1.00 to +1.11pp on the dense arm**, against
+**+0.30pp** on the P50 pruned arm. So the decline past epoch 2 is not something recovery does to a
+damaged model that has run out of things to repair: **it is what this fine-tuning recipe does to this
+model on this dataset**, pruned or not, and the pruned arms show a *weaker* version of it than the
+dense arm does.
+
+Block A's measurement is unchanged — 2 epochs beats 5 on 3/3 seeds, in FP and in INT4 — and so is the
+recommendation. What changes is the claim attached to it. "Recovery saturates at 2 epochs and then
+overfits the pruned model" is **not supported**; the dense control overfits harder. The supported
+statement is **"this recipe peaks at 2 epochs whether or not anything was pruned"** — which also
+means the knee must not be assumed to transfer to another dataset, another LR schedule, or a model
+that is not already heavily fine-tuned for its task. The caveat below that recovery hyperparameters
+are fixed now carries more weight, not less.
+
+#### Measured against its matched control, pruning costs *more* at 2 epochs
+
+Scoring each arm against the control trained for the same number of epochs reverses what exp32 was
+expected to find:
+
+| ratio | at 5 ep | vs 5-ep control (80.44%) | at 2 ep | vs 2-ep control | cost change |
+|---|---|---|---|---|---|
+| 25% | 79.41% | −1.03pp | 80.40% | **−1.28pp** | 0.25pp worse |
+| 33% | 78.85% | −1.59pp | 79.62% | **−2.06pp** | 0.47pp worse |
+| 50% | 77.27% | −3.17pp | **77.57%** | **−3.98pp** | 0.81pp worse |
+| 50%, INT4 | 75.03% | −3.98pp | **75.55%** | **−4.72pp** | 0.74pp worse |
+
+The 50% rows are three-seed on both sides (the 2-epoch cell is Block A's own, which exp32 re-runs as
+a replication). The 25% and 33% rows at 2 epochs are **seed 42 only** so far and are scored against
+that seed's own control, 81.676%, per the within-seed rule; exp32's other two seeds are still
+running.
+
+Both sides gain from the shorter schedule and the control gains more, so exp32's question — "if the
+control gains what the pruned arms gain, the costs are unchanged and only the price drops" — has the
+answer **the control gains more, so the price drops and the cost rises**. Two epochs remains the
+right default: it is cheaper and absolutely better on every arm, dense and pruned. But the gap
+pruning has to make up is wider than the 5-epoch tables suggested, and **any claim of the form
+"pruning costs ~1pp at 25%" must now state the epoch count on both sides.**
 
 ## Caveats
 
@@ -230,3 +298,9 @@ the sweep *and* its control at 2 epochs costs ~13 GPU-hours.
   "training harness") doing a second job for free.
 - The 33%-vs-50% ordering is now measured at three head ratios on three seeds and is monotone, which
   supports exp26's conclusion that heads are the expensive thing to remove.
+- **The published ratio costs go up, not down.** Against matched 2-epoch controls the sweep reads
+  −1.28 / −2.06 / −3.98pp rather than −1.03 / −1.59 / −3.17pp. Any document quoting the 5-epoch
+  figures must say so, because the 2-epoch recipe is now the default and the pair must match.
+- **The 2-epoch knee is a recipe property and should not be shipped as a law.** `CompressionPipeline`
+  should probe and keep the best epoch rather than hard-coding 2, which is what the bullet above
+  already asks for; the reframing is the reason it matters.

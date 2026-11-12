@@ -161,7 +161,10 @@ pruning at one ratio and generalises has not checked this.
     is not reached by magnitude pruning on this model. **At batch 1 every arm is
     1.00x** — 8.09–8.37 ms against 8.16 ms dense — because a ViT-B/16 there is
     kernel-launch bound. Any latency claim must say batch 32.
-  - **The reference matters, and this document's does too.** A recovered arm has
+  - **The reference matters, and this document's does too** (the rule is now
+    written up once in `CONTROL_CONVENTION.md`; this block is where it was first
+    applied, and the five-epoch control is the right one for every arm here).
+    A recovered arm has
     had five epochs of ImageNet-1k; the pretrained checkpoint has had none. 1a's
     `baseline` arm is the matched control — identical images, epochs, batch size
     and LR schedule, nothing pruned — at **80.44% / 79.01% INT4**. Against it

@@ -37,6 +37,18 @@ experiment that produces a table anyway is worse than one that crashes.
 The reference gates the control's sanity. The **control**, not the reference, is
 what the head arms are scored against.
 
+## Comparison convention
+
+Every head arm is scored against **the task's own dense fine-tune**, and the
+fine-tuning gain is reported separately from the pruning cost
+(`CONTROL_CONVENTION.md`). On GLUE there is no "pretrained checkpoint
+accuracy" to drift toward — an unfine-tuned `bert-base-uncased` scores at
+chance on these tasks — so the trap takes a different form here: **the two head
+arms are matched to the control but not to each other.** DropHead pays 3 masked
+epochs; magnitude + recovery pays 3 dense + 2 recovery. A table that puts them
+side by side without that column is comparing a 3-epoch method to a 5-epoch
+one, so every arm carries its epoch count.
+
 ## Protocol
 
 Per task, per ratio (33% and 50% of heads):
@@ -52,7 +64,10 @@ perturbation the other did not — exp27's protocol.
 
 | seed | job | state |
 |---|---|---|
-| | | _pending submission_ |
+| 42 | `23671621` | RUNNING, mnli p33 |
+| 123 | `23671622` | RUNNING, mnli p33 |
+| 456 | `23671623` | RUNNING, mnli p33 |
+| — | smoke | `23670106` COMPLETED, `23670448` TIMEOUT at 30:24 (both controls obtained) |
 
 ## Caveats, known in advance
 
@@ -62,6 +77,10 @@ perturbation the other did not — exp27's protocol.
   about, and adding it would double the eval cost for a question exp27 already
   answers on ViT.
 - MNLI is scored on `validation_matched` only.
+- **The two head arms are not matched to each other in training cost** (3
+  masked epochs vs 3 + 2). Both are matched to the control, which is what the
+  pruning cost needs, but a direct DropHead-vs-magnitude read has to carry the
+  epoch column.
 - The loss is checked every step and the run raises on the first non-finite
   value: a diverged run still yields the majority-class rate, and writing that
   to JSON is worse than crashing (exp13).
