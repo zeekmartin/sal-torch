@@ -651,7 +651,7 @@ sal-torch on the target device.
   produces a `.onnx`, `.engine`, or `.xml` file with a benchmark report.
 - **`FleetMonitor`** — track which compressed model version is deployed on which
   device, with structural verification of the compressed artifact.
-- **Pro-only features** behind the `@require_pro` decorator: `DeployPipeline`,
+- **Pro-only features**, license-gated: `DeployPipeline`,
   `FleetMonitor`, multi-target export, batch optimization.
 
 Scope note: `edit_impact_bound()` and `compare_weights()` are named here as

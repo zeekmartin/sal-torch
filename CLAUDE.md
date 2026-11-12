@@ -51,9 +51,11 @@ cardinal rule 6 and needs an explicit task to fix.
    explicitly says otherwise. **The `sal-torch` remote is PUBLIC**
    (`github.com/zeekmartin/sal-torch`), so a push needs a **pre-push scan**
    first: secrets and tokens, references to private repos, and pro internals
-   beyond what is already documented as a pro feature. `sal-torch-pro` and
-   `sal-certify` are **private**; pushing them is allowed. `agent-certify` is
-   public (Apache-2.0, on PyPI).
+   beyond what is already documented as a pro feature. `sal-torch-pro` and the
+   other private sibling repos are **private**; pushing them is allowed.
+   `agent-certify` is public (Apache-2.0, on PyPI). **This file is itself on
+   the public remote**, so it must not name an unreleased product or a private
+   path either — that is why the sibling repos are not listed here by name.
 7. **Quote only numbers that are in `results/lumi_v060/*.md` or
    `sal-torch-pro/results/*.md`.** The ImageNet-1k series (exp23-exp28,
    3 seeds, full 50 000-image validation split) **supersedes** every
