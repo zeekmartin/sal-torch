@@ -6,6 +6,12 @@
 `exp29_ep10_s42/`, `exp29_ratios_s{42,123,456}/`, gate in `exp29_gate/`.
 Script: `experiments/exp29_recovery_epochs.py`.
 
+**Plus exp31, the matched dense control, measured through this same harness**: seed 42, 4.97
+GPU-hours (job 23659604, `COMPLETED 0:0`, 4:58:12), in `results/lumi_v060/exp31_s42/`, script
+`experiments/exp31_dense_control.py`. It reads **80.556% / 78.956% INT4** and confirms exp25's
+80.44% to a tenth of a point; Block B's "vs control" column is quoted against exp25 and restated
+against it below.
+
 Magnitude head pruning plus recovery fine-tuning is the pipeline's cheapest compression path (exp24,
 exp26). It has only ever been measured at **5 epochs**, a number nobody chose. This run measures the
 curve.
@@ -106,6 +112,7 @@ of the 50% set), so these are not three independent architectures.
 | 50% | 72 | 9.56% | 77.29 / 77.33 / 77.18% | **77.27%** | 75.03% | −1.18pp | **−3.17pp** |
 | pretrained | 0 | — | — | 78.44% | 77.23% | — | — |
 | **control: dense + same 5 ep** | 0 | — | — | **80.44%** | **79.01%** | +2.00pp | — |
+| **exp31 control: dense + same 5 ep, this harness** | 0 | — | — | **80.56%** | **78.96%** | +2.12pp | — |
 
 Pre-recovery accuracies are identical across seeds to five figures (63.54 / 52.20 / 9.56), as they
 must be. The 25% row also beats dense at INT4 (77.69 vs 77.23); the 33% row does not (−0.12pp).
@@ -153,10 +160,37 @@ It also sharpens exp26's conclusion rather than softening it. Head-25 removes ~8
 size removed than MLP neurons** — the same direction as exp26's 5x at matched size, measured now at a
 third head ratio.
 
+### exp31 — the control, measured by this harness
+
 `exp31_dense_control.py` re-runs that control on seed 42 through *this* harness, so exp29's reference
-is measured by the same code path rather than quoted across campaigns. Its pass condition is
+is measured by the same code path rather than quoted across campaigns. Its pass condition was
 agreement with 80.44% inside exp25's 0.05pp seed spread; a result far from it would not revise exp25
-but would mean the two harnesses differ somewhere. **That job's result is not in this document yet.**
+but would mean the two harnesses differ somewhere.
+
+**It reads 80.556% top-1 / 78.956% INT4** (seed 42, 5 epochs, nothing pruned or masked, epoch losses
+0.606 → 0.062, 4.85h of training). That is **+0.116pp above exp25's three-seed mean** (80.44%) and
+**+0.076pp above exp25's own seed 42** (80.48%).
+
+So the two harnesses agree, but **not quite inside the 0.05pp window the pass condition named** — the
+gap is 0.08pp against the matched seed. One seed cannot say whether that is harness drift or ordinary
+run-to-run variation on a quantity whose measured spread is 0.05pp; it is small either way, and
+nothing in this document turns on a tenth of a point. The honest reading is *agreement to ~0.1pp,
+with the stated window slightly missed*.
+
+Restating Block B's "vs control" column against the locally measured 80.556% instead of the quoted
+80.44% moves every entry by the same +0.116pp:
+
+| ratio | mean | vs pretrained (78.44%) | vs exp25 control (80.44%) | vs exp31 control (80.56%) |
+|---|---|---|---|---|
+| 25% | 79.41% | +0.97pp | −1.03pp | **−1.15pp** |
+| 33% | 78.85% | +0.41pp | −1.59pp | **−1.71pp** |
+| 50% | 77.27% | −1.18pp | −3.17pp | **−3.29pp** |
+
+The conclusion is unchanged and slightly strengthened: **head pruning costs accuracy at every ratio,
+1.0-1.2pp at 25% and 3.2-3.3pp at 50%.** The exp25-referenced column stays the headline, because it
+is the three-seed figure and the one exp26 uses; the exp31 column is one seed through this code path.
+Note the INT4 side runs the other way — exp31's 78.956% is **0.05pp below** exp25's 79.01% — so the
+offset is not a uniform shift of both metrics.
 
 **A second point applies to this block specifically**: it was run at 5 epochs, and Block A shows that
 5 epochs is **past the peak**. The ratio costs above are therefore an *upper* bound on what pruning
