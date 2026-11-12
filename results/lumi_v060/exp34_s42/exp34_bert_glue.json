@@ -1,0 +1,257 @@
+{
+  "experiment": "exp34_bert_glue",
+  "model": "bert-base-uncased",
+  "dataset": "nyu-mll/glue",
+  "seed": 42,
+  "gate": false,
+  "epochs": 3,
+  "recover_epochs": 2,
+  "batch_size": 32,
+  "lr": 2e-05,
+  "max_len": 128,
+  "ratios": [
+    0.33,
+    0.5
+  ],
+  "control_tolerance_pp": 2.5,
+  "notes": {
+    "control": "The dense fine-tune is the matched control; the gain of every head arm is measured against it, not against the published reference. The reference only gates whether the control is sane.",
+    "head_set": "Both head arms are scored on the same magnitude set, uniform per layer, so neither faces a perturbation the other did not (exp27's protocol).",
+    "recovery": "2 epochs by default (exp29: the curve peaks at 2 and 5 is worse on 3/3 seeds)."
+  },
+  "gpu": "AMD Instinct MI250X",
+  "torch_version": "2.5.1+rocm6.2",
+  "tasks": {
+    "sst2": {
+      "n_train": 67349,
+      "n_val": 872,
+      "num_labels": 2,
+      "reference_accuracy": 0.925,
+      "dense_losses": [
+        0.25065230323696364,
+        0.11571008506410195,
+        0.07237667399027214
+      ],
+      "dense_seconds": 534.4,
+      "dense_accuracy": 0.9254587155963303,
+      "dense_vs_reference_pp": 0.046,
+      "control_gate": {
+        "passed": true
+      },
+      "p33": {
+        "heads_removed": 48,
+        "drophead_losses": [
+          0.2758373920856632,
+          0.1345720647102014,
+          0.09632506534311204
+        ],
+        "drophead_seconds": 722.3,
+        "drophead_dense_accuracy": 0.9254587155963303,
+        "drophead_accuracy": 0.9243119266055045,
+        "magnitude_oneshot_accuracy": 0.9128440366972477,
+        "recovery_losses": [
+          0.1036306907190563,
+          0.06429380224165983
+        ],
+        "recovery_seconds": 300.3,
+        "magnitude_recovery_accuracy": 0.9231651376146789,
+        "drophead_minus_magnitude_pp": 0.115,
+        "drophead_vs_control_pp": -0.115
+      },
+      "p50": {
+        "heads_removed": 72,
+        "drophead_losses": [
+          0.2963008170385542,
+          0.1495500087525669,
+          0.11097090281634603
+        ],
+        "drophead_seconds": 819.7,
+        "drophead_dense_accuracy": 0.9151376146788991,
+        "drophead_accuracy": 0.9059633027522935,
+        "magnitude_oneshot_accuracy": 0.8899082568807339,
+        "recovery_losses": [
+          0.11460498937996294,
+          0.07089124597662134
+        ],
+        "recovery_seconds": 286.1,
+        "magnitude_recovery_accuracy": 0.911697247706422,
+        "drophead_minus_magnitude_pp": -0.573,
+        "drophead_vs_control_pp": -1.95
+      }
+    },
+    "mrpc": {
+      "n_train": 3668,
+      "n_val": 408,
+      "num_labels": 2,
+      "reference_accuracy": 0.84,
+      "dense_losses": [
+        0.5651647948700449,
+        0.36050370594729547,
+        0.22358203057361686
+      ],
+      "dense_seconds": 27.5,
+      "dense_f1": 0.8854166666666665,
+      "reference_f1": 0.88,
+      "dense_f1_vs_reference_pp": 0.542,
+      "dense_accuracy": 0.8382352941176471,
+      "dense_vs_reference_pp": -0.176,
+      "control_gate": {
+        "passed": true
+      },
+      "p33": {
+        "heads_removed": 48,
+        "drophead_losses": [
+          0.6034563676170681,
+          0.5216623586157094,
+          0.46482405973517377
+        ],
+        "drophead_seconds": 39.5,
+        "drophead_dense_accuracy": 0.7794117647058824,
+        "drophead_accuracy": 0.7647058823529411,
+        "magnitude_oneshot_accuracy": 0.7401960784313726,
+        "recovery_losses": [
+          0.3455717568812163,
+          0.176651271270669
+        ],
+        "recovery_seconds": 16.5,
+        "magnitude_recovery_accuracy": 0.8284313725490197,
+        "drophead_minus_magnitude_pp": -6.373,
+        "drophead_vs_control_pp": -7.353
+      },
+      "p50": {
+        "heads_removed": 72,
+        "drophead_losses": [
+          0.6243255083975585,
+          0.5589020306649415,
+          0.5243066803268764
+        ],
+        "drophead_seconds": 44.8,
+        "drophead_dense_accuracy": 0.7058823529411765,
+        "drophead_accuracy": 0.7083333333333334,
+        "magnitude_oneshot_accuracy": 0.7156862745098039,
+        "recovery_losses": [
+          0.4856583040693532,
+          0.31022443693617113
+        ],
+        "recovery_seconds": 15.7,
+        "magnitude_recovery_accuracy": 0.7769607843137255,
+        "drophead_minus_magnitude_pp": -6.863,
+        "drophead_vs_control_pp": -12.99
+      }
+    },
+    "qnli": {
+      "n_train": 104743,
+      "n_val": 5463,
+      "num_labels": 2,
+      "reference_accuracy": 0.91,
+      "dense_losses": [
+        0.37379862754745097,
+        0.2030673218559913,
+        0.1175788433069708
+      ],
+      "dense_seconds": 788.4,
+      "dense_accuracy": 0.9163463298553908,
+      "dense_vs_reference_pp": 0.635,
+      "control_gate": {
+        "passed": true
+      },
+      "p33": {
+        "heads_removed": 48,
+        "drophead_losses": [
+          0.42892944393139026,
+          0.2899588533860922,
+          0.2324011670806711
+        ],
+        "drophead_seconds": 1126.2,
+        "drophead_dense_accuracy": 0.90481420464946,
+        "drophead_accuracy": 0.8923668314113125,
+        "magnitude_oneshot_accuracy": 0.8326926597107817,
+        "recovery_losses": [
+          0.2183122093406396,
+          0.11547856535091222
+        ],
+        "recovery_seconds": 469.6,
+        "magnitude_recovery_accuracy": 0.9073768991396669,
+        "drophead_minus_magnitude_pp": -1.501,
+        "drophead_vs_control_pp": -2.398
+      },
+      "p50": {
+        "heads_removed": 72,
+        "drophead_losses": [
+          0.47063396413677994,
+          0.3400652775394166,
+          0.29015749014308706
+        ],
+        "drophead_seconds": 1285.2,
+        "drophead_dense_accuracy": 0.8980413692110562,
+        "drophead_accuracy": 0.8482518762584661,
+        "magnitude_oneshot_accuracy": 0.7190188541094636,
+        "recovery_losses": [
+          0.3231017902133919,
+          0.17189906570530186
+        ],
+        "recovery_seconds": 460.2,
+        "magnitude_recovery_accuracy": 0.8978583196046128,
+        "drophead_minus_magnitude_pp": -4.961,
+        "drophead_vs_control_pp": -6.809
+      }
+    },
+    "mnli": {
+      "n_train": 392702,
+      "n_val": 9815,
+      "num_labels": 3,
+      "reference_accuracy": 0.84,
+      "dense_losses": [
+        0.5692397846076565,
+        0.3571052751692092,
+        0.2417356940156342
+      ],
+      "dense_seconds": 3103.1,
+      "dense_accuracy": 0.8454406520631687,
+      "dense_vs_reference_pp": 0.544,
+      "control_gate": {
+        "passed": true
+      },
+      "p33": {
+        "heads_removed": 48,
+        "drophead_losses": [
+          0.6389256099377415,
+          0.4518370300001978,
+          0.37498053574431905
+        ],
+        "drophead_seconds": 4257.0,
+        "drophead_dense_accuracy": 0.8321956189505858,
+        "drophead_accuracy": 0.8214977075904228,
+        "magnitude_oneshot_accuracy": 0.7920529801324503,
+        "recovery_losses": [
+          0.3495704852374856,
+          0.22145133395831076
+        ],
+        "recovery_seconds": 1748.3,
+        "magnitude_recovery_accuracy": 0.8380030565461029,
+        "drophead_minus_magnitude_pp": -1.651,
+        "drophead_vs_control_pp": -2.394
+      },
+      "p50": {
+        "heads_removed": 72,
+        "drophead_losses": [
+          0.6906417348219331,
+          0.5074282556947083,
+          0.44022249279366477
+        ],
+        "drophead_seconds": 4969.7,
+        "drophead_dense_accuracy": 0.8158940397350993,
+        "drophead_accuracy": 0.7954151808456444,
+        "magnitude_oneshot_accuracy": 0.6603158430973001,
+        "recovery_losses": [
+          0.43726101826580127,
+          0.27587198778850935
+        ],
+        "recovery_seconds": 1776.3,
+        "magnitude_recovery_accuracy": 0.8342333163525216,
+        "drophead_minus_magnitude_pp": -3.882,
+        "drophead_vs_control_pp": -5.003
+      }
+    }
+  }
+}
