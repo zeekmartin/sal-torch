@@ -54,13 +54,22 @@ for _p in (str(SCRIPTS), str(HERE)):
 MODEL_ID = "bert-base-uncased"
 GLUE = "nyu-mll/glue"
 
-# task -> (text keys, num_labels, validation split, reference accuracy)
+# task -> (text keys, num_labels, validation split, reference ACCURACY)
+#
+# These are ``bert-base-uncased`` dev **accuracies**. The distinction matters:
+# the number usually quoted for MRPC is **88-89 F1**, not accuracy, and its
+# accuracy is ~84. The first smoke of this script gated MRPC against 88.0,
+# read 83.82% and reported a 4.18pp control failure that was nothing of the
+# kind -- the control was fine and the reference was the wrong metric. MRPC
+# therefore also reports F1 below, against ``REFERENCE_F1``.
 TASKS = {
     "sst2": (("sentence", None), 2, "validation", 92.5),
-    "mrpc": (("sentence1", "sentence2"), 2, "validation", 88.0),
+    "mrpc": (("sentence1", "sentence2"), 2, "validation", 84.0),
     "qnli": (("question", "sentence"), 2, "validation", 91.0),
     "mnli": (("premise", "hypothesis"), 3, "validation_matched", 84.0),
 }
+# Tasks whose customary headline figure is F1, reported alongside accuracy.
+REFERENCE_F1 = {"mrpc": 88.0}
 RATIOS = (0.33, 0.50)
 RECOVER_EPOCHS = 2
 EPOCHS = 3
@@ -127,9 +136,14 @@ def load_model(n_labels, device):
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, use_amp) -> float:
+def evaluate(model, loader, device, use_amp, want_f1: bool = False):
+    """Accuracy, and F1 of the positive class when ``want_f1``.
+
+    Returns a float, or ``(accuracy, f1)`` when F1 was asked for, so existing
+    call sites keep their shape.
+    """
     model.eval()
-    right = total = 0
+    right = total = tp = fp = fn = 0
     for batch in loader:
         labels = batch.pop("label").to(device)
         batch = {k: v.to(device) for k, v in batch.items()
@@ -138,9 +152,20 @@ def evaluate(model, loader, device, use_amp) -> float:
                else torch.autocast("cpu", enabled=False))
         with ctx:
             logits = model(**batch).logits
-        right += int((logits.float().argmax(-1) == labels).sum())
+        pred = logits.float().argmax(-1)
+        right += int((pred == labels).sum())
         total += labels.numel()
-    return right / max(total, 1)
+        if want_f1:
+            tp += int(((pred == 1) & (labels == 1)).sum())
+            fp += int(((pred == 1) & (labels == 0)).sum())
+            fn += int(((pred == 0) & (labels == 1)).sum())
+    acc = right / max(total, 1)
+    if not want_f1:
+        return acc
+    prec = tp / max(tp + fp, 1)
+    rec = tp / max(tp + fn, 1)
+    f1 = 2 * prec * rec / max(prec + rec, 1e-12)
+    return acc, f1
 
 
 def train_loop(model, loader, epochs, device, use_amp, masker=None,
@@ -288,12 +313,23 @@ def main(argv=None):
                                            use_amp, label=f"{task}/dense",
                                            lr=args.lr)
         entry["dense_seconds"] = round(time.time() - t0, 1)
-        acc = evaluate(dense, vl, device, use_amp)
+        want_f1 = task in REFERENCE_F1
+        if want_f1:
+            acc, f1 = evaluate(dense, vl, device, use_amp, want_f1=True)
+            entry["dense_f1"] = f1
+            entry["reference_f1"] = REFERENCE_F1[task] / 100
+            entry["dense_f1_vs_reference_pp"] = round(
+                (f1 - REFERENCE_F1[task] / 100) * 100, 3)
+        else:
+            acc = evaluate(dense, vl, device, use_amp)
         entry["dense_accuracy"] = acc
         gap = ref / 100 - acc
         entry["dense_vs_reference_pp"] = round(-gap * 100, 3)
-        log(f"  dense control {acc * 100:.2f}% (reference {ref:.1f}%, "
-            f"{-gap * 100:+.2f}pp)")
+        log(f"  dense control {acc * 100:.2f}% accuracy "
+            f"(reference {ref:.1f}%, {-gap * 100:+.2f}pp)"
+            + (f" | F1 {entry['dense_f1'] * 100:.2f}% "
+               f"(reference {REFERENCE_F1[task]:.1f}%, "
+               f"{entry['dense_f1_vs_reference_pp']:+.2f}pp)" if want_f1 else ""))
         save()
         if gap * 100 > args.control_tolerance:
             msg = (f"{task}: dense control {acc * 100:.2f}% is "
