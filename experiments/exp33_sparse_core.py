@@ -33,14 +33,25 @@ Neither reference needs a custom CUDA kernel: the whole pruning path is torch
 ops. The ROCm-sensitive ones are ``torch.linalg.cholesky``,
 ``torch.cholesky_inverse``, ``torch.sort`` and ``torch.topk``.
 
-What this module deliberately does not do
------------------------------------------
-Both methods produce **unstructured** sparsity: zeros scattered inside the
-weight matrices. The parameters are *masked, not removed*, so a dense kernel
-does exactly as much arithmetic as before. **There is no speedup to report for
-these arms** — compare them on accuracy at a matched count of zeroed
-parameters, never on latency. ``slice_heads()`` and FFN neuron slicing are the
-structured methods where size and latency actually move.
+Three structure classes, and what each one may claim
+----------------------------------------------------
+**Unstructured** (the default path): zeros scattered inside the weight
+matrices. The parameters are *masked, not removed*, so a dense kernel does
+exactly as much arithmetic as before. **There is no speedup to report** --
+compare on accuracy at a matched count of zeroed parameters, never on latency.
+
+**Semi-structured 2:4** (``prunen=2, prunem=4``): exactly two of every four
+consecutive weights in a row are zero. This is the pattern NVIDIA's sparse
+tensor cores accelerate, so unlike the unstructured arms it *can* be made
+faster -- **on Ampere or newer, with a kernel that exploits it**. It cannot be
+measured here: LUMI is MI250X, and ROCm has no equivalent sparse-tensor-core
+path, so these rows are **accuracy-only, with the speedup recorded as
+unmeasurable rather than as "none"**. Those are different claims and the table
+must not blur them.
+
+**Structured** (``slice_heads()``, FFN neuron slicing): weights are removed,
+so size and latency actually move. That is where this project's measured
+speedups come from.
 """
 from __future__ import annotations
 
@@ -86,8 +97,17 @@ class SparseGPTPruner:
         self.H += inp.matmul(inp.t())
 
     def prune(self, sparsity: float, blocksize: int = BLOCKSIZE,
-              percdamp: float = PERCDAMP) -> int:
-        """Prune to ``sparsity`` and write the weights back. Returns #zeroed."""
+              percdamp: float = PERCDAMP, prunen: int = 0,
+              prunem: int = 0) -> int:
+        """Prune and write the weights back. Returns the number zeroed.
+
+        With ``prunen``/``prunem`` set (2:4 is ``prunen=2, prunem=4``) the
+        reference builds the mask **inside** the column loop, in groups of
+        ``prunem``, from the *already error-corrected* ``W1`` rather than from
+        a metric computed up front. That ordering is the method, so it is
+        reproduced rather than simplified. ``sparsity`` is then ignored,
+        because n:m fixes the fraction by construction.
+        """
         W = self.layer.weight.data.clone().float()
         H = self.H
 
@@ -115,13 +135,22 @@ class SparseGPTPruner:
             Err1 = torch.zeros_like(W1)
             Hinv1 = Hinv[i1:i2, i1:i2]
 
-            tmp = W1 ** 2 / (torch.diag(Hinv1).reshape((1, -1))) ** 2
-            thresh = torch.sort(tmp.flatten())[0][int(tmp.numel() * sparsity)]
-            mask1 = tmp <= thresh
+            if prunen == 0:
+                tmp = W1 ** 2 / (torch.diag(Hinv1).reshape((1, -1))) ** 2
+                thresh = torch.sort(tmp.flatten())[0][int(tmp.numel() * sparsity)]
+                mask1 = tmp <= thresh
+            else:
+                mask1 = torch.zeros_like(W1) == 1
 
             for i in range(count):
                 w = W1[:, i]
                 d = Hinv1[i, i]
+                if prunen != 0 and i % prunem == 0:
+                    tmp = (W1[:, i:(i + prunem)] ** 2
+                           / (torch.diag(Hinv1)[i:(i + prunem)].reshape((1, -1))) ** 2)
+                    mask1.scatter_(
+                        1, i + torch.topk(tmp, prunen, dim=1,
+                                          largest=False)[1], True)
                 q = w.clone()
                 q[mask1[:, i]] = 0
                 Q1[:, i] = q
@@ -171,16 +200,31 @@ class WandaPruner:
             raise ValueError("Wanda: non-finite activation norm — "
                              "calibration batch has an inf in it")
 
-    def prune(self, sparsity: float) -> int:
+    def prune(self, sparsity: float, prunen: int = 0,
+              prunem: int = 0) -> int:
+        """Mask the lowest-metric weights. Returns the number zeroed.
+
+        With ``prunen``/``prunem`` the comparison group is each run of
+        ``prunem`` consecutive columns within a row, and ``prunen`` of them
+        are zeroed -- the n:m branch of ``lib/prune.py::prune_wanda``.
+        ``sparsity`` is then ignored, since n:m fixes the fraction.
+        """
         W = self.layer.weight.data
         metric = torch.abs(W).float() * torch.sqrt(
             self.scaler_row.reshape((1, -1)))
-        # Per-output-row comparison group: each row loses the same fraction.
         mask = torch.zeros_like(metric, dtype=torch.bool)
-        k = int(metric.shape[1] * sparsity)
-        if k > 0:
-            idx = torch.sort(metric, dim=-1, stable=True)[1][:, :k]
-            mask.scatter_(1, idx, True)
+        if prunen != 0:
+            for ii in range(0, metric.shape[1], prunem):
+                tmp = metric[:, ii:(ii + prunem)].float()
+                mask.scatter_(
+                    1, ii + torch.topk(tmp, prunen, dim=1,
+                                       largest=False)[1], True)
+        else:
+            # Per-output-row comparison group: each row loses the same fraction.
+            k = int(metric.shape[1] * sparsity)
+            if k > 0:
+                idx = torch.sort(metric, dim=-1, stable=True)[1][:, :k]
+                mask.scatter_(1, idx, True)
         W[mask] = 0
         return int(mask.sum().item())
 
@@ -236,7 +280,8 @@ def sparsity_report(model: nn.Module, layers: dict | None = None) -> dict:
 
 @torch.no_grad()
 def prune_model(model: nn.Module, layers: dict, calib_batches, method: str,
-                sparsity: float, device=None, log=print) -> dict:
+                sparsity: float, device=None, log=print, prunen: int = 0,
+                prunem: int = 0) -> dict:
     """Prune ``layers`` with ``method`` at ``sparsity``, one forward pass.
 
     Both methods need the *input* to each target layer, so every target gets a
@@ -277,10 +322,12 @@ def prune_model(model: nn.Module, layers: dict, calib_batches, method: str,
 
     zeroed = 0
     for name, pr in pruners.items():
-        zeroed += pr.prune(sparsity)
-    log(f"  zeroed {zeroed} weights at sparsity {sparsity}")
+        zeroed += pr.prune(sparsity, prunen=prunen, prunem=prunem)
+    shape = f"{prunen}:{prunem}" if prunen else f"sparsity {sparsity}"
+    log(f"  zeroed {zeroed} weights at {shape}")
 
     rep = sparsity_report(model, layers)
     rep.update(method=method, sparsity=sparsity, calib_samples=n,
-               layers=len(layers), zeroed=zeroed)
+               layers=len(layers), zeroed=zeroed,
+               nm=(f"{prunen}:{prunem}" if prunen else None))
     return rep

@@ -85,6 +85,9 @@ DATASET = "evanarlian/imagenet_1k_resized_256"
 METHODS = ("wanda", "sparsegpt")
 SCOPES = ("attn", "whole")
 RATIOS = (0.33, 0.50)
+# 2:4 is attention-only and inherently 50% sparse, so it has no ratio of its
+# own; it is matched to the P50 rows by construction.
+NM_SHAPES = ("2:4",)
 CALIB_IMAGES = 128
 RECOVER_EPOCHS = 2
 
@@ -189,6 +192,13 @@ def main(argv=None):
     p.add_argument("--methods", nargs="+", default=list(METHODS))
     p.add_argument("--scopes", nargs="+", default=list(SCOPES))
     p.add_argument("--ratios", type=float, nargs="+", default=list(RATIOS))
+    p.add_argument("--nm", nargs="*", default=list(NM_SHAPES),
+                   help="semi-structured shapes, e.g. 2:4. Attention-only and "
+                        "inherently 50%% sparse. Pass --nm with no value to "
+                        "skip these arms.")
+    p.add_argument("--only-nm", action="store_true",
+                   help="run only the semi-structured arms, skipping "
+                        "the unstructured scope x ratio grid")
     p.add_argument("--calib-images", type=int, default=CALIB_IMAGES)
     p.add_argument("--recover-epochs", type=int, default=RECOVER_EPOCHS,
                    help="default 2 (exp29: the recovery curve peaks there)")
@@ -212,6 +222,7 @@ def main(argv=None):
         args.n_train, args.n_val = 2000, 1000
         args.methods, args.scopes, args.ratios = ["wanda"], ["attn"], [0.50]
         args.recover_epochs, args.calib_images = 1, 32
+        args.nm = ["2:4"]
 
     outdir = Path(args.output)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -293,61 +304,81 @@ def main(argv=None):
 
     save()  # write before anything that could fail, per the expF lesson
 
+    # (scope, ratio, nm) triples: the unstructured grid, then the 2:4 arms.
+    configs = ([] if args.only_nm else
+               [(sc, r, None) for sc in args.scopes for r in args.ratios])
+    configs += [("attn", 0.50, nm) for nm in (args.nm or [])]
+
     for method in args.methods:
-        for scope in args.scopes:
-            for ratio in args.ratios:
-                key = f"{method}_{scope}_p{int(ratio * 100)}"
-                rule(f"{method} | scope={scope} | matched to {ratio:.0%} of heads")
-                model = copy.deepcopy(pretrained)
-                sparsity, detail = matched_sparsity(model, scope, ratio)
-                layers = (attention_linear_layers(model) if scope == "attn"
-                          else {n: l for n, l in linear_layers(model).items()
-                                if "classifier" not in n})
-                log(f"    matched sparsity {sparsity:.4f} over "
-                    f"{len(layers)} layers "
-                    f"({detail['target_removed_params'] / 1e6:.1f}M params)")
+        for scope, ratio, nm in configs:
+            key = (f"{method}_{scope}_p{int(ratio * 100)}" if nm is None
+                   else f"{method}_{scope}_{nm.replace(':', 'of')}")
+            prunen, prunem = ((0, 0) if nm is None
+                              else tuple(int(x) for x in nm.split(":")))
+            rule(f"{method} | scope={scope} | "
+                 + (f"{nm} semi-structured" if nm else
+                    f"matched to {ratio:.0%} of heads"))
+            model = copy.deepcopy(pretrained)
+            sparsity, detail = matched_sparsity(model, scope, ratio)
+            detail["structure"] = "semi-structured" if nm else "unstructured"
+            detail["nm"] = nm
+            # 2:4 can be accelerated by NVIDIA sparse tensor cores on
+            # Ampere or newer. MI250X has no equivalent path, so the
+            # speedup here is UNMEASURABLE, which is not the same claim as
+            # "no speedup" -- the unstructured arms are the latter.
+            detail["speedup_batch32"] = (
+                "unmeasurable on MI250X (2:4 needs NVIDIA Ampere+ sparse "
+                "tensor cores)" if nm else
+                "none by construction (weights masked, not removed)")
+            layers = (attention_linear_layers(model) if scope == "attn"
+                      else {n: l for n, l in linear_layers(model).items()
+                            if "classifier" not in n})
+            log(f"    {detail['structure']}"
+                + (f" {nm}" if nm else f", matched sparsity {sparsity:.4f}")
+                + f" over {len(layers)} layers")
 
-                t0 = time.time()
-                rep = prune_model(model, layers, calib, method, sparsity,
-                                  device=device, log=log)
-                prune_seconds = time.time() - t0
-                masks = capture_masks(layers)
-                one_shot = score(model, val_split, device, use_amp, P,
-                                 args.skip_int4)
-                log(f"    one-shot: {one_shot['accuracy'] * 100:.2f}%")
+            t0 = time.time()
+            rep = prune_model(model, layers, calib, method, sparsity,
+                              device=device, log=log, prunen=prunen,
+                              prunem=prunem)
+            prune_seconds = time.time() - t0
+            masks = capture_masks(layers)
+            one_shot = score(model, val_split, device, use_amp, P,
+                             args.skip_int4)
+            log(f"    one-shot: {one_shot['accuracy'] * 100:.2f}%")
 
-                cell = {"matched": detail, "prune_report": rep,
-                        "prune_seconds": round(prune_seconds, 1),
-                        "one_shot": one_shot}
-                payload["cells"][key] = cell
+            cell = {"matched": detail, "prune_report": rep,
+                    "prune_seconds": round(prune_seconds, 1),
+                    "one_shot": one_shot}
+            payload["cells"][key] = cell
+            save()
+
+            if not args.skip_recovery:
+                losses, secs = recover_sparse(
+                    model, layers, masks, train_split,
+                    args.recover_epochs, args, device, use_amp, P, log)
+                after = sparsity_report(model, layers)
+                rec = score(model, val_split, device, use_amp, P,
+                            args.skip_int4)
+                drift = abs(after["target_zero_frac"]
+                            - rep["target_zero_frac"])
+                log(f"    recovered ({args.recover_epochs} ep): "
+                    f"{rec['accuracy'] * 100:.2f}% | "
+                    f"zero frac {after['target_zero_frac']:.4f} "
+                    f"(drift {drift:.2e})")
+                cell["recovered"] = rec
+                cell["recovered_losses"] = losses
+                cell["recover_seconds"] = round(secs, 1)
+                cell["sparsity_after_recovery"] = after
+                cell["sparsity_drift"] = drift
+                # A drifting mask means the arm is no longer sparse and the
+                # label on it is false. Record it loudly rather than
+                # quietly reporting a dense model as pruned.
+                cell["mask_preserved"] = bool(drift < 1e-6)
+                if drift >= 1e-6:
+                    log(f"    WARNING: sparsity drifted by {drift:.2e} — "
+                        "the recovery mask did not hold")
                 save()
-
-                if not args.skip_recovery:
-                    losses, secs = recover_sparse(
-                        model, layers, masks, train_split,
-                        args.recover_epochs, args, device, use_amp, P, log)
-                    after = sparsity_report(model, layers)
-                    rec = score(model, val_split, device, use_amp, P,
-                                args.skip_int4)
-                    drift = abs(after["target_zero_frac"]
-                                - rep["target_zero_frac"])
-                    log(f"    recovered ({args.recover_epochs} ep): "
-                        f"{rec['accuracy'] * 100:.2f}% | "
-                        f"zero frac {after['target_zero_frac']:.4f} "
-                        f"(drift {drift:.2e})")
-                    cell["recovered"] = rec
-                    cell["recovered_losses"] = losses
-                    cell["recover_seconds"] = round(secs, 1)
-                    cell["sparsity_after_recovery"] = after
-                    cell["sparsity_drift"] = drift
-                    # A drifting mask means the arm is no longer sparse and the
-                    # label on it is false. Record it loudly rather than
-                    # quietly reporting a dense model as pruned.
-                    cell["mask_preserved"] = bool(drift < 1e-6)
-                    if drift >= 1e-6:
-                        log(f"    WARNING: sparsity drifted by {drift:.2e} — "
-                            "the recovery mask did not hold")
-                    save()
 
     rule("done")
     log(f"  wrote {outdir / 'exp33_sparse.json'}")

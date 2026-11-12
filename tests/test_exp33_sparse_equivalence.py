@@ -135,6 +135,44 @@ def test_zero_sparsity_is_a_no_op_for_wanda(layer_and_calib):
     assert torch.equal(layer.weight.data, before)
 
 
+# ------------------------------------------------- tier 1: 2:4 invariants
+def test_wanda_24_zeroes_two_of_every_four(layer_and_calib):
+    layer, calib = layer_and_calib
+    pr = WandaPruner(layer)
+    for i in range(NCALIB):
+        pr.add_batch(calib[i])
+    pr.prune(0.0, prunen=2, prunem=4)
+    z = layer.weight.data == 0
+    groups = z.reshape(ROWS, COLS // 4, 4).sum(dim=-1)
+    assert groups.unique().tolist() == [2], groups.unique().tolist()
+
+
+def test_sparsegpt_24_zeroes_two_of_every_four(layer_and_calib):
+    layer, calib = layer_and_calib
+    pr = SparseGPTPruner(layer)
+    for i in range(NCALIB):
+        pr.add_batch(calib[i])
+    pr.prune(0.0, prunen=2, prunem=4)
+    z = layer.weight.data == 0
+    groups = z.reshape(ROWS, COLS // 4, 4).sum(dim=-1)
+    assert groups.unique().tolist() == [2], groups.unique().tolist()
+    assert torch.isfinite(layer.weight.data).all()
+
+
+def test_24_ignores_the_sparsity_argument(layer_and_calib):
+    """n:m fixes the fraction, so sparsity must not change the result."""
+    layer, calib = layer_and_calib
+    outs = []
+    for sp in (0.0, 0.9):
+        lyr = _fresh(layer)
+        pr = WandaPruner(lyr)
+        for i in range(NCALIB):
+            pr.add_batch(calib[i])
+        pr.prune(sp, prunen=2, prunem=4)
+        outs.append(lyr.weight.data.clone())
+    assert torch.equal(outs[0], outs[1])
+
+
 # -------------------------------------------- tier 2: against the references
 @needs_refs
 def test_wanda_matches_the_reference(layer_and_calib):
@@ -195,5 +233,60 @@ def test_sparsegpt_matches_the_reference(layer_and_calib, monkeypatch):
 
     assert torch.equal(ours.weight.data == 0, theirs.weight.data == 0), \
         "masks differ"
+    assert torch.allclose(ours.weight.data, theirs.weight.data, atol=1e-5), \
+        (ours.weight.data - theirs.weight.data).abs().max().item()
+
+@needs_refs
+def test_wanda_24_matches_the_reference(layer_and_calib):
+    """2:4 masks must match upstream's n:m branch exactly."""
+    sys.path.insert(0, str(Path(REFS) / "wanda" / "image_classifiers"))
+    from layerwrapper import WrappedLayer          # noqa: E402
+
+    layer, calib = layer_and_calib
+    ours, theirs = _fresh(layer), _fresh(layer)
+
+    mine = WandaPruner(ours)
+    ref = WrappedLayer(theirs)
+    for i in range(NCALIB):
+        mine.add_batch(calib[i])
+        ref.add_batch(calib[i], None)
+    mine.prune(0.0, prunen=2, prunem=4)
+
+    # lib/prune.py::prune_wanda, the prune_n != 0 branch, verbatim
+    metric = torch.abs(theirs.weight.data) * torch.sqrt(
+        ref.scaler_row.reshape((1, -1)))
+    W_mask = torch.zeros_like(metric) == 1
+    for ii in range(metric.shape[1]):
+        if ii % 4 == 0:
+            tmp = metric[:, ii:(ii + 4)].float()
+            W_mask.scatter_(1, ii + torch.topk(tmp, 2, dim=1,
+                                               largest=False)[1], True)
+    theirs.weight.data[W_mask] = 0
+
+    assert torch.equal(ours.weight.data == 0, theirs.weight.data == 0)
+    assert torch.allclose(ours.weight.data, theirs.weight.data, atol=1e-6)
+
+
+@needs_refs
+def test_sparsegpt_24_matches_the_reference(layer_and_calib, monkeypatch):
+    """2:4 through the reference's own prunen/prunem path."""
+    monkeypatch.setattr(torch.cuda, "synchronize", lambda *a, **k: None)
+    sys.path.insert(0, str(Path(REFS) / "sparsegpt"))
+    from sparsegpt import SparseGPT                # noqa: E402
+
+    layer, calib = layer_and_calib
+    ours, theirs = _fresh(layer), _fresh(layer)
+
+    mine = SparseGPTPruner(ours)
+    ref = SparseGPT(theirs)
+    for i in range(NCALIB):
+        mine.add_batch(calib[i])
+        ref.add_batch(calib[i], None)
+
+    mine.prune(0.0, prunen=2, prunem=4)
+    ref.fasterprune(0.0, prunen=2, prunem=4, blocksize=128, percdamp=0.01)
+
+    assert torch.equal(ours.weight.data == 0, theirs.weight.data == 0), \
+        "2:4 masks differ"
     assert torch.allclose(ours.weight.data, theirs.weight.data, atol=1e-5), \
         (ours.weight.data - theirs.weight.data).abs().max().item()
