@@ -215,7 +215,9 @@ def main(argv=None):
 
     outdir = Path(args.output)
     outdir.mkdir(parents=True, exist_ok=True)
-    device = P.detect_device()
+    # detect_device returns (device, vram_gb) — exp12 and the prototype
+    # unpack it the same way.
+    device, _vram = P.detect_device()
     use_amp = device.type == "cuda"
 
     rule("exp33 — SparseGPT / Wanda against DropHead / magnitude")
