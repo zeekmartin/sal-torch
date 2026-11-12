@@ -211,7 +211,7 @@ offset is not a uniform shift of both metrics.
 5 epochs is **past the peak**. This block therefore predicted that the ratio costs above were an
 *upper* bound, that each arm would read 0.2-0.4pp better at 2 epochs, and that the control would move
 too so the net was not predictable from here. **exp32 has now measured all three, and the prediction
-was wrong in both parts.** The arms gained more than predicted (+0.99 / +0.77 / +0.30pp at 25 / 33 /
+was wrong in both parts.** The arms gained more than predicted (+0.85 / +0.78 / +0.38pp at 25 / 33 /
 50%), the control gained more still (+1.11pp), and so the costs **rose** rather than falling. The
 sweep's internal ordering (25 > 33 > 50) is unaffected, and the exp24 cross-check required 5 epochs to
 be comparable, so 5 was right for the cross-check. The redone sweep is `EXP32_RATIO_AT_2EP.md`; the
@@ -248,17 +248,18 @@ are fixed now carries more weight, not less.
 Scoring each arm against the control trained for the same number of epochs reverses what exp32 was
 expected to find:
 
-| ratio | at 5 ep | vs 5-ep control (80.44%) | at 2 ep | vs 2-ep control | cost change |
+| ratio | at 5 ep | vs 5-ep control (80.44%) | at 2 ep | vs 2-ep control (81.554%) | cost change |
 |---|---|---|---|---|---|
-| 25% | 79.41% | −1.03pp | 80.40% | **−1.28pp** | 0.25pp worse |
-| 33% | 78.85% | −1.59pp | 79.62% | **−2.06pp** | 0.47pp worse |
-| 50% | 77.27% | −3.17pp | **77.57%** | **−3.98pp** | 0.81pp worse |
-| 50%, INT4 | 75.03% | −3.98pp | **75.55%** | **−4.72pp** | 0.74pp worse |
+| 25% | 79.41% | −1.03pp | 80.258% | **−1.30pp** | 0.27pp worse |
+| 33% | 78.85% | −1.59pp | 79.626% | **−1.93pp** | 0.34pp worse |
+| 50% | 77.27% | −3.17pp | **77.642%** | **−3.91pp** | 0.74pp worse |
+| 25%, INT4 | 77.69% | −1.32pp | 78.744% | **−1.53pp** | 0.21pp worse |
+| 33%, INT4 | 77.11% | −1.90pp | 78.003% | **−2.27pp** | 0.37pp worse |
+| 50%, INT4 | 75.03% | −3.98pp | **75.427%** | **−4.85pp** | 0.87pp worse |
 
-The 50% rows are three-seed on both sides (the 2-epoch cell is Block A's own, which exp32 re-runs as
-a replication). The 25% and 33% rows at 2 epochs are **seed 42 only** so far and are scored against
-that seed's own control, 81.676%, per the within-seed rule; exp32's other two seeds are still
-running.
+Three seeds on every cell on both sides (`EXP32_RATIO_AT_2EP.md`). exp32's 50% cell reads 77.642%
+against this document's own 2-epoch Block A point of 77.570% — a 0.07pp replication on an independent
+run.
 
 Both sides gain from the shorter schedule and the control gains more, so exp32's question — "if the
 control gains what the pruned arms gain, the costs are unchanged and only the price drops" — has the
@@ -299,7 +300,7 @@ pruning has to make up is wider than the 5-epoch tables suggested, and **any cla
 - The 33%-vs-50% ordering is now measured at three head ratios on three seeds and is monotone, which
   supports exp26's conclusion that heads are the expensive thing to remove.
 - **The published ratio costs go up, not down.** Against matched 2-epoch controls the sweep reads
-  −1.28 / −2.06 / −3.98pp rather than −1.03 / −1.59 / −3.17pp. Any document quoting the 5-epoch
+  −1.30 / −1.93 / −3.91pp rather than −1.03 / −1.59 / −3.17pp. Any document quoting the 5-epoch
   figures must say so, because the 2-epoch recipe is now the default and the pair must match.
 - **The 2-epoch knee is a recipe property and should not be shipped as a law.** `CompressionPipeline`
   should probe and keep the best epoch rather than hard-coding 2, which is what the bullet above

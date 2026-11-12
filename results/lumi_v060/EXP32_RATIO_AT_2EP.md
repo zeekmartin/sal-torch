@@ -1,12 +1,21 @@
 # exp32 — the ratio sweep, re-anchored at 2 epochs of recovery
 
-**PARTIAL — the three dense controls are in; the pruned arms are running.**
-Seed 42's 25% and 33% cells are readable from the logs and quoted below as
-provisional. Job IDs at the bottom.
+**COMPLETE — 6 jobs, 3 seeds, 23.87 GPU-hours, all `COMPLETED 0:0`.** Data in
+`exp32_ratios_s{42,123,456}/exp29_recovery.json` and
+`exp32_ctrl_s{42,123,456}/exp31_dense_control.json`.
 
 **ViT-B/16 (`google/vit-base-patch16-224`), ImageNet-1k
 (`evanarlian/imagenet_1k_resized_256`), 3 seeds (42, 123, 456), full
 50 000-image validation split, autocast bfloat16, batch 64.**
+
+## Headline
+
+**Two epochs is better than five on every arm, and pruning costs more than the
+five-epoch tables said.** The dense control gains +1.11pp from the shorter
+schedule against the pruned arms' +0.38 to +0.85pp, so the sweep's costs rise
+to **−1.30 / −1.93 / −3.91pp** at 25 / 33 / 50% of heads. Two epochs stays the
+default — cheaper and absolutely better everywhere — but the 5-epoch cost
+figures must not be requoted alongside the 2-epoch recipe.
 
 ## Why
 
@@ -72,35 +81,48 @@ fine-tuning recipe on this dataset, and the dense arm shows it more strongly
 than any pruned arm does. That reframing is written up in
 `EXP29_RECOVERY_EPOCHS.md`.
 
-### The sweep, against matched controls
+### The sweep at 2 epochs, 3 seeds
 
-| ratio | 5 ep | vs 5-ep control | 2 ep | vs 2-ep control | cost change |
+| ratio | heads | seed 42 | seed 123 | seed 456 | mean | INT4 mean |
+|---|---|---|---|---|---|---|
+| 25% | 36 | 80.40% | 80.21% | 80.17% | **80.258%** | 78.744% |
+| 33% | 48 | 79.62% | 79.70% | 79.56% | **79.626%** | 78.003% |
+| 50% | 72 | 77.81% | 77.44% | 77.68% | **77.642%** | 75.427% |
+
+The 50% cell replicates exp29's Block A 2-epoch point (77.57%) to **0.07pp** on
+an independent run — the cross-check that the two configurations are the same
+measurement.
+
+### Against matched controls, the costs grew
+
+| ratio | 5 ep | vs 5-ep control (80.44%) | 2 ep | vs 2-ep control (81.554%) | cost change |
 |---|---|---|---|---|---|
-| 25% | 79.41% | −1.03pp | 80.40% _(s42)_ | **−1.28pp** | 0.25pp worse |
-| 33% | 78.85% | −1.59pp | 79.62% _(s42)_ | **−2.06pp** | 0.47pp worse |
-| 50% | 77.27% | −3.17pp | **77.57%** | **−3.98pp** | 0.81pp worse |
-| 50%, INT4 | 75.03% | −3.98pp | **75.55%** | **−4.72pp** | 0.74pp worse |
+| 25% | 79.41% | −1.03pp | 80.258% | **−1.30pp** | 0.27pp worse |
+| 33% | 78.85% | −1.59pp | 79.626% | **−1.93pp** | 0.34pp worse |
+| 50% | 77.27% | −3.17pp | 77.642% | **−3.91pp** | 0.74pp worse |
+| 25%, INT4 | 77.69% | −1.32pp | 78.744% | **−1.53pp** | 0.21pp worse |
+| 33%, INT4 | 77.11% | −1.90pp | 78.003% | **−2.27pp** | 0.37pp worse |
+| 50%, INT4 | 75.03% | −3.98pp | 75.427% | **−4.85pp** | 0.87pp worse |
 
-The 50% rows are three-seed on both sides — the 2-epoch cell is exp29 Block
-A's, which this run re-measures as a replication. The 25% and 33% 2-epoch cells
-are **seed 42 only** and scored against that seed's own control (81.676%); two
-more seeds are running.
+Three seeds on every cell on both sides. The arms gained +0.85 / +0.78 / +0.38pp
+from the shorter schedule; the control gained **+1.11pp**; so every cost rose,
+and the INT4 column rose further than the FP one.
 
 ## What it answered
 
-1. **Do the ratio costs shrink at 2 epochs?** No — they **grow**, by 0.25 to
-   0.81pp. Both sides gain from the shorter schedule and the control gains
-   more.
+1. **Do the ratio costs shrink at 2 epochs?** No — they **grow**, by 0.27 to
+   0.74pp in FP and up to 0.87pp at INT4. Both sides gain from the shorter
+   schedule and the control gains more.
 2. **Does the matched control improve by as much?** It improves by *more*:
-   +1.11pp against the pruned arms' +0.30 to +0.99pp. exp32's framing — "if the
+   +1.11pp against the pruned arms' +0.38 to +0.85pp. exp32's framing — "if the
    control gains what the pruned arms gain, the costs are unchanged and only
    the price drops" — resolves to **the price drops and the cost rises**.
 3. **Is the ordering preserved?** Yes, 25 < 33 < 50 and monotone, as at 5
    epochs.
 
 Two epochs stays the default: cheaper, and absolutely better on every arm,
-dense and pruned. But the published ratio costs must be requoted — **−1.28 /
-−2.06 / −3.98pp**, not −1.03 / −1.59 / −3.17 — and every such figure has to
+dense and pruned. But the published ratio costs must be requoted — **−1.30 /
+−1.93 / −3.91pp**, not −1.03 / −1.59 / −3.17 — and every such figure has to
 name the epoch count on both sides from now on.
 
 ## What it was asked to answer
@@ -120,9 +142,9 @@ name the epoch count on both sides from now on.
 | 42 | control, dense + 2 ep | `23670468` | **COMPLETED** 2:13:53 |
 | 123 | control, dense + 2 ep | `23670469` | **COMPLETED** 2:09:39 |
 | 456 | control, dense + 2 ep | `23670470` | **COMPLETED** 2:13:22 |
-| 42 | ratios 0.25 / 0.33 / 0.50 @ 2 ep | `23670464` | RUNNING, p50 |
-| 123 | ratios | `23670465` | RUNNING, p50 |
-| 456 | ratios | `23670466` | RUNNING, p50 |
+| 42 | ratios 0.25 / 0.33 / 0.50 @ 2 ep | `23670464` | **COMPLETED** 5:36:39 |
+| 123 | ratios | `23670465` | **COMPLETED** 5:36:39 |
+| 456 | ratios | `23670466` | **COMPLETED** 5:44:21 |
 | — | smoke | `23670101` | COMPLETED 0:05:07 |
 
 ## Caveats, known in advance

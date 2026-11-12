@@ -1,0 +1,159 @@
+{
+  "experiment": "exp33_sparse_vs_structured",
+  "model": "google/vit-base-patch16-224",
+  "dataset": "evanarlian/imagenet_1k_resized_256",
+  "dataset_label": "ImageNet-1k (resized 256px, evanarlian/imagenet_1k_resized_256)",
+  "seed": 456,
+  "gate": false,
+  "n_train": 1281167,
+  "n_val": 50000,
+  "num_classes": 1000,
+  "batch_size": 64,
+  "calib_images": 128,
+  "recover_epochs": 2,
+  "pretrained": {
+    "accuracy": 0.78436,
+    "int4_accuracy": 0.77228
+  },
+  "reference_structured": {
+    "drophead_p33": {
+      "accuracy": 0.7769,
+      "source": "EXP27_DROPHEAD.md"
+    },
+    "drophead_p50": {
+      "accuracy": 0.7254,
+      "source": "EXP27_DROPHEAD.md"
+    },
+    "magnitude_recovery_p33_5ep": {
+      "accuracy": 0.78845,
+      "source": "EXP29"
+    },
+    "magnitude_recovery_p50_5ep": {
+      "accuracy": 0.77265,
+      "source": "EXP29"
+    },
+    "magnitude_recovery_p50_2ep": {
+      "accuracy": 0.7757,
+      "source": "EXP29"
+    },
+    "control_dense_5ep": {
+      "accuracy": 0.80556,
+      "source": "EXP31"
+    }
+  },
+  "notes": {
+    "unstructured": "SparseGPT and Wanda mask weights; they do not remove them. No dense-kernel speedup exists for these arms -- report accuracy at matched removed parameter count only.",
+    "matching": "Removing a fraction f of heads uniformly per layer removes exactly f of the q/k/v/o weight parameters, so scope=attn matches at sparsity f. scope=whole spreads the same absolute count over all encoder linear layers, giving a lower sparsity.",
+    "mask_preserved": "Recovery re-applies the prune-time mask via a gradient hook plus a final re-apply, and the zero fraction is re-measured afterwards. Without this an ordinary fine-tune fills the zeros back in.",
+    "seeds": "SparseGPT/Wanda are deterministic given a calibration set; the seed varies which 128 training images calibrate.",
+    "int4": "quantize_weights(model, 4): a simulated per-channel round-trip in fp32, not a 4-bit kernel."
+  },
+  "gpu": "AMD Instinct MI250X",
+  "torch_version": "2.5.1+rocm6.2",
+  "cells": {
+    "wanda_attn_2of4": {
+      "matched": {
+        "scope": "attn",
+        "head_ratio": 0.5,
+        "attn_weight_params": 28311552,
+        "target_removed_params": 14155776,
+        "target_layers": 48,
+        "target_layer_params": 28311552,
+        "matched_sparsity": 0.5,
+        "structure": "semi-structured",
+        "nm": "2:4",
+        "speedup_batch32": "unmeasurable on MI250X (2:4 needs NVIDIA Ampere+ sparse tensor cores)"
+      },
+      "prune_report": {
+        "model_params": 86567656,
+        "model_zeros": 14155776,
+        "model_zero_frac": 0.1635226902759155,
+        "target_params": 28311552,
+        "target_zeros": 14155776,
+        "target_zero_frac": 0.5,
+        "method": "wanda",
+        "sparsity": 0.5,
+        "calib_samples": 128,
+        "layers": 48,
+        "zeroed": 14155776,
+        "nm": "2:4"
+      },
+      "prune_seconds": 5.1,
+      "one_shot": {
+        "accuracy": 0.72788,
+        "int4_accuracy": 0.71
+      },
+      "recovered": {
+        "accuracy": 0.8098,
+        "int4_accuracy": 0.79774
+      },
+      "recovered_losses": [
+        0.6502903352516075,
+        0.31784638285782424
+      ],
+      "recover_seconds": 6674.1,
+      "sparsity_after_recovery": {
+        "model_params": 86567656,
+        "model_zeros": 14155776,
+        "model_zero_frac": 0.1635226902759155,
+        "target_params": 28311552,
+        "target_zeros": 14155776,
+        "target_zero_frac": 0.5
+      },
+      "sparsity_drift": 0.0,
+      "mask_preserved": true
+    },
+    "sparsegpt_attn_2of4": {
+      "matched": {
+        "scope": "attn",
+        "head_ratio": 0.5,
+        "attn_weight_params": 28311552,
+        "target_removed_params": 14155776,
+        "target_layers": 48,
+        "target_layer_params": 28311552,
+        "matched_sparsity": 0.5,
+        "structure": "semi-structured",
+        "nm": "2:4",
+        "speedup_batch32": "unmeasurable on MI250X (2:4 needs NVIDIA Ampere+ sparse tensor cores)"
+      },
+      "prune_report": {
+        "model_params": 86567656,
+        "model_zeros": 14155776,
+        "model_zero_frac": 0.1635226902759155,
+        "target_params": 28311552,
+        "target_zeros": 14155776,
+        "target_zero_frac": 0.5,
+        "method": "sparsegpt",
+        "sparsity": 0.5,
+        "calib_samples": 128,
+        "layers": 48,
+        "zeroed": 14155776,
+        "nm": "2:4"
+      },
+      "prune_seconds": 14.9,
+      "one_shot": {
+        "accuracy": 0.75184,
+        "int4_accuracy": 0.73898
+      },
+      "recovered": {
+        "accuracy": 0.81138,
+        "int4_accuracy": 0.79764
+      },
+      "recovered_losses": [
+        0.6462805407714746,
+        0.3159536473343067
+      ],
+      "recover_seconds": 6650.4,
+      "sparsity_after_recovery": {
+        "model_params": 86567656,
+        "model_zeros": 14155776,
+        "model_zero_frac": 0.1635226902759155,
+        "target_params": 28311552,
+        "target_zeros": 14155776,
+        "target_zero_frac": 0.5
+      },
+      "sparsity_drift": 0.0,
+      "mask_preserved": true
+    }
+  }
+}

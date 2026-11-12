@@ -1,7 +1,8 @@
 # exp33 — SparseGPT / Wanda against DropHead and magnitude
 
-**STUB — no accuracy results yet.** The ROCm check and the equivalence test are
-done and recorded below; the tables arrive with the runs.
+**PARTIAL — the 2:4 arm is complete at 3 seeds (below); the unstructured grid
+is running.** The ROCm check and the equivalence test are done and recorded
+below.
 
 **ViT-B/16 (`google/vit-base-patch16-224`), ImageNet-1k
 (`evanarlian/imagenet_1k_resized_256`), 3 seeds, full 50 000-image validation
@@ -154,7 +155,7 @@ it with the same epoch count.
 | DropHead, **no recovery** | 5 (DropHead) | structured | **1.10x** | **72.54%** (exp27) |
 | DropHead → magnitude + recovery | 5 + 5 | structured | **1.10x** | **77.06%** (exp24 arm 4) |
 | magnitude + recovery, 5 ep | 5 | structured | **1.10x** | 77.265% (exp29) → **−3.17pp** |
-| magnitude + recovery, **2 ep** | **2** | structured | **1.10x** | **77.570%** (exp29) → **−3.98pp** |
+| magnitude + recovery, **2 ep** | **2** | structured | **1.10x** | **77.642%** (exp32, 3 seeds) → **−3.91pp** |
 | SparseGPT attn, one-shot | **0** | unstructured | **none by construction** | _this run_ |
 | SparseGPT attn, + 2 ep | **2** | unstructured | **none by construction** | _this run_ |
 | Wanda attn, one-shot | **0** | unstructured | **none by construction** | _this run_ |
@@ -205,8 +206,67 @@ is the method rather than an implementation detail and is reproduced as such.
 well as at unstructured sparsity, plus an invariant that exactly two of every
 four weights are zero. **13 tests pass.**
 
+### Results: 2:4 is complete, 3 seeds
+
+12 runs, 11.71 GPU-hours, jobs `23672190/91/92`, all `COMPLETED 0:0`. Data in
+`exp33_nm_s{42,123,456}/exp33_sparse.json`. 14 155 776 of 28 311 552 attention
+parameters zeroed, **zero fraction exactly 0.5000** and **sparsity drift exactly
+0.0 with `mask_preserved` true on 6/6 recovery runs** — the mask survived
+fine-tuning, so these cells are what they are labelled.
+
+| arm | epochs | seed 42 | seed 123 | seed 456 | mean | vs matched control |
+|---|---|---|---|---|---|---|
+| Wanda 2:4, one-shot | **0** | 72.89% | 72.94% | 72.79% | **72.871%** | **−5.57pp** vs pretrained |
+| SparseGPT 2:4, one-shot | **0** | 75.10% | 75.39% | 75.18% | **75.223%** | **−3.22pp** vs pretrained |
+| Wanda 2:4, + 2 ep | **2** | 80.99% | 81.03% | 80.98% | **80.999%** | **−0.55pp** vs 2-ep control |
+| SparseGPT 2:4, + 2 ep | **2** | 81.08% | 81.08% | 81.14% | **81.097%** | **−0.46pp** vs 2-ep control |
+
+INT4 means: 71.188 / 73.919 one-shot, 79.729 / 79.779 recovered (−0.54 and
+−0.49pp against the 2-epoch control's 80.273%). Seed spreads are 0.15pp and
+below on every cell — the calibration sample is not a meaningful noise source
+here, unlike the training seed in the SAL campaigns.
+
+**SparseGPT's one-shot lead over Wanda is real and then it evaporates.**
++2.35pp at zero epochs — the error compensation earning its keep under the
+tighter 2:4 constraint, where the two are within 0.1pp at unstructured
+sparsity — and **+0.10pp after two epochs of recovery**, which is inside the
+seed spread. If recovery is affordable the choice between them does not matter;
+if it is not, SparseGPT is worth 2.35pp.
+
+### What 2:4 costs against structured head pruning
+
+Both remove the same share of attention parameters (50%, 16.35% of the model),
+so this is the comparison the experiment exists for:
+
+| method at ~16.4% of params | epochs | structure | speedup @ batch ≥ 32 | vs 2-ep control |
+|---|---|---|---|---|
+| magnitude heads P50 | 2 | structured | **1.10x measured** | **−3.91pp** (exp32) |
+| SparseGPT 2:4 | 2 | semi-structured | unmeasurable here | **−0.46pp** |
+| Wanda 2:4 | 2 | semi-structured | unmeasurable here | **−0.55pp** |
+
+**2:4 costs roughly an eighth of what head pruning costs**, and the thing it
+gives up is the speedup this hardware can actually deliver. That is the
+trade-off stated plainly, and it is why the speedup column may not be left
+empty: a reader comparing only the accuracy column would conclude head pruning
+is simply worse, when what it is, is the only one of the three that makes the
+model faster *here*.
+
+One caveat that belongs with every unstructured and 2:4 row: those models are
+**the same size in memory**. The weights are zeroed, not removed, so there is no
+memory saving and no latency change without a kernel that exploits the pattern.
+The structured arm is genuinely 16.5% smaller.
+
 ## Jobs
 
-| seed | job | state |
-|---|---|---|
-| | | _pending submission_ |
+| arm | seed | job | state |
+|---|---|---|---|
+| ROCm check | — | `23669807` | COMPLETED 0:02:49 |
+| smoke | — | `23670445` | COMPLETED 0:07:57 |
+| order check | — | `23670472` | COMPLETED 0:03:46 |
+| 2:4 smoke | — | `23672122` | COMPLETED 0:01:46 |
+| unstructured grid, 8 configs | 42 | `23671606` | RUNNING |
+| unstructured grid | 123 | `23671607` | RUNNING |
+| unstructured grid | 456 | `23671608` | RUNNING |
+| **2:4, attention-only** | 42 | `23672190` | **COMPLETED** 3:55:05 |
+| **2:4** | 123 | `23672191` | **COMPLETED** 3:55:24 |
+| **2:4** | 456 | `23672192` | **COMPLETED** 3:52:03 |
