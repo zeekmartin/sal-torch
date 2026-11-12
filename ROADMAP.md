@@ -524,6 +524,18 @@ repairs.
 
 - **An FFN-ratio router**, so step 2 covers the component that carries most of
   the compression rather than only the heads.
+- **Make DropHead's masking cheaper than a forward hook.** Measured on
+  BERT-base (exp34's smoke, MI250X, seq 128, batch 32): a plain fine-tune runs
+  at **453 samples/s** and the same fine-tune with DropHead's per-step
+  resampled masking runs at **284 samples/s** — the hooks cost **~37% of
+  training throughput**. DropHead is the default method, so that overhead is
+  paid on every recommended run. Two things to do, in order: **measure the
+  same overhead on a ViT**, where the attention block is a smaller share of
+  the step and the cost should differ; then **try applying the mask inside the
+  attention computation as a vectorised op** rather than through a pre-hook on
+  the output projection, and keep whichever is faster at identical masks. The
+  hook is what makes the mechanism architecture-agnostic, so a faster path has
+  to be shown equivalent before it replaces it, not instead of it.
 - **The training harness safeguard** — the control gate, promoted from
   experiment script to library. Specced below.
 - **A corrected self-supervised recipe** — **done, validated** (exp28b): a
