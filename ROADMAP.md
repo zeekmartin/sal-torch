@@ -513,7 +513,12 @@ repairs.
    the package, documented and supported, but it is no longer the recommendation
    anywhere. FFN neuron pruning carries the bulk of the size reduction.
 4. **Recover** — a short fine-tune after pruning, which is worth more than any
-   training-time masking when the deployment architecture is known.
+   training-time masking when the deployment architecture is known. **Two
+   epochs**, not five: exp29 measured the curve and it peaks at 2, with 5 below
+   2 on 3/3 seeds in FP and INT4, and 10 epochs below 1. Two epochs is 39% of
+   the cost of the old default and 0.31pp better. The pipeline should also
+   **probe after each recovery epoch and keep the best checkpoint**, since the
+   last one is measurably worse than the best.
 
 **Also in v0.7.0:**
 

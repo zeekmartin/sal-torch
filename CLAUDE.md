@@ -305,9 +305,13 @@ every shared cell. Docs: `PHASE3_IMAGENET1K.md`, `EXP24_SAL_RECOVERY.md`,
   target encoder.** A target computed from the live weights has no fixed point,
   so the encoder can drift toward a low-variance output, drag both sides of the
   MSE down together and **destroy the representation while the loss falls**. That
-  is exp28 in one sentence, and `scripts/run_jepa_sal.py:make_step` still has the
-  broken form — use `experiments/exp28b_jepa_corrected.py` as the reference for
-  any continued-pretraining run. Corollary: on this objective **loss progress is
+  is exp28 in one sentence. `scripts/run_jepa_sal.py:make_step` **is fixed as of
+  v0.7.0 batch 1**: it takes its target from `load_target_encoder()`, a frozen
+  pretrained copy, and the parameter is required so no call site can fall back
+  to the live-weight form. That script still runs `LR` 1e-5 with no schedule,
+  though, where the measured recipe is 5e-6 with 10% warmup and cosine decay —
+  so `experiments/exp28b_jepa_corrected.py` remains the reference for any
+  continued-pretraining run. Corollary: on this objective **loss progress is
   decoupled from representation quality**, so a loss curve is not a gate; probe
   the features.
 - **INT4 caveat, applies to every number above.** INT4 is
@@ -397,8 +401,8 @@ every shared cell. Docs: `PHASE3_IMAGENET1K.md`, `EXP24_SAL_RECOVERY.md`,
 
 ## Integration tests
 
-The CPU unit suite must stay all-green (**319 passed** as of v0.6.1, plus the
-8 integration tests skipped); integration tests are marked
+The CPU unit suite must stay all-green (**330 passed** as of v0.7.0 batch 1, plus
+the 8 integration tests skipped; it read 319 at v0.6.1); integration tests are marked
 `@pytest.mark.integration` and **skipped by default** (need network + model
 downloads):
 ```

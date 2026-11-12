@@ -178,7 +178,14 @@ def main(argv=None):
     p.add_argument("--n-val", type=int, default=50_000)
     p.add_argument("--ratios", type=float, nargs="+", default=list(RATIOS))
     p.add_argument("--prune-seeds", type=int, default=20)
-    p.add_argument("--recover-epochs", type=int, default=5)
+    # exp29 measured the curve: it peaks at 2 epochs and declines, with 5 below
+    # 2 on 3/3 seeds in FP and INT4 and 10 below 1. Two is the default because
+    # it is both better and 39% of the cost. **The published cells in this
+    # file's own results were measured at 5** -- pass --recover-epochs 5 to
+    # reproduce them, and do not compare a 2-epoch re-run against them.
+    p.add_argument("--recover-epochs", type=int, default=2,
+                   help="default 2 (exp29: the curve peaks there); the "
+                        "published exp23/exp24/exp26 cells used 5")
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--workers", type=int, default=7)

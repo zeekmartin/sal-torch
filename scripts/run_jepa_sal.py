@@ -33,10 +33,24 @@ heads.
 
 **The training objective is I-JEPA-shaped, not I-JEPA.** No predictor network,
 no EMA target encoder. It predicts the clean-image representation from a
-patch-masked image. Using the clean image on *both* sides — the obvious
-simplification — makes the loss identically zero whenever head masking is off,
-so an unmasked control would train on a constant while logging as though it
-were learning.
+patch-masked image, and the clean-image side comes from a **frozen copy of the
+pretrained weights** (``load_target_encoder``).
+
+That frozen target is not a detail. Until exp28b this script took the target
+from the same live weights it was training, which is an objective with no fixed
+point: the encoder can drift toward a low-variance output, drag both sides of
+the MSE down together and **destroy the representation while the loss falls**.
+On ViT-H/14 that cost 196.6 GPU-hours and collapsed every arm including the
+unmasked control. Two consequences for anyone reading a run of this script:
+**a falling loss is not evidence of anything** — probe the features — and the
+**control arm must be checked against its own starting point**, which is what
+``experiments/exp28b_jepa_corrected.py`` does per epoch.
+
+**This script is not the validated recipe.** exp28b also lowered the LR to
+5e-6 and added 10% warmup with cosine decay; this script still runs ``LR``
+1e-5 with no schedule. The frozen target removes the fault that destroyed
+exp28, but for a real continued-pretraining run use
+``experiments/exp28b_jepa_corrected.py``, which is the arm that was measured.
 
 **By default this table compares head *selection*, not SAL training.** One model
 is SAL-trained, then pruned two ways: ``random`` (SAL's own, validated default)
@@ -190,6 +204,32 @@ def load_model(device, grad_ckpt: bool):
     return model.to(device)
 
 
+def load_target_encoder(device):
+    """A frozen copy of the pretrained weights, used for the target pass.
+
+    exp28 computed the target from the **same live weights it was training**,
+    an objective with no fixed point: the encoder can drift toward a
+    low-variance output, drag both sides of the MSE down together and destroy
+    the representation while the loss falls. Two epochs of that collapsed every
+    arm including the unmasked control -- a three-seed linear probe of 46.07%
+    pretrained against 15.32% for the control -- and the losses fell the whole
+    way (``EXP28_JEPA_1B.md``).
+
+    exp28b changed only the target, to frozen pretrained weights that are never
+    updated, and the control arm survived on 3/3 seeds
+    (``EXP28B_JEPA_CORRECTED.md``). This is that fix: a second encoder in eval
+    mode with gradients off, which the optimizer never sees.
+
+    Gradient checkpointing is deliberately not enabled here. The target pass
+    runs under ``no_grad``, so there is no activation graph to trade memory
+    for. It costs one extra encoder's worth of weights.
+    """
+    target = load_model(device, grad_ckpt=False)
+    target.eval()
+    target.requires_grad_(False)
+    return target
+
+
 # --------------------------------------------------------------------- data
 class _NormalizedSplit(torch.utils.data.Dataset):
     """A ``(uint8 images, labels)`` split served as normalized float pixels.
@@ -325,13 +365,15 @@ def mask_patches(pixels, patch_size: int, ratio: float):
     return (pixels.view(b, c, gh, patch_size, gw, patch_size) * mask).view(b, c, h, w)
 
 
-def make_step(patch_size: int, use_amp: bool, progress: Progress | None = None,
-              restore_masks=None):
+def make_step(target_model, patch_size: int, use_amp: bool,
+              progress: Progress | None = None, restore_masks=None):
     """Build the SALTrainer callback.
 
-    The target pass runs inside ``mask_module.unmasked()`` — a *suspend*, not
-    ``deactivate()``, which refills the masks with ones and would throw away the
-    pruned set the schedule has accumulated, silently undoing SAL.
+    ``target_model`` is the frozen encoder from ``load_target_encoder`` and is
+    required: it has no default, so no call site can quietly fall back to
+    exp28's live-weight target. It is never in the optimizer's parameter list
+    and never updated, so the online encoder cannot move the objective by
+    training — the property exp28 lacked.
 
     ``restore_masks`` re-applies a checkpointed pruned set on the first step.
     SALTrainer installs the masker inside ``train()``, so the first callback is
@@ -351,8 +393,12 @@ def make_step(patch_size: int, use_amp: bool, progress: Progress | None = None,
         autocast = (torch.autocast("cuda", dtype=torch.bfloat16)
                     if use_amp else contextlib.nullcontext())
         with autocast:
-            with torch.no_grad(), mask_module.unmasked():
-                target = model(pixel_values=pixels).last_hidden_state
+            # The target encoder has no masker installed and is not the model
+            # being trained, so it sees the clean image through unmasked,
+            # unchanging weights by construction — not by a context manager
+            # that could be got wrong, and not through weights that move.
+            with torch.no_grad():
+                target = target_model(pixel_values=pixels).last_hidden_state
             predicted = model(pixel_values=visible).last_hidden_state
             loss = torch.nn.functional.mse_loss(predicted, target.detach())
         loss.backward()
@@ -368,7 +414,8 @@ def make_step(patch_size: int, use_amp: bool, progress: Progress | None = None,
     return step
 
 
-def train_control(model, loader, epochs, patch_size, device, use_amp):
+def train_control(model, loader, epochs, patch_size, device, use_amp,
+                  target_model):
     """No-SAL control: identical objective, optimizer and step count.
 
     Deliberately not SALTrainer with a near-zero prune_fraction —
@@ -386,7 +433,7 @@ def train_control(model, loader, epochs, patch_size, device, use_amp):
     losses = []
     for epoch in range(epochs):
         prog = Progress(len(loader), f"control epoch {epoch + 1}/{epochs}")
-        step = make_step(patch_size, use_amp, prog)
+        step = make_step(target_model, patch_size, use_amp, prog)
         total = 0.0
         for batch in loader:
             batch = [b.to(device) if torch.is_tensor(b) else b for b in batch]
@@ -398,7 +445,7 @@ def train_control(model, loader, epochs, patch_size, device, use_amp):
 
 
 def train_drophead(model, loader, epochs, patch_size, device, use_amp,
-                   mask_ratio: float, seed: int):
+                   mask_ratio: float, seed: int, target_model=None):
     """DropHead control: the same hook and ratio, resampled every step.
 
     ``ResampleMasker`` is imported from ``run_sal_qat_prototype`` rather than
@@ -425,7 +472,7 @@ def train_drophead(model, loader, epochs, patch_size, device, use_amp,
     try:
         for epoch in range(epochs):
             prog = Progress(len(loader), f"drophead epoch {epoch + 1}/{epochs}")
-            step = make_step(patch_size, use_amp, prog)
+            step = make_step(target_model, patch_size, use_amp, prog)
             running = 0.0
             for batch in loader:
                 batch = [b.to(device) if torch.is_tensor(b) else b for b in batch]
@@ -1159,6 +1206,10 @@ def main(argv=None):
         + (f"  (memmap cache {args.data_cache})" if args.data_cache else ""))
     log("  (cached under ~/.cache/huggingface — re-runs do not re-download)")
     model = load_model(device, grad_ckpt)
+    # One frozen target for every arm, so all of them optimise the *same*
+    # objective and the comparison between them means something. It is in eval
+    # mode with gradients off and is never handed to an optimizer.
+    target_model = load_target_encoder(device)
     patch_size = model.config.patch_size
     from sal import count_params
     log(f"  loaded:  {count_params(model) / 1e6:.0f}M params, "
@@ -1231,7 +1282,8 @@ def main(argv=None):
         # restart the prune schedule each time. The per-epoch checkpoint is
         # therefore written from inside the callback, at each epoch boundary.
         prog = Progress(len(loaders["train"]) * remaining, "training")
-        base_step = make_step(patch_size, use_amp, prog, restore_masks)
+        base_step = make_step(target_model, patch_size, use_amp, prog,
+                              restore_masks)
         batches_per_epoch = len(loaders["train"])
         seen = {"n": 0, "sum": 0.0}
 
@@ -1284,7 +1336,7 @@ def main(argv=None):
         rule(f"Control arm ({epochs} epochs, no head masking)")
         control_model = load_model(device, grad_ckpt)
         control_hist = train_control(control_model, loaders["train"], epochs,
-                                     patch_size, device, use_amp)
+                                     patch_size, device, use_amp, target_model)
 
     # optional DropHead arm --------------------------------------------------
     drophead_model, drophead_hist = None, None
@@ -1294,7 +1346,7 @@ def main(argv=None):
         drophead_model = load_model(device, grad_ckpt)
         drophead_hist = train_drophead(drophead_model, loaders["train"], epochs,
                                        patch_size, device, use_amp,
-                                       args.mask_ratio, args.seed)
+                                       args.mask_ratio, args.seed, target_model)
 
     # 7 ---------------------------------------------------------- benchmark
     rule("Compression benchmark")

@@ -1,5 +1,20 @@
 # exp28 — I-JEPA ViT-H/14 on ImageNet-1k: a recipe failure, not a SAL result
 
+> # ⚠ INVALID — DO NOT QUOTE AS A METHOD RESULT
+>
+> **Why:** the training objective computed its target from the **same live
+> weights it was training**, which has no fixed point. Every arm — *including
+> the unperturbed control* — lost most of its representation quality on all
+> three seeds, while the losses fell the whole way. With a broken control the
+> run measures nothing about SAL or DropHead.
+>
+> **Superseded by [exp28b](EXP28B_JEPA_CORRECTED.md)**, which changed only the
+> target (a frozen target encoder, LR 5e-6, 10% warmup, cosine decay) and whose
+> control arm holds on 3/3 seeds. Read exp28b for the method comparison.
+>
+> This document is kept for the diagnosis, the GPU-hour accounting and the two
+> numbers it corrects — not for its accuracy figures.
+
 `experiments/exp28_jepa_1b.py`, `.venv-tf47` (transformers 4.47.1), torch
 2.5.1+rocm6.2, one MI250X GCD per job.
 
