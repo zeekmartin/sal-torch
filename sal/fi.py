@@ -159,12 +159,17 @@ def classify_layers(model: nn.Module, adjacency: np.ndarray, num_heads_per_layer
     BUFFER   : in between
 
     **``critical_thr`` was 0.05 and is now 0.25.** At 5% the classification
-    saturates: on ViT-B/16 / ImageNet-1k it called 11 / 10 / 11 of 12 layers
-    CRITICAL on three probes, which is not a classification. 5% of an FI of
-    0.0709 is 3.6 edges out of 1030 — barely above the two-edge resolution of
+    saturates: on ViT-B/16 / ImageNet-1k it called nearly every layer of twelve
+    CRITICAL on three probes, which is not a classification. 5% of an FI around
+    0.07 is a few edges out of ~1030 — barely above the two-edge resolution of
     the graph itself, so almost every layer clears it. Sweeping the threshold
-    on stored deltas, every value in (0.205, 0.295] put all three probes in a
-    3-8 CRITICAL range, and 0.25 gave 7 / 6 / 5.
+    on stored deltas, a band around 0.25 put all three probes in a usable
+    range.
+
+    **Source**: an internal threshold-sensitivity run, **not published in this
+    repository** — so the per-probe counts are not quoted here, under the rule
+    that a figure in a public file must be traceable to a published result.
+    Treat the default as a calibration for one architecture, not as evidence.
 
     That measurement is **one architecture**: 12 layers x 12 heads at FI 0.05-0.08.
     A model with a very different graph may well want a different number, and
@@ -198,11 +203,13 @@ def classify_layers_by_rank(fi_deltas: dict[int, float], k: int = 3) -> list[int
     depend on the model, the probe and the graph's edge density, so a number
     that classifies one model sensibly saturates on another (see
     ``critical_thr`` in :func:`classify_layers`). The *ordering* is the part
-    that held across probes in the only place it has been measured — exp30b,
-    three probes of the same ViT-B/16, where one layer ranked most sensitive
-    3/3 and another least 3/3 while no fixed threshold put all three probes in
-    a usable range. ``k`` is a budget the caller already has ("I can afford to
-    protect three layers"), not a property of the model that has to be guessed.
+    that held across probes in the only place it has been measured — three
+    probes of the same ViT-B/16, where one layer ranked most sensitive 3/3 and
+    another least 3/3 while no fixed threshold put all three probes in a usable
+    range. That run is **internal and not published in this repository**, so
+    read it as the reason for the API rather than as a citable result. ``k`` is
+    a budget the caller already has ("I can afford to protect three layers"),
+    not a property of the model that has to be guessed.
 
     ``k`` is clamped to the number of layers; ``k <= 0`` returns ``[]``.
     """

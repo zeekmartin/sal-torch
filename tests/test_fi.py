@@ -77,7 +77,9 @@ class TestClassify:
             assert c in (LayerClass.IMMUNE, LayerClass.BUFFER, LayerClass.CRITICAL)
 
     def test_default_critical_thr_is_the_measured_one(self):
-        """exp30b: 0.05 saturated, 0.25 did not. The default carries that."""
+        """An internal sweep found 0.05 saturated and 0.25 did not; the
+        default carries that. Unpublished, so no figures are asserted here --
+        only the default itself."""
         import inspect
         sig = inspect.signature(classify_layers)
         assert sig.parameters["critical_thr"].default == 0.25
@@ -148,7 +150,8 @@ class TestClassifyByRank:
     def test_rank_is_threshold_free(self):
         """The reason this API exists: it survives a scale change intact.
 
-        exp30b measured FI deltas spanning 0.004-0.79 on one model and found no
+        An internal sweep measured FI deltas spanning three orders of
+        magnitude on one model and found no
         single threshold that classified three probes of it sensibly, while the
         ordering was stable. Scaling every delta must not move the ranking.
         """
