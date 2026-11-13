@@ -32,9 +32,23 @@ result:
 Second result, visible one-shot and larger than anything after recovery:
 **removing 50% of the attention weights without a structure constraint costs
 −1.23pp at zero epochs; removing the same parameters as whole heads costs
-−60.11pp** (exp25: 20.33% against its own matched 5-epoch control's 80.44%,
-one-shot in both cases). The price is paid for the *structure*, not for the
-parameters.
+−68.88pp.** Both figures are one-shot from the *same* pretrained checkpoint
+(78.44%) with zero epochs on either side: unstructured reads **77.210%**, and
+magnitude head pruning at P50 reads **9.56%** (`exp32_ratios_s{42,123,456}`,
+`ratios/0.50/accuracy_before_recovery`, 3 seeds, identical to 4 decimals
+because the selection is deterministic). The price is paid for the *structure*,
+not for the parameters.
+
+A note on provenance, because the first draft of this page got it wrong. The
+obvious figure to reach for is exp25's **20.33%** at aligned-P50, and it is the
+wrong one twice over: it is SAL's head set rather than the magnitude set, and
+it is sliced from the **five-epoch** baseline (80.44%) where this experiment's
+one-shot rows are sliced from the pretrained checkpoint. Using it mixed a
+selection rule and five epochs into a zero-epoch comparison — the error
+`CONTROL_CONVENTION.md` exists to prevent, caught by the pre-report audit.
+Incidentally the correctly matched number is **worse** for structured pruning,
+not better: magnitude at P50 one-shot (9.56%) falls further than a random or
+SAL-chosen set does from a fine-tuned checkpoint (20.38 / 20.33%).
 
 Third, **SparseGPT's error compensation earns its keep only as the constraint
 tightens**: it loses to Wanda one-shot at unstructured sparsity (−0.39pp at
