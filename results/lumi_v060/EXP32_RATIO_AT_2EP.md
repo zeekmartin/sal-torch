@@ -6,7 +6,7 @@
 
 **ViT-B/16 (`google/vit-base-patch16-224`), ImageNet-1k
 (`evanarlian/imagenet_1k_resized_256`), 3 seeds (42, 123, 456), full
-50 000-image validation split, autocast bfloat16, batch 64.**
+50 000-image validation split, bfloat16 autocast for training and float16 autocast for scoring, batch 64.**
 
 ## Headline
 
@@ -149,6 +149,7 @@ name the epoch count on both sides from now on.
 
 ## Caveats, known in advance
 
+- Precision, stated exactly: **training and recovery run under `bfloat16` autocast; scoring runs under `float16` autocast** (`run_sal_qat_prototype.py:accuracy`). The two differ, and earlier revisions of this page said "autocast bfloat16" for both. fp16 carries more mantissa than bf16 and its range is ample for a ViT on normalised inputs, so this is a labelling fix and not a re-measurement -- but it also means the INT4 column is **INT4-rounded weights scored under fp16 autocast**, not under fp32.
 - INT4 is `quantize_weights(model, 4)`, a simulated per-channel round-trip in
   fp32, not a 4-bit kernel. It says nothing about speed or memory.
 - Head sets are deterministic given the checkpoint and **nested** (25% ⊂ 33% ⊂

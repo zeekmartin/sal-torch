@@ -191,7 +191,7 @@ different script and a different harness.
 
 - Inference only, one deterministic architecture per row. The three-seed columns
   are the only variability; there is no within-seed spread to quote.
-- Accuracy is **autocast bfloat16**, the path 1a, exp24, exp25 and exp26 score
+- Accuracy is scored under **float16 autocast** (training and recovery run under bfloat16); it is the path 1a, exp24, exp25 and exp26 score
   under — not true FP32. Comparable with those, not with an FP32 reference.
 - INT4 is `quantize_weights(model, 4)`, the simulated per-channel round-trip,
   not bitsandbytes NF4.

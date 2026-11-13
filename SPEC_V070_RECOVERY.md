@@ -1,7 +1,19 @@
 # v0.7.0 item 1 — a recovery stage for `CompressionPipeline`
 
-**Status: specification. Nothing here is implemented.** Raised by the pre-report
-audit (pass 2) and approved as v0.7.0 item 1.
+**Status: specification. Nothing here is implemented**, by instruction:
+implementation follows audit pass 3. Raised by the pre-report audit (pass 2)
+and approved as v0.7.0 item 1.
+
+**Decisions taken (these are settled, not open):**
+
+1. `recover()` ships in the **open-source `sal` package**, not pro. The recipe
+   is not a pro feature and the gap is in both pipelines.
+2. The dense matched control is **optional**. Without one, the report gives the
+   **final accuracy** and states that the pruning cost is not isolated. It
+   **never** reports a cost against the pretrained checkpoint, under any name.
+3. `accuracy_floor` is evaluated **after** recovery, and its error message is
+   rewritten.
+4. `preserve_sparsity=True` is the default.
 
 ## The gap
 
@@ -60,6 +72,9 @@ def recover(self, train_dataset, epochs: int = 2, *,
 Placed between `compress()` and `validate()`. Raises `PipelineError` if called
 before `compress()`, matching the existing stage discipline.
 
+- **`preserve_sparsity=True` by default.** The wrong value is silent and the
+  right value costs nothing on a structurally sliced model, where there is no
+  mask and the flag is a no-op.
 - **`epochs=2` is the default** and the number is measured, not chosen.
   `EXP29_RECOVERY_EPOCHS.md` found the curve peaks at 2 and declines, with 5
   below 2 on 3/3 seeds in FP and INT4, and 10 below 1. exp32 confirmed it at
@@ -126,19 +141,37 @@ the field is absent and the report says which control is needed. This is the
 a 2-epoch control was wrong by 0.97–1.12pp on three headline cells, and the
 mistake survived in committed data (see `results/lumi_v060/CORRECTIONS.json`).
 
-When no control is supplied, the report prints the pretrained delta **labelled
-as the sum of two effects** and says a control is required for a pruning cost.
-It must never print a bare "+1.37pp" that a reader will take for a pruning
-result — that is how a model pruning damaged gets reported as improved, which
-`CONTROL_CONVENTION.md` exists to prevent.
+When no control is supplied the report gives the **final accuracy** and one
+sentence: *the pruning cost is not isolated, because no dense control trained
+for the same number of epochs was supplied.* It prints **no delta against the
+pretrained checkpoint at all** — not even labelled as a sum. That is stricter
+than the experiment scripts, which report `vs_pretrained_pp` beside a
+`fine_tuning_gain_pp` for readers who know the convention, and the difference is
+deliberate: a product user reads one number and ships. A bare "+1.37pp" is how
+a model that pruning damaged gets reported as improved, which is the whole
+reason `CONTROL_CONVENTION.md` exists.
+
+`fine_tuning_gain_pp` is likewise absent without a control, since it is defined
+as control − pretrained and there is no control to subtract from.
 
 ### 4. `validate()` and the floor
 
-- `validate()` scores the recovered model when `recover()` has run, and says in
-  the stage name which it scored.
-- If `compress()` is followed directly by `validate()`, the floor error gains a
-  second suggestion: "or call `recover()` — two epochs is worth up to 68pp at
-  50% head pruning". The current message offers only a smaller `prune_ratio`.
+- **The floor is evaluated after recovery when `recover()` has run.** This is
+  the decision that matters most: today the floor fires on the unrecovered
+  model, so a user at P50 is refused at 9.56% and told to reduce the ratio,
+  when two epochs would have put them at 77.6%. `validate()` names in the stage
+  record which model it scored.
+- The error message is rewritten. Current text offers only a smaller
+  `prune_ratio`. New text, when `recover()` has **not** run:
+
+  > Compressed model scores 0.0956, below the accuracy_floor of 0.7000.
+  > Nothing exported. This model has not been repaired: call `recover()` before
+  > `validate()` — two epochs is worth up to 68pp at 50% head pruning on the
+  > measured configuration. If you intended the one-shot number, lower
+  > `accuracy_floor` or pass `strict_recovery=False`.
+
+  and when it **has** run, the old suggestion stands (a smaller `prune_ratio`),
+  because at that point the damage really is the ratio.
 - A `strict_recovery=True` pipeline option makes `validate()` refuse to score an
   unrecovered compressed model at all. Not the default: a user who genuinely
   wants the one-shot number should be able to ask for it.
@@ -165,16 +198,11 @@ CPU-only, tiny fixture, no network — cardinal rule 4.
 
 ## Open questions for review
 
-1. **Does `recover()` belong in the open package or in pro?** The recovery
-   *recipe* is not a pro feature and the gap is in both pipelines, so the
-   argument is for `sal`. But it makes `sal` depend on a training loop over a
-   user dataset, which only `sal_train` currently does. Recommendation: `sal`,
-   reusing `sal_train`'s loop machinery.
-2. **Should a control be mandatory?** Making `RecoveryControl` required would
-   force every user into the correct comparison and would also force them to
-   pay for a dense training run they may not want. Recommendation: optional,
-   with the no-control report wording above, and `strict_recovery=True` for
-   users who want it enforced.
+1. ~~Open package or pro?~~ **Settled: `sal`.** It reuses `sal_train`'s loop
+   machinery, which already depends on a user dataset, so no new dependency
+   class is introduced.
+2. ~~Mandatory control?~~ **Settled: optional**, with the no-control wording
+   below, and `strict_recovery=True` available for users who want it enforced.
 3. **MLP recovery.** `sal_pro.mlp` slices neurons; the same stage covers it with
    no change, but exp26's published MLP figures are at **5** epochs against a
    5-epoch control. The product defaulting to 2 means the product's numbers will

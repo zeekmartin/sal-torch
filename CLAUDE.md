@@ -323,7 +323,11 @@ every shared cell. Docs: `PHASE3_IMAGENET1K.md`, `EXP24_SAL_RECOVERY.md`,
   the features.
 - **INT4 caveat, applies to every number above.** INT4 is
   `quantize_weights(model, 4)`, a **simulated per-channel quantize/dequantize
-  round-trip in fp32**, not a 4-bit kernel. bitsandbytes NF4 is CUDA-only and
+  round-trip**, not a 4-bit kernel. The rounding is done in fp32; the rounded
+  model is then **scored under float16 autocast**, like every other accuracy in
+  the campaign (`run_sal_qat_prototype.py:accuracy`). Training and recovery run
+  under bfloat16 autocast -- the two are different and the write-ups said
+  "autocast bfloat16" for both until the pre-report audit. bitsandbytes NF4 is CUDA-only and
   absent on the ROCm image, so native INT4 was never measured on LUMI. The
   column is the accuracy cost of 4-bit weight rounding and says **nothing** about
   speed or memory.

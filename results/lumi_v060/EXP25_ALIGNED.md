@@ -131,7 +131,7 @@ there the quota equals SAL's set and `aligned_is_subset` is `false`.
 
 - Inference only, one deterministic architecture per row, so there is no spread
   within a seed to quote. The three-seed columns are the only variability.
-- The accuracy column is **autocast bfloat16**, the path 1a and exp24 score
+- The accuracy column is scored under **float16 autocast** (training and recovery run under bfloat16); it is the path 1a and exp24 score
   under — not true FP32. It is comparable with those experiments, not with an
   FP32 reference.
 - INT4 is the simulated per-channel round-trip, `quantize_weights(model, 4)`,

@@ -1,7 +1,7 @@
 # exp29 — how many epochs of recovery are actually needed?
 
 **ViT-B/16 (`google/vit-base-patch16-224`), ImageNet-1k (`evanarlian/imagenet_1k_resized_256`),
-3 seeds (42, 123, 456), full 50 000-image validation split, autocast bfloat16, batch 64.**
+3 seeds (42, 123, 456), full 50 000-image validation split, bfloat16 autocast for training and float16 autocast for scoring, batch 64.**
 **81.7 GPU-hours**, 7 jobs, all `COMPLETED 0:0`. Data in `results/lumi_v060/exp29_curve_s{42,123,456}/`,
 `exp29_ep10_s42/`, `exp29_ratios_s{42,123,456}/`, gate in `exp29_gate/`.
 Script: `experiments/exp29_recovery_epochs.py`.

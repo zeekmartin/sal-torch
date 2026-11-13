@@ -24,7 +24,7 @@ but it is never the headline and never labelled a pruning cost.
 
 `google/vit-base-patch16-224` on `evanarlian/imagenet_1k_resized_256`, full
 50 000-image validation split, batch 64, lr 5e-5 backbone / 1e-3 head, wd 0.05,
-linear warmup 5% + cosine, autocast bfloat16. **Nothing pruned, nothing
+linear warmup 5% + cosine, bfloat16 autocast for training (scoring is fp16 autocast; see the precision note in `EXP32_RATIO_AT_2EP.md`). **Nothing pruned, nothing
 masked.**
 
 | dense control | top-1 | INT4 | seeds | fine-tuning gain |

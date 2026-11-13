@@ -247,7 +247,7 @@ supports nor contradicts them.
 - **The probe's absolute level moves with the data shuffle** (41.04–48.60% on the
   same untrained checkpoint across the three eval jobs). Compare within a seed,
   never across.
-- **INT4 is the simulated per-channel quantize/dequantize round-trip in fp32**,
+- **INT4 is the simulated per-channel quantize/dequantize round-trip**, the rounding done in fp32 and the resulting model then scored under float16 autocast like every other row,
   not a 4-bit kernel. bitsandbytes NF4 is CUDA-only and absent on this ROCm
   image, so native INT4 is unavailable on this hardware. The column measures the
   accuracy cost of 4-bit weight rounding and nothing about speed or memory.

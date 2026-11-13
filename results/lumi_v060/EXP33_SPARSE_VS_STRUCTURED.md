@@ -7,7 +7,7 @@
 
 **ViT-B/16 (`google/vit-base-patch16-224`), ImageNet-1k
 (`evanarlian/imagenet_1k_resized_256`), 3 seeds, full 50 000-image validation
-split, autocast bfloat16.** Script `experiments/exp33_sparse_vs_structured.py`,
+split, bfloat16 autocast for training and float16 autocast for scoring.** Script `experiments/exp33_sparse_vs_structured.py`,
 pruning cores in `experiments/exp33_sparse_core.py`.
 
 ## Headline

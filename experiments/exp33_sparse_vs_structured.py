@@ -94,13 +94,35 @@ RECOVER_EPOCHS = 2
 # Structured references, measured on the identical model, dataset and eval
 # path. exp27 (DropHead) and exp29 (magnitude + recovery, re-anchored at 2
 # epochs by exp32). Printed beside this run's numbers; never reused as data.
+# EVERY key states its epoch count, and every entry carries ``epochs``
+# explicitly. The audit found the two DropHead keys silent about theirs, which
+# left a reader unable to tell which rows were comparable; they are 5 epochs of
+# masked training with NO post-pruning recovery, which is a third condition
+# again. ``seeds`` is here for the same reason: control_dense_5ep is one seed
+# where the published tables use exp25's three-seed 80.44%.
 REFERENCE = {
-    "drophead_p33": {"accuracy": 0.7769, "source": "EXP27_DROPHEAD.md"},
-    "drophead_p50": {"accuracy": 0.7254, "source": "EXP27_DROPHEAD.md"},
-    "magnitude_recovery_p33_5ep": {"accuracy": 0.78845, "source": "EXP29"},
-    "magnitude_recovery_p50_5ep": {"accuracy": 0.77265, "source": "EXP29"},
-    "magnitude_recovery_p50_2ep": {"accuracy": 0.77570, "source": "EXP29"},
-    "control_dense_5ep": {"accuracy": 0.80556, "source": "EXP31"},
+    "drophead_trained5ep_norecovery_p33": {
+        "accuracy": 0.7769, "epochs": 5, "recovery_epochs": 0, "seeds": 3,
+        "source": "EXP27_DROPHEAD.md"},
+    "drophead_trained5ep_norecovery_p50": {
+        "accuracy": 0.7254, "epochs": 5, "recovery_epochs": 0, "seeds": 3,
+        "source": "EXP27_DROPHEAD.md"},
+    "magnitude_recovery_p33_5ep": {
+        "accuracy": 0.78845, "epochs": 5, "recovery_epochs": 5, "seeds": 3,
+        "source": "EXP29"},
+    "magnitude_recovery_p50_5ep": {
+        "accuracy": 0.77265, "epochs": 5, "recovery_epochs": 5, "seeds": 3,
+        "source": "EXP29"},
+    "magnitude_recovery_p50_2ep": {
+        "accuracy": 0.77570, "epochs": 2, "recovery_epochs": 2, "seeds": 3,
+        "source": "EXP29"},
+    "control_dense_5ep": {
+        "accuracy": 0.80556, "epochs": 5, "recovery_epochs": 5, "seeds": 1,
+        "source": "EXP31 (one seed; prefer exp25 arm 1a's three-seed 80.44%)"},
+    "control_dense_2ep": {
+        "accuracy": 0.81554, "epochs": 2, "recovery_epochs": 2, "seeds": 3,
+        "source": "EXP32 (exp32_ctrl_s{42,123,456}) -- the control this "
+                  "experiment's own recovered arms are scored against"},
 }
 
 
