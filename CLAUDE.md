@@ -4,10 +4,35 @@ Context for future sessions working on this package.
 
 ## What this is
 
-`sal-torch` is a **commercial** PyTorch package (BSL 1.1 license) that makes any
-transformer **compression-resilient** through training-time head masking. It is
-a **product**, not a research repo: clean API, clear errors, no research
+`sal-torch` is a **commercial** PyTorch package (BSL 1.1 license). It is a
+**product**, not a research repo: clean API, clear errors, no research
 artifacts.
+
+**Positioning, decided 2026-11-13 after the pre-report audit.** It is a
+**measured compression tool** — diagnose → prune → recover → verify — **not a
+training-time resilience method**. SAL and DropHead remain supported methods,
+**scoped to "no post-pruning fine-tune is possible"**. The reason is measured:
+at a fixed head set, SAL's weights are worth **+0.05pp** and DropHead's
+**+0.07pp** as a starting point for a recovery fine-tune, while the recovery
+fine-tune itself is worth up to **68pp**. When you can fine-tune after pruning,
+the training-time method is close to irrelevant.
+
+### Three rules for every public document
+
+These bind `README.md`, `ROADMAP.md`, this file, and every user-facing string
+in `sal/*.py` — a docstring or an error message is a published claim.
+
+1. **Describe only what the released code does.** No unimplemented pipeline
+   step presented as available. Two live violations, both now flagged in the
+   docs and both v0.7.0 items: `CompressionPipeline` has **no recovery stage**,
+   and **DropHead is not callable from the package** (`HeadMasker` accumulates
+   and holds, which is SAL; the resampled variant lives only in
+   `scripts/run_sal_qat_prototype.py`).
+2. **Every figure traceable to a JSON, with the epoch-matched control, the
+   hardware, the batch size and the seed count stated.** No "free" or "beats"
+   inside seed noise.
+3. **Limitations sit next to the results they qualify**, not in a separate
+   caveats section further down.
 
 Three independent, composable components:
 
@@ -18,19 +43,26 @@ Three independent, composable components:
   (exp27, exp28b). Shipped and supported; not the recommended default anywhere.
 - **DropHead** — the same quota, mask resampled every step. *Perturbs.*
   **General**: its resilience holds on any head set of that size, including
-  SAL's own (exp27, exp28b). Started life as SAL's control arm and outperforms it
-  on the product's actual promise. **This is the default head method.**
+  SAL's own (exp27, exp28b). Started life as SAL's control arm and outperforms
+  it on the product's actual promise. **This is the default *head-training*
+  method — and head training is itself the fallback**, used when no
+  post-pruning fine-tune is possible. **It is not implemented in `sal/`**: the
+  resampled mask exists only in `scripts/run_sal_qat_prototype.py`
+  (`--mask-mode drophead`). `mask_mode="drophead"` on `HeadMasker` is v0.7.0
+  item 2.
 - **FI (Fragility Index)** — a post-hoc structural fragility diagnostic.
   *Measures.* Diagnosis and certification only — **not** a router and not a head
   selector (exp17, PHASE2E).
 
-They are **separate**. A user can use any one without the others. Which head
-method to use is decided by the **probe**, not by FI: see the routing table in
-`README.md` (>30pp drop → train for it, 10-30pp → either, <10pp → skip head
-training). The probe decides **whether** to train for compression; **DropHead is
-what you train with** in every case (exp27, exp28b). `README.md` still prints
-"SAL" in the >30pp row and is out of date on this point; it is off-limits under
-cardinal rule 6 and needs an explicit task to fix.
+They are **separate**. A user can use any one without the others.
+
+**What decides the method is not the route — it is whether a post-pruning
+fine-tune is available.** If it is: prune by magnitude, recover 2 epochs, and
+skip head training entirely (exp24, exp29, exp32, exp34). If it is not: the
+probe decides whether head training pays for itself at all (>30pp drop → yes,
+10-30pp → less, <10pp → the router says no), and **DropHead is what you train
+with** (exp27, exp28b). The `<10pp → skip` row is the one exp34 contradicts —
+see wave 1 below.
 
 ## Cardinal rules (do not violate)
 
@@ -44,9 +76,11 @@ cardinal rule 6 and needs an explicit task to fix.
    full stop.
 4. **All unit tests must pass on CPU** with the tiny model fixture
    (4 layers × 8 heads × 64 hidden). No GPU required for the unit suite.
-5. The **scaffold API is the target**; the reference research code
-   (`H:\Structural Awareness Loss\`) is the **source of truth for the
-   mechanism**. Keep the clean API, use the validated implementation details.
+5. The **scaffold API is the target**; the **private research reference** is
+   the **source of truth for the mechanism**. Keep the clean API, use the
+   validated implementation details. That reference is not shipped and **its
+   location is not recorded in this file**, which is on the public remote — see
+   cardinal rule 6 and the local notes outside any repository.
 6. Treat `pyproject.toml`, `LICENSE`, `README.md` as off-limits unless the task
    explicitly says otherwise. **The `sal-torch` remote is PUBLIC**
    (`github.com/zeekmartin/sal-torch`), so a push needs a **pre-push scan**
@@ -340,6 +374,72 @@ every shared cell. Docs: `PHASE3_IMAGENET1K.md`, `EXP24_SAL_RECOVERY.md`,
   checkpoint reads −9.20, −1.44 and −0.32pp of INT4 cost on the three seeds,
   which is probe noise, not a quantization effect. There is no measured
   "continued pretraining reduces the INT4 cost from −9.2pp" claim.
+### Wave 1 (exp29-exp34) — the matched-control campaign, 104 GPU-h
+
+**`results/lumi_v060/CONTROL_CONVENTION.md` governs every cost on this page.**
+Fine-tuning gain = dense control − pretrained. **Pruning cost = arm − dense
+control trained for the SAME number of epochs.** The pretrained checkpoint is
+**not** a control, and a delta against it is the *sum* of the two effects, never
+a pruning cost. Where an arm is single-seed, score it within its own seed.
+
+The control ladder (ViT-B/16, ImageNet-1k, nothing pruned):
+
+| epochs | accuracy | INT4 | seeds |
+|---|---|---|---|
+| 0 (pretrained) | 78.44% | 77.228% | — |
+| **2** | **81.554%** | **80.273%** | 3 (81.676 / 81.524 / 81.462) |
+| 5 | 80.556% | 78.956% | 1 (exp31) |
+| 5 | 80.44% | 79.01% | 3 (exp25 arm 1a) |
+
+Use `experiments/matched_control.py` rather than copying these numbers: it loads
+the control from exp32's JSONs, verifies it against the published mean before
+deriving anything, and **emits `pruning_cost_pp` only when the epoch counts
+match**. `tests/test_matched_control.py` pins that behaviour.
+
+- **exp29 — two epochs of recovery, not five.** The curve peaks at 2 and
+  declines: 5 is below 2 on 3/3 seeds in FP and INT4, and 10 is below 1. Two
+  epochs is 39% of the cost. **The peak is a property of this recipe on this
+  dataset, not of recovery** — the dense control with nothing pruned also peaks
+  at 2, and by a larger margin. Do not assume the knee transfers.
+- **exp31/exp32 — the ratio sweep at 2 epochs, and the bug that motivated the
+  audit.** exp32 measures 33/40/50% of heads + 2 epochs against the verified
+  2-epoch control, 3 seeds: **−1.93 / −2.27 / −3.91pp** (FP) and −4.85pp at
+  50%+INT4. **Both readings of "two beats five" are true and must be stated
+  together**: two epochs gives a *better model* (77.64% vs 77.27%) and a
+  *larger pruning cost* (−3.91 vs −3.17), because the control is itself better
+  at two epochs. The committed `exp32_ctrl_*` JSONs carry `vs_this_control_pp`
+  values computed from 5-epoch arms against the 2-epoch control — wrong by
+  0.97-1.12pp. **Measured data is never mutated**: the fix is
+  `results/lumi_v060/CORRECTIONS.json` plus `experiments/results_corrections.py`,
+  which applies corrections at load time.
+- **exp33 — unstructured sparsity is free; the structure is what costs.** 8
+  configs × 3 seeds unstructured (SparseGPT + Wanda) plus 2:4, with
+  mask-preserving recovery (gradient hook + final re-apply, `sparsity_drift`
+  0.0 on 24/24 runs). At matched parameter count every cell lands within
+  ±0.22pp of a control whose own seeds span 0.21pp. **One-shot, removing 50% of
+  the attention weights without a structure constraint costs −1.23pp; removing
+  the same parameters as whole heads costs −68.88pp.** The accuracy ordering is
+  the exact inverse of the speedup ordering (unstructured ≈0 / 2:4 −0.5 /
+  structured −3.91pp). SparseGPT's error compensation only earns its keep as
+  the constraint tightens (loses to Wanda by 0.39pp at attn-P33, wins +2.35pp
+  at 2:4); Wanda prunes 3-18x faster. **INT4 robustness is worse for `whole`
+  scope on 4/4 pairings — the opposite of the FP32 ordering.**
+- **exp34 — the router's `<10pp → skip` row is wrong on text.** BERT-base,
+  4 GLUE tasks, 3 seeds. **Magnitude + 2 epochs of recovery beats DropHead on
+  8/8 cells**, by 0.42 to 7.03pp — the reverse of the ViT ordering. DropHead's
+  resilience *does* replicate (8/8, 4.6-10.9x less accuracy lost per head
+  one-shot); what sinks it is that it pays for that resilience in dense
+  accuracy, up to −12.58pp on MRPC. And the probe's prediction fails: one-shot
+  drops at P50 are **−4.17 / −12.42 / −21.68 / −17.56pp**, i.e. mostly outside
+  the skip band. DropHead's hooks also cost **~37% of training throughput** on
+  BERT (453 → 284 samples/s).
+
+**Precision, stated exactly**: training and recovery run under **bfloat16**
+autocast; scoring runs under **float16** autocast
+(`run_sal_qat_prototype.py:accuracy`). INT4 is fp32 rounding, then scored under
+fp16 autocast like every other row. The write-ups said "autocast bfloat16" for
+both until the pre-report audit.
+
 - MLP pruning and the compile/ONNX paths live in **sal-torch-pro**
   (`sal_pro.mlp`, `sal_pro.deploy`): MLP pruning is now measured (exp26,
   exp18) and ONNX export is validated (exp22).
@@ -399,11 +499,21 @@ every shared cell. Docs: `PHASE3_IMAGENET1K.md`, `EXP24_SAL_RECOVERY.md`,
   steps would have saved ~157 GPU-hours. This is the "fail loudly on a
   non-finite loss" lesson one level up: **fail loudly when the control arm
   regresses against its own starting point.**
-- Next: v0.7.0 on the new narrative — **diagnose (FI) → route (probe) → DropHead
-  by default, with no exception → MLP prune → recover**. The "SAL when the
-  deployed head set is fixed" carve-out is **gone**: exp28b measured that cell at
-  631M and DropHead matches or beats SAL there on 3/3 seeds, without having to
-  commit to a head set at training time. The SSL recipe is **fixed and validated**
+- Next: v0.7.0 on the repositioned narrative — **diagnose (FI) → route (probe)
+  → prune (magnitude by default) → recover (2 epochs) → verify against a
+  matched control**. Head training is the branch taken only when no
+  post-pruning fine-tune is possible, and there **DropHead with no exception**:
+  the "SAL when the deployed head set is fixed" carve-out is **gone**, since
+  exp28b measured that cell at 631M and DropHead matches or beats SAL there on
+  3/3 seeds without committing to a head set at training time.
+  **v0.7.0 item 1** is `recover()` (`SPEC_V070_RECOVERY.md`); **item 2** is
+  `mask_mode="drophead"` on `HeadMasker`. **Release gate: no v0.7.0 tag until
+  the shipped `CompressionPipeline` runs probe → magnitude → recover →
+  validate end-to-end on ViT-B/16 / ImageNet-1k and reproduces 77.64% at 50% of
+  heads within the published three-seed spread (77.44-77.81%).** Every number
+  the project publishes today came from `scripts/run_sal_qat_prototype.py`, not
+  from the pipeline, which is how the missing recovery stage survived two
+  releases. The SSL recipe is **fixed and validated**
   (exp28b, frozen target encoder). Remaining: the epoch-1 control gate as a
   shipped safeguard and an FFN-ratio router (both specced in `ROADMAP.md`), and
   Phase 5 (license signing + compliance reports). The `nonaccum` control arm is
@@ -433,8 +543,10 @@ projection directly.
   FI is the triangle-fragility score, not λ₂.
 - `SAL_ROADMAP_V3.md` — ablation results, validated claims (random > structured
   selection; gains come from progressive training-time sparsification).
-- `H:\Structural Awareness Loss\` — private research reference. Canonical
-  mechanism: `sal_v5_extra.py` (`random` branch). Not shipped.
+- The **private research reference** — canonical mechanism, `random` branch.
+  Not shipped, and deliberately not located here: this file is on the public
+  remote, so a local path to unshipped research does not belong in it. The
+  location lives in the local notes outside any repository.
 
 ## Testing
 
