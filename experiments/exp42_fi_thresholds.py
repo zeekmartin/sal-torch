@@ -51,6 +51,7 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import torch
 
 _HERE = Path(__file__).resolve().parent
@@ -68,6 +69,31 @@ IMMUNE_THR = 0.01
 USABLE = (3, 8)        # inclusive CRITICAL count that leaves room to move
 
 
+def layer_deltas(adjacency, num_heads_per_layer):
+    """Relative FI change from removing each layer's heads.
+
+    ``sal.fi`` exports no function for this: ``classify_layers`` computes the
+    delta and then discards it, returning only the IMMUNE / BUFFER / CRITICAL
+    label. The arithmetic below is its arithmetic -- same ``abs()``, same
+    ``max(base, 1e-10)`` guard -- so a delta here classifies exactly as the
+    shipped function would. It needs only the adjacency, so no model and no
+    second forward pass are involved, which is why the sweep is free once the
+    graph exists.
+    """
+    from sal.fi import compute_fi
+
+    total = adjacency.shape[0]
+    base = compute_fi(adjacency)
+    out = {}
+    for li in range(total // num_heads_per_layer):
+        s, e = li * num_heads_per_layer, (li + 1) * num_heads_per_layer
+        keep = np.ones(total, dtype=bool)
+        keep[s:e] = False
+        red = compute_fi(adjacency[np.ix_(keep, keep)])
+        out[li] = abs(red - base) / max(base, 1e-10)
+    return out
+
+
 def scan_once(model, probe, n_probe, density):
     """Global FI plus the per-layer relative deltas, for one probe draw.
 
@@ -75,13 +101,13 @@ def scan_once(model, probe, n_probe, density):
     ``density``, and reads the device off the model -- it has no ``device``
     argument. exp37 calls it the same way.
     """
-    from sal.fi import compute_fi, extract_activation_graph, layer_fi_deltas
+    from sal.fi import compute_fi, extract_activation_graph
 
     adjacency = extract_activation_graph(
         model, probe, num_samples=n_probe, density=density)
     fi = float(compute_fi(adjacency))
     nh = model.config.num_attention_heads
-    deltas = layer_fi_deltas(model, adjacency, nh)
+    deltas = layer_deltas(adjacency, nh)
     return fi, {int(k): float(v) for k, v in deltas.items()}, adjacency
 
 
