@@ -68,6 +68,30 @@ N_PROBE = 500
 EDGE_DENSITY = 0.10
 
 
+def make_probe(images_uint8, device, batch_size=16):
+    """The probe in the shape ``sal.fi`` actually expects.
+
+    A raw ``(images, labels)`` tuple walks into two traps at once, and neither
+    one raises:
+
+    * ``sal.fi._iter_data`` treats any iterable as a sequence of **batches**,
+      so a 2-tuple yields the whole image tensor and then the label tensor.
+      The images arrive as one N-image batch, and the labels are spared only
+      because ``num_samples`` is already reached and the loop breaks first.
+    * ``extract_activation_graph`` does **not** normalise, and ``build_data``
+      returns **uint8 in [0, 255]**. ``nn.Conv2d`` promotes uint8 silently
+      instead of raising, so the scan runs on inputs two orders of magnitude
+      outside the ViT's [-1, 1] range and reports a perfectly plausible number.
+
+    ``run_sal_qat_prototype`` normalises on its own FI path (``fi_x =
+    normalize(val_split[0][:n_fi])``), and so does the certification harness.
+    Building the probe here the same way is what makes the three comparable.
+    """
+    return [{"pixel_values": P.normalize(
+        images_uint8[i:i + batch_size]).to(device)}
+        for i in range(0, images_uint8.shape[0], batch_size)]
+
+
 def fi_of(model, probe, device, n_probe=N_PROBE, density=EDGE_DENSITY) -> dict:
     """FI plus the graph shape it was computed on."""
     from sal.fi import compute_fi, extract_activation_graph
@@ -255,7 +279,7 @@ def main(argv=None) -> int:
     for ps in args.probe_seeds:
         g = torch.Generator().manual_seed(1000 + ps)
         pidx = torch.randperm(n_val, generator=g)[:args.n_probe]
-        probes[ps] = (val_split[0][pidx], val_split[1][pidx])
+        probes[ps] = make_probe(val_split[0][pidx], device)
     # exp33's calibration shape exactly: normalised, in batches of 16, drawn
     # with the run's seed. prune_model pushes these through the model once.
     g = torch.Generator().manual_seed(args.seed)

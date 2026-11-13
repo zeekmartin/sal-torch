@@ -1,5 +1,33 @@
 # exp37 — does a fragility scan detect compression, and what does it detect?
 
+> ## SUSPENDED — every number below was measured through an invalid probe
+>
+> Found 2026-11-13, after this write-up was committed. **Both** exp37 runs —
+> the single-probe tier A and the three-probe rerun — built the FI probe as a
+> raw ``(images, labels)`` tuple of **uint8 tensors in [0, 255]**. Two silent
+> failures compose:
+>
+> * ``sal.fi.extract_activation_graph`` does not normalise its input, and
+>   ``build_data`` returns uint8. ``nn.Conv2d`` **promotes uint8 instead of
+>   raising**, so the scan ran on pixel values two orders of magnitude outside
+>   the ViT's [-1, 1] range and returned plausible-looking numbers.
+> * ``sal.fi._iter_data`` treats any iterable as a sequence of *batches*, so
+>   the tuple delivered all 500 images as one batch; the label tensor was next
+>   in line and was spared only because ``num_samples`` was already reached.
+>
+> This was caught by a disagreement with the certification harness, which
+> normalises, on the **same model and the same operation**: it reads the INT4
+> round-trip at +8 to +17 edges where this run reads −2 to +5. The prototype's
+> own FI path normalises too (``fi_x = normalize(val_split[0][:n_fi])``), so
+> the published PHASE1 scans are unaffected — the defect is confined to
+> ``exp37_fi_compressed.py`` and ``exp42_fi_thresholds.py``, both written in
+> this campaign, and both now fixed (``make_probe``).
+>
+> **Nothing below should be quoted, in either direction.** The withdrawal of
+> the single-probe table stands on its own arithmetic and is not reinstated by
+> this; it is simply that the run which withdrew it is not yet evidence either.
+> The re-measure costs 0.08 GPU-hours and this page is rewritten from it.
+
 **TIER A, THREE PROBES — 13 arms, 1 seed, 3 independent probe draws, 0.08
 GPU-hours (job 23702553, `COMPLETED 0:0`).** Data in
 `results/lumi_v060/exp37_3probes/exp37_fi_compressed.json`. The superseded
