@@ -392,9 +392,9 @@ canonical 1000 classes, 256px shortest side), **three seeds, the full 50 000-ima
 validation split**. Every earlier ImageNet-100 figure is superseded where the
 cells overlap.
 
-**DropHead — resampling the mask every step — is now the default method.** It
-entered as SAL's control arm, to test whether progressive accumulation was doing
-anything. It was, and the sign was negative:
+**DropHead — resampling the mask every step — beat SAL as a head-training
+method.** It entered as SAL's control arm, to test whether progressive
+accumulation was doing anything. It was, and the sign was negative:
 
 | at 50% of heads + INT4, vs the *same* baseline | |
 |---|---|
@@ -402,10 +402,15 @@ anything. It was, and the sign was negative:
 | **DropHead, on any set** | **+57.2pp** |
 | DropHead over SAL | **+42.7pp** |
 
-- **Pruning 33% of heads is free with DropHead**: 77.69% against its own dense
-  77.54%, and 76.12 vs 76.09 at INT4. At 50% it costs 5.0pp. On a fixed
-  magnitude-chosen set it is **+63.5pp** over a standard fine-tune, and
-  **+54.7pp** on SAL's own set — a set it has no more seen than any other.
+- **Pruning 33% of DropHead's heads costs +0.14pp against its own dense row**
+  (77.69% vs 77.54%, 76.12 vs 76.09 at INT4) — **but that row is not the
+  control**. Against the dense checkpoint trained for the same five epochs with
+  nothing pruned (80.44%) the cell reads **−2.75pp**, because DropHead's
+  training costs **2.90pp** on its own. Earlier revisions called this "free",
+  which compared an arm to itself; that wording is withdrawn. At 50% it costs
+  5.0pp against its own dense row. On a fixed magnitude-chosen set DropHead is
+  **+63.5pp** over a standard fine-tune, and **+54.7pp** on SAL's own set — a
+  set it has no more seen than any other.
 - **DropHead is also stable**: seed-to-seed sd of 0.02-0.92pp across six
   measured rows, against SAL's 0.50-17.55pp. One SAL row reads
   60.15 / 51.83 / 26.46% on three seeds of the same configuration.
@@ -434,11 +439,20 @@ either. What does is **how far an ordinary fine-tune falls when you prune it** �
 which `CompressionPipeline.probe()` measures directly in two evaluation sweeps
 and no training:
 
-| probe drop at 50% of heads | route |
-|---|---|
-| **> 30pp** | `sal_aligned` — SAL, if you control the deployed head set |
-| **10-30pp** | `drophead` — either; DropHead if you do not |
-| **< 10pp** | `skip_heads` — head training buys nothing measurable |
+| probe drop at 50% of heads | route | what it means |
+|---|---|---|
+| **> 30pp** | `sal_aligned` | head training pays for itself. The route string names the *regime*, not a method. |
+| **10-30pp** | `drophead` | head training pays for itself less. |
+| **< 10pp** | `skip_heads` | head training buys nothing measurable — **the one row the evidence contradicts**, see exp34 below. |
+
+**The method is not chosen by the route; it is chosen by whether you can
+fine-tune after pruning.** If you can, magnitude selection + a 2-epoch recovery
+is the strongest option measured and the training-time method is close to
+irrelevant (+0.05pp for SAL's weights, +0.07pp for DropHead's, at a fixed head
+set). If you cannot, DropHead is the general method and SAL the specialist.
+The earlier form of this table carried "SAL, if you control the deployed head
+set" in the top row, which v0.7.0 step 3 withdraws three sections below; the
+contradiction is resolved here in favour of the withdrawal.
 
 **FI stays in the product for diagnosis and certification, not as a router** —
 and not as a head selector either: fragility-weighted selection loses to uniform
@@ -505,13 +519,19 @@ repairs.
    `drophead` / `skip_heads` from measured accuracy loss. Already shipped in
    v0.6.1; v0.7.0 adds routing for the FFN ratio, which currently has no
    equivalent.
-3. **Compress** — **DropHead, with no exception.** The "SAL when the deployed
-   head set is fixed at training time" carve-out that stood here through v0.6.x
-   is **withdrawn**: exp28b measured exactly that cell on a 631M self-supervised
-   encoder and DropHead matched or beat SAL on 3/3 seeds, while costing nothing
-   at training time and leaving the head set free until deployment. SAL stays in
-   the package, documented and supported, but it is no longer the recommendation
-   anywhere. FFN neuron pruning carries the bulk of the size reduction.
+3. **Compress** — **the choice is set by whether a post-pruning fine-tune is
+   available, not by the route.** If it is, prune by magnitude and recover;
+   head-training methods are worth +0.05pp (SAL) and +0.07pp (DropHead) as
+   starting points for that fine-tune, i.e. nothing, and on BERT-base across
+   four GLUE tasks magnitude + 2 epochs beat DropHead on 8/8 cells (exp34). If
+   it is not, **DropHead, with no exception among head-training methods**: the
+   "SAL when the deployed head set is fixed at training time" carve-out is
+   **withdrawn**, since exp28b measured exactly that cell on a 631M
+   self-supervised encoder and DropHead matched or beat SAL on 3/3 seeds while
+   leaving the head set free until deployment. SAL stays in the package,
+   documented and supported, scoped to "no recovery possible and the deployed
+   set is fixed before training". FFN neuron pruning carries the bulk of the
+   size reduction.
 4. **Recover** — a short fine-tune after pruning, which is worth more than any
    training-time masking when the deployment architecture is known. **Two
    epochs**, not five: exp29 measured the curve and it peaks at 2, with 5 below
@@ -522,6 +542,18 @@ repairs.
 
 **Also in v0.7.0:**
 
+- **`recover()` as a pipeline stage — item 1.** `CompressionPipeline` has no
+  recovery stage today, so every accuracy this project publishes for post-hoc
+  pruning includes a step the product does not perform. Default 2 epochs,
+  mask-preserving by default, and matched-control reporting that separates
+  `fine_tuning_gain_pp` from `pruning_cost_pp` and emits the second only when
+  the epoch counts match. Specified in `SPEC_V070_RECOVERY.md`.
+- **`mask_mode="drophead"` on `HeadMasker` — item 2.** DropHead is recommended
+  throughout this document and is **not callable from the package**:
+  `HeadMasker` accumulates and holds, which is SAL, and the per-step resampled
+  variant exists only in `scripts/run_sal_qat_prototype.py`. v0.7.0 adds it as a
+  supported mode, with tests reproducing the prototype's behaviour at identical
+  seeds and masks.
 - **An FFN-ratio router**, so step 2 covers the component that carries most of
   the compression rather than only the heads.
 - **Make DropHead's masking cheaper than a forward hook.** Measured on
@@ -617,6 +649,23 @@ gate.poll()                  # every arm, inside the step loop: raise if failed
 a non-finite loss" rule, one level up: a diverged loss is caught in seconds, a
 quietly collapsing control arm currently is not caught at all.
 
+#### The v0.7.0 release gate
+
+**No v0.7.0 tag until the shipped pipeline reproduces the published figures.**
+Every accuracy on this page and in the README was produced by
+`scripts/run_sal_qat_prototype.py`, not by `CompressionPipeline`. That is
+acceptable for a research trail and not acceptable for a product claim, and it
+is how the missing recovery stage went unnoticed through two releases.
+
+The gate: run the shipped pipeline end to end — `probe()` → magnitude selection
+→ `recover()` → `validate()` — on ViT-B/16 / ImageNet-1k, and check it lands
+within seed tolerance of the published cell (77.64% at 50% of heads after two
+epochs, three seeds spanning 77.44–77.81%). The control it is scored against is
+the 2-epoch dense control, verified before the run rather than quoted.
+
+If the pipeline cannot reproduce the number, the number is not a product claim
+and the README says so instead.
+
 ### v0.8.0 — Edge deployment exports
 
 Making compressed models deployable on real edge hardware without requiring
@@ -642,8 +691,14 @@ sal-torch on the target device.
 - **FFN neuron pruning** (`sal_pro.mlp`) — **validated on ImageNet-1k**, three
   seeds, full validation split (exp18, exp26; 97.2 GPU-hours). This is the
   component that carries the compression: 25% of neurons costs 0.63pp against
-  3.17pp for 50% of heads at comparable size, and the measured batch-32 speedups
-  run 1.28× / 1.33× / 1.50× at 25 / 33 / 50% of neurons.
+  3.17pp for 50% of heads at comparable size. **Speedups, with the two sources
+  separated**: slicing alone at batch 32 is **1.15× / 1.19× / 1.36×** at
+  25 / 33 / 50% of neurons (exp26, ImageNet-1k, MI250X eager). Adding
+  `torch.compile --max-autotune` on top reaches 1.28× / 1.33× / 1.50×
+  (exp16, ImageNet-100) — **those are pruning × compiler, not pruning**, and
+  an earlier revision of this roadmap quoted them as if the pruning had earned
+  them. The dense model compiles to 1.12× on its own, which is the reference
+  any pruning speedup has to be read against.
 - **`torch.compile` and ONNX export** (`sal_pro.deploy`) — **ONNX export
   validated** (exp22), compiled inference benchmarked (exp16). The compiled dense
   model is 1.12× at batch 32, which is the reference any pruning speedup has to
