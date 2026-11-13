@@ -1,0 +1,102 @@
+{
+  "_README": [
+    "Corrections to committed result JSONs. MEASURED DATA IS NEVER MUTATED.",
+    "A result file on disk stays exactly as the job wrote it; this sidecar records",
+    "which DERIVED fields in it are wrong, why, and what replaces them. Read any",
+    "result through experiments/results_corrections.py:load_result() and the",
+    "corrections are applied in memory, so a table built from JSON gets the same",
+    "numbers as the write-ups.",
+    "",
+    "Only derived fields are correctable. A measured accuracy, loss or timing is",
+    "never touched: if one of those is wrong the run is wrong and the fix is to",
+    "re-run it, not to edit it here.",
+    "",
+    "Each entry carries: files, pointer (slash path into the JSON), op, value,",
+    "reason, provenance, added. op is one of set / remove / annotate."
+  ],
+  "schema_version": 1,
+  "corrections": [
+    {
+      "id": "exp32-ctrl-unmatched-restatement",
+      "files": [
+        "results/lumi_v060/exp32_ctrl_s42/exp31_dense_control.json",
+        "results/lumi_v060/exp32_ctrl_s123/exp31_dense_control.json",
+        "results/lumi_v060/exp32_ctrl_s456/exp31_dense_control.json"
+      ],
+      "pointer": "exp29_restated/ratios/*/vs_this_control_pp",
+      "op": "remove",
+      "reason": "exp29's ratio arms were measured at FIVE epochs of recovery; this control ran TWO. The field scored a 5-epoch arm against a 2-epoch control, which reports the pruning cost plus the difference between two fine-tuning schedules as if it were the pruning cost alone. On this recipe the dense arm alone moves 1.11pp between 2 and 5 epochs. Each seed carries its own wrong triple, being exp29's mean minus that seed's own control: s42 -2.269 / -2.831 / -4.411, s123 -2.117 / -2.679 / -4.259, s456 -2.055 / -2.617 / -4.197, against matched three-seed costs of -1.30 / -1.93 / -3.91. No pruning cost is reportable from this pairing at all, so the field is removed rather than replaced.",
+      "provenance": "experiments/exp31_dense_control.py now refuses this restatement unless args.epochs == EXP29_RATIO_EPOCHS; the fix landed after these three jobs ran, so the guard has never executed on real data. Correct 2-epoch costs: results/lumi_v060/EXP32_RATIO_AT_2EP.md, from exp32_ratios_s{42,123,456}/exp29_recovery.json.",
+      "added": "2026-11-13"
+    },
+    {
+      "id": "exp32-ctrl-epoch-flags",
+      "files": [
+        "results/lumi_v060/exp32_ctrl_s42/exp31_dense_control.json",
+        "results/lumi_v060/exp32_ctrl_s123/exp31_dense_control.json",
+        "results/lumi_v060/exp32_ctrl_s456/exp31_dense_control.json"
+      ],
+      "pointer": "exp29_restated",
+      "op": "annotate",
+      "value": {
+        "arm_epochs": 5,
+        "control_epochs": 2,
+        "epochs_matched": false,
+        "corrected": "exp32-ctrl-unmatched-restatement"
+      },
+      "reason": "The file predates the epochs_matched field, so nothing in it tells a reader that the arm and the control were trained for different lengths. Without the flag the restated column looks like every other pruning cost in the corpus.",
+      "provenance": "args.epochs == 2 in the same file; EXP29_RATIO_EPOCHS == 5 in experiments/exp31_dense_control.py.",
+      "added": "2026-11-13"
+    },
+    {
+      "id": "exp32-ctrl-stale-note",
+      "files": [
+        "results/lumi_v060/exp32_ctrl_s42/exp31_dense_control.json",
+        "results/lumi_v060/exp32_ctrl_s123/exp31_dense_control.json",
+        "results/lumi_v060/exp32_ctrl_s456/exp31_dense_control.json"
+      ],
+      "pointer": "exp29_restated/note",
+      "op": "set",
+      "value": "WITHDRAWN restatement. exp29's ratio means are three-seed at FIVE epochs of recovery; this control ran TWO, so no pruning cost is derivable from the pairing and vs_this_control_pp has been removed. The claim 'this control is one seed' in the original note is also stale: exp32 ran three control seeds (81.676 / 81.524 / 81.462, mean 81.554). For the matched 2-epoch costs see results/lumi_v060/EXP32_RATIO_AT_2EP.md and results/lumi_v060/CONTROL_CONVENTION.md.",
+      "reason": "The note was wrong in two independent ways: it presented the restatement as usable, and it described a three-seed control as single-seed.",
+      "provenance": "exp32_ctrl_s{42,123,456}/exp31_dense_control.json, control/accuracy in each.",
+      "added": "2026-11-13"
+    },
+    {
+      "id": "exp32-ctrl-fine-tuning-gain",
+      "files": [
+        "results/lumi_v060/exp32_ctrl_s42/exp31_dense_control.json",
+        "results/lumi_v060/exp32_ctrl_s123/exp31_dense_control.json",
+        "results/lumi_v060/exp32_ctrl_s456/exp31_dense_control.json"
+      ],
+      "pointer": "control",
+      "op": "annotate",
+      "value": {
+        "fine_tuning_gain_pp": "=(control/accuracy - pretrained/accuracy)*100",
+        "fine_tuning_gain_int4_pp": "=(control/int4_accuracy - pretrained/int4_accuracy)*100"
+      },
+      "reason": "The convention reports the fine-tuning gain separately from any pruning cost. The file has vs_pretrained_pp, which is the same quantity under a name that invites it to be read as a pruning result; the labelled field is added alongside without removing the original.",
+      "provenance": "results/lumi_v060/CONTROL_CONVENTION.md. experiments/exp31_dense_control.py emits both names for runs after the fix.",
+      "added": "2026-11-13"
+    },
+    {
+      "id": "exp31-single-seed-control",
+      "files": [
+        "results/lumi_v060/exp31_s42/exp31_dense_control.json"
+      ],
+      "pointer": "exp29_restated",
+      "op": "annotate",
+      "value": {
+        "arm_epochs": 5,
+        "control_epochs": 5,
+        "epochs_matched": true,
+        "control_seeds": 1,
+        "preferred_control": "exp25 arm 1a, 80.44% / 79.01% INT4, 3 seeds, sd 0.05",
+        "caveat": "The epoch counts match, so vs_this_control_pp IS a pruning cost here (-1.149 / -1.711 / -3.291). It is scored against a ONE-seed control (80.556%), where the write-ups use exp25's three-seed 80.44% and so report -1.03 / -1.59 / -3.17. Prefer the three-seed control; the 0.12pp difference between the two is control noise, not an effect."
+      },
+      "reason": "This restatement is correctly epoch-matched and must not be swept up with the exp32 one, but its control is single-seed and the published tables use a different, better control for the same cells. Without the annotation a reader cannot tell which of the two cost triples they are looking at.",
+      "provenance": "results/lumi_v060/EXP25_ALIGNED.md for the three-seed control; results/lumi_v060/EXP29_RECOVERY_EPOCHS.md L206 already notes the single-seed path.",
+      "added": "2026-11-13"
+    }
+  ]
+}
