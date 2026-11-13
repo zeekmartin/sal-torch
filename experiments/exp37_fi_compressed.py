@@ -185,6 +185,7 @@ def main(argv=None) -> int:
     p.add_argument("--density", type=float, default=EDGE_DENSITY)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--workers", type=int, default=7)
+    p.add_argument("--loader-workers", type=int, default=6)
     p.add_argument("--skip", nargs="*", default=[],
                    help="arm names to leave out")
     p.add_argument("--checkpoints", default=None,
@@ -216,6 +217,12 @@ def main(argv=None) -> int:
     # run loads the default ImageNet-100 instead, which is how the first gate
     # failed; had the shapes been compatible it would have produced plausible
     # ImageNet-100 numbers under an ImageNet-1k label.
+    if args.data_cache:
+        # Lustre-backed memmap: without workers the reads have nothing to
+        # overlap them. The splits here are small, so this is cheap rather
+        # than critical -- but it is the same omission that made exp35 run
+        # 9.5x slow, so it is set here too.
+        P.LOADER_WORKERS = args.loader_workers
     sizes = {"n_train": max(args.n_calib * 8, 2000), "n_val": args.n_probe,
              "n_fi": args.n_probe}
     train_split, val_split, num_classes = P.build_data(
