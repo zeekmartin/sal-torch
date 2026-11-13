@@ -458,7 +458,7 @@ This report is designed to be attachable to a model card or regulatory filing.
 
 ## 8. What Is NOT in the Package
 
-- SAL internal research code (H:\Structural Awareness Loss)
+- SAL internal research code (private, not in any repository)
 - Topostability / TopoIntegrity full framework
 - GraphCoherence visualization
 - Internal research framework and its mathematical proofs — not exposed
