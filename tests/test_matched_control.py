@@ -60,13 +60,33 @@ def test_fine_tuning_gain_is_control_minus_pretrained(ladder):
 
 
 def test_asking_for_a_missing_seed_names_the_ones_it_has(ladder):
-    with pytest.raises(ControlError, match=r"seed 999.*\[42, 123, 456\]"):
+    with pytest.raises(ControlError, match=r"seed 999"):
         ladder.at(2, seed=999)
 
 
 def test_asking_for_a_missing_epoch_count_lists_what_exists(ladder):
     with pytest.raises(ControlError, match=r"no 3-epoch control"):
         ladder.at(3)
+
+
+def test_a_missing_epoch_count_with_a_seed_says_which_epochs_exist(ladder):
+    """The first exp35 gate hit this and the message said 'have []'.
+
+    A 1-epoch control does not exist, so filtering the seed list by epochs
+    returned nothing and the error named no alternative. It must say which
+    epoch counts DO exist, because that is the actionable part.
+    """
+    with pytest.raises(ControlError) as e:
+        ladder.at(1, seed=42)
+    msg = str(e.value)
+    assert "no 1-epoch control at all" in msg
+    assert "[2, 5]" in msg
+    assert "CONTROL_CONVENTION.md" in msg
+
+
+def test_a_missing_seed_at_an_existing_epoch_count_lists_the_seeds(ladder):
+    with pytest.raises(ControlError, match=r"Seeds at 2 epochs: \[42, 123, 456\]"):
+        ladder.at(2, seed=7)
 
 
 def test_a_control_file_whose_epochs_disagree_is_refused(tmp_path, monkeypatch):
@@ -208,6 +228,44 @@ def test_to_dict_carries_the_convention_and_the_verification(ladder):
     assert d["verified"][2]["checked"] is True
     assert d["controls"]["2"]["seeds"] == 3
     assert d["pretrained"]["accuracy"] == 0.7844
+
+
+def test_the_cluster_layout_resolves_to_the_same_control(tmp_path, monkeypatch):
+    """LUMI writes results/<exp>/; the repo stores results/lumi_v060/<exp>/.
+
+    A registry entry is written in repository form. If the alias stopped
+    working, a job on the cluster would not fail -- it would fall back to
+    whatever else resolved, which is worse.
+    """
+    import json
+
+    import matched_control as mc
+
+    # only the cluster-shaped path exists
+    cluster = tmp_path / "results" / "exp32_ctrl_s42"
+    cluster.mkdir(parents=True)
+    (cluster / "exp31_dense_control.json").write_text(json.dumps({
+        "epochs": 2, "seed": 42, "pretrained": PRETRAINED,
+        "control": {"accuracy": 0.81554, "int4_accuracy": 0.80273,
+                    "epochs": 2}}))
+    monkeypatch.setitem(
+        mc.CONTROL_SOURCES, 2,
+        ["results/lumi_v060/exp32_ctrl_s42/exp31_dense_control.json"])
+    # verify=False: this test is about path resolution. With it on, the seed
+    # count check fires correctly (one file against a published three), which
+    # is itself asserted in test_published_registry_matches_the_loaded_corpus.
+    ladder = ControlLadder.load(epochs=(2,), root=tmp_path, verify=False)
+    assert ladder.at(2, seed=42).accuracy == pytest.approx(0.81554)
+    assert "exp32_ctrl_s42" in ladder.at(2, seed=42).source
+
+
+def test_a_genuinely_missing_control_says_what_it_tried(tmp_path, monkeypatch):
+    import matched_control as mc
+
+    monkeypatch.setitem(mc.CONTROL_SOURCES, 2,
+                        ["results/lumi_v060/nope/x.json"])
+    with pytest.raises(ControlError, match="tried"):
+        ControlLadder.load(epochs=(2,), root=tmp_path)
 
 
 def test_published_registry_matches_the_loaded_corpus(ladder):

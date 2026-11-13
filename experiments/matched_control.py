@@ -74,6 +74,29 @@ PUBLISHED = {
 }
 
 
+# On LUMI the jobs write to ``results/<exp>/`` and the repository stores the
+# rapatriated copies at ``results/lumi_v060/<exp>/``. A registry entry is
+# written in repository form and resolved against both layouts, so the same
+# script computes the same costs on the cluster and on a workstation. Anything
+# else and a job silently falls back to a different control.
+_PREFIX_ALIASES = (("results/lumi_v060/", "results/"),)
+
+
+def _candidates(rel: str, root: Path) -> list[Path]:
+    out = [root / rel]
+    for frm, to in _PREFIX_ALIASES:
+        if rel.startswith(frm):
+            out.append(root / (to + rel[len(frm):]))
+    return out
+
+
+def _resolve_source(rel: str, root: Path) -> Path | None:
+    for c in _candidates(rel, root):
+        if c.exists():
+            return c
+    return None
+
+
 def _rel(path: Path, root: Path) -> str:
     """A repo-relative source string, or the full path when it is outside."""
     try:
@@ -180,13 +203,17 @@ class ControlLadder:
         controls: dict[int, Control] = {}
         per_seed: dict[tuple[int, int], Control] = {}
         for ep in epochs:
-            paths = [root / p for p in CONTROL_SOURCES.get(ep, [])]
-            missing = [p for p in paths if not p.exists()]
-            if not paths or missing:
+            registered = CONTROL_SOURCES.get(ep, [])
+            resolved = [(rel, _resolve_source(rel, root)) for rel in registered]
+            missing = [rel for rel, got in resolved if got is None]
+            if not registered or missing:
+                tried = [str(c) for rel in missing
+                         for c in _candidates(rel, root)]
                 raise ControlError(
                     f"{ep}-epoch control: "
-                    + (f"no source registered" if not paths else
-                       f"missing {[str(p) for p in missing]}"))
+                    + ("no source registered" if not registered else
+                       f"missing {missing}; tried {tried}"))
+            paths = [got for _, got in resolved]
             accs, int4s, seeds = [], [], []
             for p in paths:
                 d = load_result(p)
@@ -263,10 +290,18 @@ class ControlLadder:
         if seed is not None:
             c = self.per_seed.get((epochs, seed))
             if c is None:
-                have = sorted(s for e, s in self.per_seed if e == epochs
-                              and s is not None)
+                seeds_here = sorted(s for e, s in self.per_seed if e == epochs
+                                    and s is not None)
+                epochs_here = sorted(self.controls)
                 raise ControlError(
-                    f"no {epochs}-epoch control for seed {seed}; have {have}")
+                    f"no {epochs}-epoch control for seed {seed}. "
+                    + (f"Seeds at {epochs} epochs: {seeds_here}."
+                       if seeds_here else
+                       f"There is no {epochs}-epoch control at all; "
+                       f"controls exist at {epochs_here} epochs. An arm "
+                       f"trained for {epochs} epochs needs a control trained "
+                       f"for {epochs} epochs -- see "
+                       f"results/lumi_v060/CONTROL_CONVENTION.md."))
             return c
         c = self.controls.get(epochs)
         if c is None:
