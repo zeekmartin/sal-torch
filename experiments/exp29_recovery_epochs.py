@@ -64,13 +64,33 @@ EXP24_ARM1 = {"0.33": {"accuracy": 0.7885, "int4_accuracy": 0.7709},
               "0.50": {"accuracy": 0.7727, "int4_accuracy": 0.7506}}
 
 
-def slice_at(pretrained, ratio, device, P, log):
-    """Magnitude-prune ``ratio`` of heads, uniformly per layer."""
+def slice_at(pretrained, ratio, device, P, log, selection="magnitude", seed=0):
+    """Prune ``ratio`` of heads, uniformly per layer.
+
+    ``selection`` is ``"magnitude"`` (lowest L2, the published arm) or
+    ``"random"``. The random arm exists because the README recommends magnitude
+    selection for the recovery path while cardinal rule 1 says random is the
+    best selector -- and the two have never been compared *with* a recovery
+    pass. The GPT-2 table behind rule 1 (`random` 0.8867 against `magnitude`
+    0.8594) is one seed, post-hoc, with no recovery; exp24's +0.60pp selection
+    signal is measured from SAL's weights, not from the pretrained checkpoint.
+    Everything else here is held identical to exp32 so the two arms differ in
+    the selector alone.
+    """
     from sal import slice_heads
 
-    pairs = magnitude_heads(pretrained, ratio, per_layer=True)
+    if selection == "magnitude":
+        pairs = magnitude_heads(pretrained, ratio, per_layer=True)
+        how = "lowest-L2"
+    elif selection == "random":
+        cfg = pretrained.config
+        pairs = P.uniform_random_heads(
+            cfg.num_hidden_layers, cfg.num_attention_heads, ratio, seed)
+        how = f"random, seed {seed}"
+    else:
+        raise ValueError(f"unknown selection {selection!r}")
     small = slice_heads(copy.deepcopy(pretrained), pairs).eval().to(device)
-    log(f"    removed {len(pairs)} heads ({ratio:.0%}, lowest-L2, "
+    log(f"    removed {len(pairs)} heads ({ratio:.0%}, {how}, "
         "uniform per-layer quota)")
     return small, pairs
 
@@ -117,6 +137,11 @@ def main(argv=None):
     p.add_argument("--workers", type=int, default=7)
     p.add_argument("--loader-workers", type=int, default=6)
     p.add_argument("--loader-block", type=int, default=512)
+    p.add_argument("--selection", choices=("magnitude", "random"),
+                   default="magnitude",
+                   help="head selector. magnitude is the published arm; random "
+                        "is the rule-1 selector, never before measured with a "
+                        "recovery pass. Everything else is held identical.")
     p.add_argument("--skip-int4", action="store_true")
     p.add_argument("--output", default="results/exp29")
     p.add_argument("--gate", action="store_true",
@@ -165,6 +190,8 @@ def main(argv=None):
            "model": P.MODEL_ID, "dataset": args.dataset,
            "dataset_label": P.dataset_label(args.dataset),
            "seed": args.seed, "gate": args.gate,
+           "selection": args.selection,
+           "ratio_epochs": args.ratio_epochs,
            "num_classes": num_classes,
            "n_train": int(train_split[0].shape[0]),
            "n_val": int(val_split[0].shape[0]),
@@ -196,7 +223,8 @@ def main(argv=None):
     # ------------------------------------------------- (A) the epoch curve
     if not args.skip_curve:
         P.rule(f"A — epoch curve at {args.curve_ratio:.0%} heads removed")
-        small, pairs = slice_at(pretrained, args.curve_ratio, device, P, P.log)
+        small, pairs = slice_at(pretrained, args.curve_ratio, device, P, P.log,
+                                args.selection, args.seed)
         pre = score(small, val_split, device, use_amp, P, args.skip_int4)
         P.log(f"    sliced, before recovery: {pre['accuracy'] * 100:.2f}%")
         out["curve_pre_recovery"] = pre
@@ -227,7 +255,8 @@ def main(argv=None):
     if not args.skip_ratios:
         P.rule(f"B — ratio sweep at {args.ratio_epochs} epoch(s)")
         for ratio in args.ratios:
-            small, pairs = slice_at(pretrained, ratio, device, P, P.log)
+            small, pairs = slice_at(pretrained, ratio, device, P, P.log,
+                                    args.selection, args.seed)
             pre = score(small, val_split, device, use_amp, P, args.skip_int4)
             model, losses, secs = recover_for(
                 small, train_split, args.ratio_epochs, args, device, use_amp,
