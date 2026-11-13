@@ -181,6 +181,12 @@ def main(argv=None) -> int:
     p.add_argument("--dataset", default=DATASET)
     p.add_argument("--data-cache", default=None)
     p.add_argument("--n-probe", type=int, default=N_PROBE)
+    p.add_argument("--probe-seeds", type=int, nargs="+", default=[0],
+                   help="independent probe draws. Every arm is scanned under "
+                        "each of them, so dFI can be reported per probe. One "
+                        "draw cannot distinguish a compression signal from a "
+                        "probe-draw difference, which is the governing "
+                        "limitation of the first tier-A run.")
     p.add_argument("--n-calib", type=int, default=128)
     p.add_argument("--density", type=float, default=EDGE_DENSITY)
     p.add_argument("--seed", type=int, default=42)
@@ -223,7 +229,11 @@ def main(argv=None) -> int:
         # than critical -- but it is the same omission that made exp35 run
         # 9.5x slow, so it is set here too.
         P.LOADER_WORKERS = args.loader_workers
-    sizes = {"n_train": max(args.n_calib * 8, 2000), "n_val": args.n_probe,
+    # Enough validation images that the probe draws can differ. With n_val ==
+    # n_probe every seed would permute the same images and the "independent
+    # probes" would be one probe in three orders.
+    sizes = {"n_train": max(args.n_calib * 8, 2000),
+             "n_val": max(args.n_probe * len(args.probe_seeds), args.n_probe),
              "n_fi": args.n_probe}
     train_split, val_split, num_classes = P.build_data(
         sizes, args.seed, args.workers, dataset_id=args.dataset,
@@ -237,7 +247,15 @@ def main(argv=None) -> int:
     # FI's probe and the pruners' calibration set are deliberately different
     # data: calibrating and then measuring on the same images would let a
     # pruner look structurally intact on exactly what it was fitted to.
-    probe = (val_split[0][:args.n_probe], val_split[1][:args.n_probe])
+    # One draw per probe seed, disjoint where the split allows it. Each arm is
+    # scanned under all of them and the baseline is re-measured under each, so
+    # a delta is always arm-minus-dense WITHIN one probe -- never across.
+    n_val = val_split[0].shape[0]
+    probes = {}
+    for ps in args.probe_seeds:
+        g = torch.Generator().manual_seed(1000 + ps)
+        pidx = torch.randperm(n_val, generator=g)[:args.n_probe]
+        probes[ps] = (val_split[0][pidx], val_split[1][pidx])
     # exp33's calibration shape exactly: normalised, in batches of 16, drawn
     # with the run's seed. prune_model pushes these through the model once.
     g = torch.Generator().manual_seed(args.seed)
@@ -251,6 +269,7 @@ def main(argv=None) -> int:
         "model": "google/vit-base-patch16-224",
         "dataset": args.dataset,
         "seed": args.seed,
+        "probe_seeds": args.probe_seeds,
         "gate": args.gate,
         "n_probe": args.n_probe,
         "n_calib": args.n_calib,
@@ -286,22 +305,45 @@ def main(argv=None) -> int:
         dest.write_text(json.dumps(out, indent=1), encoding="utf-8")
 
     save()
-    baseline_fi = None
+    baseline_fi = {}
     for name, model, detail in build_tier_a(pretrained, calib, device, P.log,
                                             skip=tuple(args.skip)):
         t0 = time.time()
-        scan = fi_of(model, probe, device, args.n_probe, args.density)
-        detail.update(scan)
+        per_probe = {}
+        for ps, probe in probes.items():
+            scan = fi_of(model, probe, device, args.n_probe, args.density)
+            if name == "dense_pretrained":
+                baseline_fi[ps] = scan["fi"]
+            if ps in baseline_fi:
+                scan["fi_delta"] = scan["fi"] - baseline_fi[ps]
+                scan["fi_relative_change"] = (
+                    scan["fi"] - baseline_fi[ps]) / baseline_fi[ps]
+            per_probe[str(ps)] = scan
+        detail["per_probe"] = per_probe
+        # The first probe stays at the top level so the single-probe keys that
+        # the first tier-A run wrote are still there and still mean the same.
+        first = per_probe[str(args.probe_seeds[0])]
+        detail.update({k: v for k, v in first.items()})
         detail["scan_seconds"] = round(time.time() - t0, 1)
-        if name == "dense_pretrained":
-            baseline_fi = scan["fi"]
-        if baseline_fi:
-            detail["fi_delta"] = scan["fi"] - baseline_fi
-            detail["fi_relative_change"] = (scan["fi"] - baseline_fi) / baseline_fi
-        P.log(f"  {name:<24} FI {scan['fi']:.6f}  "
-              f"{scan['nodes']:>4} nodes {scan['edges']:>5} edges"
-              + (f"  {detail['fi_relative_change']:+7.1%} vs dense"
-                 if baseline_fi and name != "dense_pretrained" else ""))
+
+        deltas = [c["fi_delta"] for c in per_probe.values() if "fi_delta" in c]
+        if deltas and name != "dense_pretrained":
+            signs = {d > 0 for d in deltas}
+            detail["delta_sign_consistent"] = len(signs) == 1
+            detail["fi_delta_min"] = min(deltas)
+            detail["fi_delta_max"] = max(deltas)
+            detail["fi_delta_mean"] = sum(deltas) / len(deltas)
+            # A delta whose spread across probes exceeds its own mean is not a
+            # measurement of the arm; it is a measurement of the probe.
+            detail["delta_exceeds_probe_spread"] = (
+                min(abs(d) for d in deltas) > (max(deltas) - min(deltas)))
+        P.log(f"  {name:<24} FI " + " ".join(
+            f"{c['fi']:.6f}" for c in per_probe.values())
+              + f"  {first['nodes']:>4} nodes {first['edges']:>5} edges"
+              + (f"  dFI {detail['fi_delta_min']:+.6f}..{detail['fi_delta_max']:+.6f}"
+                 f" {'SIGN-STABLE' if detail['delta_sign_consistent'] else 'SIGN FLIPS'}"
+                 f"{'' if detail.get('delta_exceeds_probe_spread') else '  [within probe spread]'}"
+                 if deltas and name != "dense_pretrained" else ""))
         out["arms"][name] = detail
         save()
         if model is not pretrained:
