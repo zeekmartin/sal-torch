@@ -11,10 +11,12 @@ Training-time sparsification that makes neural networks structurally resilient t
 >
 > 1. **`CompressionPipeline` does not run a recovery pass.** Its stages are
 >    `probe → scan → sal_train → compress → validate → export`; nothing repairs
->    the model after `compress()`. Almost every accuracy quoted below includes a
->    post-pruning fine-tune, which is a step the shipped pipeline does not
->    perform — at 50% of heads that gap is the difference between **9.56%** and
->    **77.6%**. `recover()` is v0.7.0 item 1. Until it ships, run the recovery
+>    the model after `compress()`. **Every row below marked as recovery** —
+>    the magnitude + recovery arms, the FFN table, the 2-epoch figures —
+>    includes a post-pruning fine-tune, which is a step the shipped pipeline
+>    does not perform. At 50% of heads that gap is the difference between
+>    **9.56%** and **77.6%**. The DropHead, SAL and GPT-2 tables contain no
+>    recovery pass and are not affected. `recover()` is v0.7.0 item 1. Until it ships, run the recovery
 >    yourself after `compress()` and before `validate()`.
 > 2. **DropHead is not callable from this package.** `HeadMasker` accumulates
 >    and holds its pruned set — that is SAL. The per-step resampled variant that
@@ -28,22 +30,26 @@ Training-time sparsification that makes neural networks structurally resilient t
 >
 > **`probe()` → head training *or* magnitude selection → prune FFN neurons → recover → `torch.compile`**
 >
-> - **`probe()` first.** Two evaluation sweeps, no training: it tells you whether
->   head training is worth paying for at all. Nothing cheaper predicts it — not
->   the architecture, not the parameter count, and not the fragility index.
-> - **DropHead**, per-step resampled head dropout, is the general method: it beats
->   a standard fine-tune by **+57.2pp** at 50% head pruning + INT4. Its
->   resilience holds on *any* head set of that size, and its seed-to-seed
->   spread is 0.02–0.92pp. **Removing 33% of its heads costs it +0.14pp
->   against its own dense row (77.69 vs 77.54) — but that row is not the
+> - **`probe()` first.** Two evaluation sweeps, no training: it measures how
+>   much head damage costs *your* model. Nothing cheaper predicts that — not the
+>   architecture, not the parameter count, and not the fragility index. It does
+>   **not** pick the method: what picks the method is whether you can fine-tune
+>   after pruning.
+> - **DropHead**, per-step resampled head dropout, is the general head-training
+>   method: it beats a standard fine-tune by **+57.2pp** at 50% head pruning +
+>   INT4. Its resilience holds on *any* head set of that size, and its
+>   seed-to-seed spread is 0.02–0.92pp. **Removing 33% of its heads leaves it
+>   +0.14pp above its own dense row (77.69 vs 77.54) — but that row is not the
 >   control.** Against the dense checkpoint trained for the same five epochs
 >   with nothing pruned (80.44%), the same cell reads **−2.75pp**, because
 >   DropHead's training itself costs **2.90pp** of dense accuracy. "Free"
 >   compared an arm to itself; the earlier wording is withdrawn.
-> - **SAL** is the specialist: use it when you control the deployed head set and
->   can fix it at training time. On its own trained-for set it reads **76.51%**,
->   +1.48pp over DropHead on that same set — and **34.52%** on a set it did not
->   train for. The specialisation is the whole value and the whole limit.
+> - **SAL** is the specialist, and its carve-out is **withdrawn**: on its own
+>   trained-for set it reads **76.51%**, +1.48pp over DropHead on that same set
+>   at 85.9M — but **−0.67pp** on the same cell at 631M, and **34.52%** on a set
+>   it did not train for. It is supported, not recommended. Use it only where
+>   you cannot fine-tune after pruning, the deployed head set is fixed before
+>   training, and you have measured it ahead on your own model.
 > - **Most of the compression is in the FFN, not the heads.** 25% of FFN neurons
 >   costs **−0.63pp** for 1.15x; 50% of heads costs −3.17pp for 1.20x.
 >
@@ -226,14 +232,15 @@ print(pr.recommendation)
 
 | probe drop at 50% of heads | route | what to do |
 |---|---|---|
-| **> 30pp** — fragile | `sal_aligned` | **DropHead.** Train with the quota resampled every step, then prune whatever set you deploy: **+54.95pp** over a standard fine-tune on random sets, **+63.47pp** on a fixed magnitude set, **+54.70pp** on SAL's own set (ViT-B/16, ImageNet-1k, 3 seeds). SAL is an option only where the deployed set is fixed *before* training — it is +1.48pp over DropHead on that one set at 85.9M, and **loses by 0.67pp** at 631M. |
-| **10–30pp** — intermediate | `drophead` | **DropHead, or magnitude + recovery if you can fine-tune after pruning.** Removing 33% of heads costs DropHead +0.14pp against its own dense row at 85.9M and −0.04pp at 631M — against a matched dense control it is −2.75pp, since the training itself costs 2.90pp. |
+| **> 30pp** — fragile | `sal_aligned` | **Magnitude + recovery if you can fine-tune after pruning; DropHead if you cannot.** With recovery: **77.57%** at 50% of heads after two epochs (exp29; exp32 replicates at 77.64%, 3 seeds), above both head methods, and SAL's or DropHead's weights add **+0.05pp / +0.07pp** to it, i.e. nothing. Without recovery, DropHead: **+54.95pp** over a standard fine-tune on random sets, **+63.47pp** on a fixed magnitude set, **+54.70pp** on SAL's own set (ViT-B/16, ImageNet-1k, 3 seeds). SAL only where the deployed set is fixed *before* training — +1.48pp over DropHead on that one set at 85.9M, and **−0.67pp** at 631M. |
+| **10–30pp** — intermediate | `drophead` | **Magnitude + recovery if you can fine-tune after pruning; DropHead if you cannot.** Removing 33% of heads leaves DropHead +0.14pp above its own dense row at 85.9M and −0.04pp at 631M — against a matched dense control it is −2.75pp, since the training itself costs 2.90pp. |
 | **< 10pp** — robust | `skip_heads` | **Skip head training — but this row is the one the evidence contradicts.** It was set from BERT-base's 5.15pp probe drop on ImageNet-100/SST-2 and phi-2 at one seed. Measured directly on BERT-base across four GLUE tasks (3 seeds), one-shot drops at 50% of heads are **−4.17 / −12.42 / −21.68 / −17.56pp** — three of four land in the 10–30pp band or above it, not in the skip band. And in that band magnitude + 2 epochs of recovery beat DropHead on **8 of 8 cells**. Treat `skip_heads` as unvalidated. |
 
 The `route` strings are the values `probe()` returns and are kept for
 compatibility; `sal_aligned` names the **regime** — fragile enough that head
-training pays for itself — not the method. What you train with there is
-DropHead.
+damage is expensive — not the method. The route does not choose the method:
+if you can fine-tune after pruning, magnitude + recovery is the strongest
+option measured in every band; if you cannot, DropHead is what you train with.
 
 Then, in order — **probe → head training *or* magnitude selection → FFN
 neurons → recover → `torch.compile`**:
@@ -263,11 +270,13 @@ neurons → recover → `torch.compile`**:
    [MLP neurons vs. attention heads](#mlp-neurons-vs-attention-heads) below.
    The tooling for it (`MLPMasker`, `slice_mlp_neurons`) ships in
    [sal-torch-pro](#sal-torch-pro), not in this package.
-4. **`torch.compile`.** Measured 1.12x on a dense ViT-B/16 at batch 32, 1.50x on
-   a pruned one, and 2.2x at batch 1 where pruning alone buys almost nothing.
+4. **`torch.compile`.** Measured **on GPU**: 1.12x on a dense ViT-B/16 at batch
+   32, 1.50x on a pruned one, and 2.2x at batch 1 — where pruning alone buys
+   almost nothing, also on GPU.
 
 **Report latency per batch size, and state the device.** At batch 32 the
-measured pruning speedups run 1.20x to 1.74x. **At batch 1 on a GPU every
+measured pruning speedups run 1.15x (25% of FFN neurons) to 1.74x (50% of
+heads + 50% of neurons). **At batch 1 on a GPU every
 pruning configuration is 1.00x** — a ViT-B/16 there is kernel-launch bound, and
 the only speedup available is the compiler's. That is a GPU statement and
 earlier revisions of this page did not say so: on CPU, where the same shape is
@@ -843,7 +852,7 @@ set, 3/3 seeds, every cell:
 | 50% of heads, 20 random sets | **75.33%** | 20.38% | **+54.95pp** |
 | 50% + INT4, 20 random sets | **73.29%** | 16.06% | **+57.23pp** |
 
-**Removing 33% of DropHead's heads costs +0.14pp against its own dense row** (77.69% vs 77.54%, and 76.12 vs 76.09 at INT4) — but that row is not the control. Against the dense checkpoint trained for the same five epochs with nothing pruned (80.44%) the same cell reads **−2.75pp**, because DropHead's training costs **2.90pp** of dense accuracy on its own. The earlier "free" wording compared an arm to itself and is withdrawn. At 50% it costs 5.01pp against its own dense row.
+**Removing 33% of DropHead's heads leaves it +0.14pp above its own dense row** (77.69% vs 77.54%, and 76.12 vs 76.09 at INT4) — but that row is not the control. Against the dense checkpoint trained for the same five epochs with nothing pruned (80.44%) the same cell reads **−2.75pp**, because DropHead's training costs **2.90pp** of dense accuracy on its own. The earlier "free" wording compared an arm to itself and is withdrawn. At 50% it costs 5.01pp against its own dense row.
 
 **DropHead is also stable, which SAL is not.** Seed-to-seed standard deviation
 over six measured rows: **DropHead 0.02–0.92pp, SAL 0.50–17.55pp.** SAL's clean
@@ -968,7 +977,12 @@ there (+50.78pp for SAL-aligned, +50.30pp for DropHead-random, both 10/10).
 
 **So: which one you want depends on whether you control the head set.**
 
-| your deployment | use | measured, ImageNet-100 |
+**Both rows below assume you cannot fine-tune after pruning.** If you can,
+neither is the recommendation — magnitude + 2 epochs of recovery beats both, and
+SAL's or DropHead's weights add +0.05pp / +0.07pp to it. This table is the
+ImageNet-100 reading of the head-training choice, kept for the trail.
+
+| your deployment, with no recovery pass available | use | measured, ImageNet-100 |
 |---|---|---|
 | You choose which heads to remove, and can keep a list | **SAL** with `uniform_per_layer=True` (the default), saving `pruned_heads()` with the checkpoint and slicing exactly that set | 16.5% smaller, **+1.4pp** over the best alternative at the same size, 8–10/10 seeds |
 | The pruning is out of your hands, or varies per deployment | **DropHead** (`mask_mode="drophead"` in the prototype script) | **+49.8pp** over a standard fine-tune at 50% + INT4, 10/10 seeds |
@@ -1108,7 +1122,8 @@ the adaptation cannot.
   (82.16% vs 54.56% at mask_ratio 0.5, 10 seeds) and by **42.66pp** on
   ImageNet-1k at 50% + INT4 (73.29% vs 30.63%, 3 seeds). SAL's advantage exists
   only on the specific set it trained without, which means you must record that
-  set and prune exactly it. If you cannot, use DropHead.
+  set and prune exactly it. If you cannot, use DropHead — and if you can
+  fine-tune after pruning, neither: magnitude + recovery beats both.
 - **That SAL's edge survives INT4.** Sliced and in FP16 it is +1.36pp, CI
   [+0.53, +2.18], 8/10 seeds on ImageNet-100. With INT4 weights stacked on top
   the same comparison is +0.49pp with the interval spanning zero, 6/10. On
@@ -1189,17 +1204,20 @@ the adaptation cannot.
 
 ### When to use SAL
 
-**Run `probe()` first.** The old advice here was "use DropHead by default"; six
-architectures later, the default is to spend two eval sweeps measuring your own
-model instead of inheriting someone else's regime. The table below is what to do
-once you have that number.
+**Run `probe()` first, and answer one question before it.** The question is
+whether you can run a fine-tuning pass after pruning: if you can, that dominates
+every choice below and the training-time method is close to irrelevant
+(+0.05pp / +0.07pp at a fixed head set). The probe then tells you how much is at
+stake rather than which method to use. The old advice here was "use DropHead by
+default"; six architectures and one matched-control campaign later, the default
+is to measure your own model instead of inheriting someone else's regime.
 
 | your setup | recommendation |
 |---|---|
-| **Any model, before anything else** | **`pipe.probe()`.** Two eval sweeps, no training. Drop > 10pp → **DropHead**, and prune whatever set you deploy; < 10pp → skip head training. SAL only where the deployed set is fixed before training, and even there DropHead matched or beat it at 631M. See [Start with the probe](#start-with-the-probe-not-with-a-guess). |
-| **You can run a fine-tuning pass after pruning** | **Magnitude + recovery, and skip the special training method.** On ImageNet-1k it is the strongest single-architecture option at 50% of heads: **77.57% / 75.55% INT4 after two epochs** of recovery (exp29; exp32 replicates at 77.64% / 75.43% on 3 seeds), against SAL's 76.51% / 73.95% on its own set. **Two epochs produces a better model than five and a larger pruning cost**, and both are true: 77.64% against 77.27%, but **−3.91pp** against the matched 2-epoch control where five epochs cost **−3.17pp** against its own — because the control is itself better at two epochs (81.55% vs 80.44%). Ten epochs is worse than one. And SAL's weights are **not** a useful starting point — at a fixed head set SAL pre-training is worth **+0.05pp**. |
-| **The probe says > 30pp, and you know which heads you will remove** | **DropHead first; SAL only if you measure it ahead on your model.** This is SAL's best cell and the only one where it has ever led: +1.48pp over DropHead at INT4 on ViT-B/16 (below), and **−0.67pp** on the same cell at 631M (exp28b), so the lead does not survive a change of model. If you do use SAL, keep `uniform_per_layer=True` (the default). Save `pruned_heads()` with the checkpoint and slice that set. 16.5% fewer parameters, **+56.18pp** over a standard fine-tune on that identical set and **+0.91pp** over DropHead at INT4 (ImageNet-1k, 3 seeds). Without the saved set the advantage is unrecoverable: off its own set SAL reads 34.52% against DropHead's 75.33%. The **ratio** must match too — at 33% of heads, a subset of its own set, SAL falls to 72.76%. |
-| **The probe says > 10pp and the pruning is out of your hands** | **DropHead, not SAL.** Per-step resampled head dropout: **+57.2pp** over a standard fine-tune at 50% pruning + INT4 on ViT-B/16 / ImageNet-1k, 3 seeds, and **+63.5pp** on a fixed magnitude set. 33% of heads costs it **+0.14pp against its own dense row** and **−2.75pp against a matched dense control** — its training costs 2.90pp on its own. SAL on an arbitrary set is **42.7pp behind** it. DropHead is also the stable one: seed-to-seed sd 0.02–0.92pp against SAL's 0.50–17.55pp. |
+| **Any model, before anything else** | **`pipe.probe()`.** Two eval sweeps, no training. It measures how much head damage costs your model; it does **not** choose the method. **The method is chosen by whether you can fine-tune after pruning** — if you can, magnitude + recovery, in every band; if you cannot, DropHead, and SAL only where the deployed set is fixed before training (and even there DropHead matched or beat it at 631M). The probe tells you how much is at stake. See [Start with the probe](#start-with-the-probe-not-with-a-guess). |
+| **You can run a fine-tuning pass after pruning** | **Magnitude + recovery, and skip the special training method.** On ImageNet-1k it is the strongest single-architecture option at 50% of heads: **77.57% / 75.55% INT4 after two epochs** of recovery (exp29; exp32 replicates at 77.64% / 75.43% on 3 seeds), against SAL's 76.51% / 73.95% on its own set. **Two epochs produces a better model than five and a larger pruning cost**, and both are true: 77.64% against 77.27%, but **−3.91pp** against the matched 2-epoch control where five epochs cost **−3.17pp** against its own — because the control is itself better at two epochs (81.55% vs 80.44%). Ten epochs is worse than one, **on a single seed** — that cell was not replicated, where the 1/2/3/5-epoch points are 3 seeds each. And SAL's weights are **not** a useful starting point — at a fixed head set SAL pre-training is worth **+0.05pp**. |
+| **The probe says > 30pp, and you know which heads you will remove** | **If you can fine-tune after pruning, magnitude + recovery; otherwise DropHead first, and SAL only if you measure it ahead on your model.** This is SAL's best cell and the only one where it has ever led: +1.48pp over DropHead at INT4 on ViT-B/16 (below), and **−0.67pp** on the same cell at 631M (exp28b), so the lead does not survive a change of model. If you do use SAL, keep `uniform_per_layer=True` (the default). Save `pruned_heads()` with the checkpoint and slice that set. 16.5% fewer parameters, **+56.18pp** over a standard fine-tune on that identical set and **+0.91pp** over DropHead at INT4 (ImageNet-1k, 3 seeds). Without the saved set the advantage is unrecoverable: off its own set SAL reads 34.52% against DropHead's 75.33%. The **ratio** must match too — at 33% of heads, a subset of its own set, SAL falls to 72.76%. |
+| **The probe says > 10pp and the pruning is out of your hands** | **DropHead, not SAL.** Per-step resampled head dropout: **+57.2pp** over a standard fine-tune at 50% pruning + INT4 on ViT-B/16 / ImageNet-1k, 3 seeds, and **+63.5pp** on a fixed magnitude set. 33% of heads leaves it **+0.14pp above its own dense row** and **−2.75pp against a matched dense control** — its training costs 2.90pp on its own. SAL on an arbitrary set is **42.7pp behind** it. DropHead is also the stable one: seed-to-seed sd 0.02–0.92pp against SAL's 0.50–17.55pp. |
 | **The probe says < 10pp** | **Verify before trusting this row.** On BERT-base and phi-2 both head methods landed within 0.1pp of a standard fine-tune, and on I-JEPA DropHead cost 1.1pp of clean accuracy for no gain — but BERT-base, probed at −5.15pp, loses **−4.17 to −21.68pp** one-shot at 50% of heads across four GLUE tasks, mostly outside this band, and magnitude + 2 epochs of recovery beats DropHead there on 8/8 cells. Compress, then recover, and measure on your own task. |
 | **Where your compression actually comes from** | **FFN neurons, not heads** — measured on ImageNet-1k with a matched control, **roughly five times cheaper per unit of size**: 25% of neurons costs 0.63pp at −16.4%, where 50% of heads costs 3.17pp at −16.5%. Not in this package; see [MLP neurons vs. attention heads](#mlp-neurons-vs-attention-heads). |
 | **You need 2x** | **Not from magnitude pruning on a ViT-B/16 GPU.** The highest measured GPU speedup is **1.74x**, at half the parameters removed and a cost of 6.82pp, **at batch 32**; at batch 1 on a GPU every configuration is 1.00x. Both figures are GPU figures and the CPU picture is different — a revision covering it is pending. |
