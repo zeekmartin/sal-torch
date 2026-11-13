@@ -1,0 +1,439 @@
+{
+  "experiment": "exp33_sparse_vs_structured",
+  "model": "google/vit-base-patch16-224",
+  "dataset": "evanarlian/imagenet_1k_resized_256",
+  "dataset_label": "ImageNet-1k (resized 256px, evanarlian/imagenet_1k_resized_256)",
+  "seed": 42,
+  "gate": false,
+  "n_train": 1281167,
+  "n_val": 50000,
+  "num_classes": 1000,
+  "batch_size": 64,
+  "calib_images": 128,
+  "recover_epochs": 2,
+  "pretrained": {
+    "accuracy": 0.7844,
+    "int4_accuracy": 0.77228
+  },
+  "reference_structured": {
+    "drophead_p33": {
+      "accuracy": 0.7769,
+      "source": "EXP27_DROPHEAD.md"
+    },
+    "drophead_p50": {
+      "accuracy": 0.7254,
+      "source": "EXP27_DROPHEAD.md"
+    },
+    "magnitude_recovery_p33_5ep": {
+      "accuracy": 0.78845,
+      "source": "EXP29"
+    },
+    "magnitude_recovery_p50_5ep": {
+      "accuracy": 0.77265,
+      "source": "EXP29"
+    },
+    "magnitude_recovery_p50_2ep": {
+      "accuracy": 0.7757,
+      "source": "EXP29"
+    },
+    "control_dense_5ep": {
+      "accuracy": 0.80556,
+      "source": "EXP31"
+    }
+  },
+  "notes": {
+    "unstructured": "SparseGPT and Wanda mask weights; they do not remove them. No dense-kernel speedup exists for these arms -- report accuracy at matched removed parameter count only.",
+    "matching": "Removing a fraction f of heads uniformly per layer removes exactly f of the q/k/v/o weight parameters, so scope=attn matches at sparsity f. scope=whole spreads the same absolute count over all encoder linear layers, giving a lower sparsity.",
+    "mask_preserved": "Recovery re-applies the prune-time mask via a gradient hook plus a final re-apply, and the zero fraction is re-measured afterwards. Without this an ordinary fine-tune fills the zeros back in.",
+    "seeds": "SparseGPT/Wanda are deterministic given a calibration set; the seed varies which 128 training images calibrate.",
+    "int4": "quantize_weights(model, 4): a simulated per-channel round-trip in fp32, not a 4-bit kernel."
+  },
+  "gpu": "AMD Instinct MI250X",
+  "torch_version": "2.5.1+rocm6.2",
+  "cells": {
+    "wanda_attn_p33": {
+      "matched": {
+        "scope": "attn",
+        "head_ratio": 0.33,
+        "attn_weight_params": 28311552,
+        "target_removed_params": 9342812,
+        "target_layers": 48,
+        "target_layer_params": 28311552,
+        "matched_sparsity": 0.33
+      },
+      "prune_report": {
+        "model_params": 86567656,
+        "model_zeros": 9326592,
+        "model_zero_frac": 0.10773760583282976,
+        "target_params": 28311552,
+        "target_zeros": 9326592,
+        "target_zero_frac": 0.3294270833333333,
+        "method": "wanda",
+        "sparsity": 0.33,
+        "calib_samples": 128,
+        "layers": 48,
+        "zeroed": 9326592
+      },
+      "prune_seconds": 6.9,
+      "one_shot": {
+        "accuracy": 0.78432,
+        "int4_accuracy": 0.77652
+      },
+      "recovered": {
+        "accuracy": 0.81598,
+        "int4_accuracy": 0.8045
+      },
+      "recovered_losses": [
+        0.5895892458377175,
+        0.2850575414236174
+      ],
+      "recover_seconds": 6796.5,
+      "sparsity_after_recovery": {
+        "model_params": 86567656,
+        "model_zeros": 9326592,
+        "model_zero_frac": 0.10773760583282976,
+        "target_params": 28311552,
+        "target_zeros": 9326592,
+        "target_zero_frac": 0.3294270833333333
+      },
+      "sparsity_drift": 0.0,
+      "mask_preserved": true
+    },
+    "wanda_attn_p50": {
+      "matched": {
+        "scope": "attn",
+        "head_ratio": 0.5,
+        "attn_weight_params": 28311552,
+        "target_removed_params": 14155776,
+        "target_layers": 48,
+        "target_layer_params": 28311552,
+        "matched_sparsity": 0.5
+      },
+      "prune_report": {
+        "model_params": 86567656,
+        "model_zeros": 14155776,
+        "model_zero_frac": 0.1635226902759155,
+        "target_params": 28311552,
+        "target_zeros": 14155776,
+        "target_zero_frac": 0.5,
+        "method": "wanda",
+        "sparsity": 0.5,
+        "calib_samples": 128,
+        "layers": 48,
+        "zeroed": 14155776
+      },
+      "prune_seconds": 1.2,
+      "one_shot": {
+        "accuracy": 0.7719,
+        "int4_accuracy": 0.76396
+      },
+      "recovered": {
+        "accuracy": 0.8135,
+        "int4_accuracy": 0.80116
+      },
+      "recovered_losses": [
+        0.609379816442137,
+        0.29879118490351386
+      ],
+      "recover_seconds": 6906.4,
+      "sparsity_after_recovery": {
+        "model_params": 86567656,
+        "model_zeros": 14155776,
+        "model_zero_frac": 0.1635226902759155,
+        "target_params": 28311552,
+        "target_zeros": 14155776,
+        "target_zero_frac": 0.5
+      },
+      "sparsity_drift": 0.0,
+      "mask_preserved": true
+    },
+    "wanda_whole_p33": {
+      "matched": {
+        "scope": "whole",
+        "head_ratio": 0.33,
+        "attn_weight_params": 28311552,
+        "target_removed_params": 9342812,
+        "target_layers": 72,
+        "target_layer_params": 84934656,
+        "matched_sparsity": 0.11
+      },
+      "prune_report": {
+        "model_params": 86567656,
+        "model_zeros": 9298944,
+        "model_zero_frac": 0.10741822557838461,
+        "target_params": 84934656,
+        "target_zeros": 9298944,
+        "target_zero_frac": 0.10948350694444445,
+        "method": "wanda",
+        "sparsity": 0.11,
+        "calib_samples": 128,
+        "layers": 72,
+        "zeroed": 9298944
+      },
+      "prune_seconds": 1.2,
+      "one_shot": {
+        "accuracy": 0.78468,
+        "int4_accuracy": 0.77218
+      },
+      "recovered": {
+        "accuracy": 0.81674,
+        "int4_accuracy": 0.8016
+      },
+      "recovered_losses": [
+        0.5861115893555143,
+        0.28288858088563434
+      ],
+      "recover_seconds": 6894.0,
+      "sparsity_after_recovery": {
+        "model_params": 86567656,
+        "model_zeros": 9298944,
+        "model_zero_frac": 0.10741822557838461,
+        "target_params": 84934656,
+        "target_zeros": 9298944,
+        "target_zero_frac": 0.10948350694444445
+      },
+      "sparsity_drift": 0.0,
+      "mask_preserved": true
+    },
+    "wanda_whole_p50": {
+      "matched": {
+        "scope": "whole",
+        "head_ratio": 0.5,
+        "attn_weight_params": 28311552,
+        "target_removed_params": 14155776,
+        "target_layers": 72,
+        "target_layer_params": 84934656,
+        "matched_sparsity": 0.16666666666666666
+      },
+      "prune_report": {
+        "model_params": 86567656,
+        "model_zeros": 14155776,
+        "model_zero_frac": 0.1635226902759155,
+        "target_params": 84934656,
+        "target_zeros": 14155776,
+        "target_zero_frac": 0.16666666666666666,
+        "method": "wanda",
+        "sparsity": 0.16666666666666666,
+        "calib_samples": 128,
+        "layers": 72,
+        "zeroed": 14155776
+      },
+      "prune_seconds": 1.2,
+      "one_shot": {
+        "accuracy": 0.7838,
+        "int4_accuracy": 0.77238
+      },
+      "recovered": {
+        "accuracy": 0.81516,
+        "int4_accuracy": 0.8004
+      },
+      "recovered_losses": [
+        0.5817210821127717,
+        0.2834525019116709
+      ],
+      "recover_seconds": 6956.4,
+      "sparsity_after_recovery": {
+        "model_params": 86567656,
+        "model_zeros": 14155776,
+        "model_zero_frac": 0.1635226902759155,
+        "target_params": 84934656,
+        "target_zeros": 14155776,
+        "target_zero_frac": 0.16666666666666666
+      },
+      "sparsity_drift": 0.0,
+      "mask_preserved": true
+    },
+    "sparsegpt_attn_p33": {
+      "matched": {
+        "scope": "attn",
+        "head_ratio": 0.33,
+        "attn_weight_params": 28311552,
+        "target_removed_params": 9342812,
+        "target_layers": 48,
+        "target_layer_params": 28311552,
+        "matched_sparsity": 0.33
+      },
+      "prune_report": {
+        "model_params": 86567656,
+        "model_zeros": 9343008,
+        "model_zero_frac": 0.10792723785890657,
+        "target_params": 28311552,
+        "target_zeros": 9343008,
+        "target_zero_frac": 0.3300069173177083,
+        "method": "sparsegpt",
+        "sparsity": 0.33,
+        "calib_samples": 128,
+        "layers": 48,
+        "zeroed": 9343008
+      },
+      "prune_seconds": 22.8,
+      "one_shot": {
+        "accuracy": 0.7811,
+        "int4_accuracy": 0.77244
+      },
+      "recovered": {
+        "accuracy": 0.81548,
+        "int4_accuracy": 0.80446
+      },
+      "recovered_losses": [
+        0.590082125334918,
+        0.28513481869725676
+      ],
+      "recover_seconds": 7870.1,
+      "sparsity_after_recovery": {
+        "model_params": 86567656,
+        "model_zeros": 9343008,
+        "model_zero_frac": 0.10792723785890657,
+        "target_params": 28311552,
+        "target_zeros": 9343008,
+        "target_zero_frac": 0.3300069173177083
+      },
+      "sparsity_drift": 0.0,
+      "mask_preserved": true
+    },
+    "sparsegpt_attn_p50": {
+      "matched": {
+        "scope": "attn",
+        "head_ratio": 0.5,
+        "attn_weight_params": 28311552,
+        "target_removed_params": 14155776,
+        "target_layers": 48,
+        "target_layer_params": 28311552,
+        "matched_sparsity": 0.5
+      },
+      "prune_report": {
+        "model_params": 86567656,
+        "model_zeros": 14156064,
+        "model_zero_frac": 0.163526017153566,
+        "target_params": 28311552,
+        "target_zeros": 14156064,
+        "target_zero_frac": 0.5000101725260416,
+        "method": "sparsegpt",
+        "sparsity": 0.5,
+        "calib_samples": 128,
+        "layers": 48,
+        "zeroed": 14156064
+      },
+      "prune_seconds": 11.7,
+      "one_shot": {
+        "accuracy": 0.77304,
+        "int4_accuracy": 0.76166
+      },
+      "recovered": {
+        "accuracy": 0.81448,
+        "int4_accuracy": 0.80268
+      },
+      "recovered_losses": [
+        0.6103960424531375,
+        0.29807817215811994
+      ],
+      "recover_seconds": 6788.6,
+      "sparsity_after_recovery": {
+        "model_params": 86567656,
+        "model_zeros": 14156064,
+        "model_zero_frac": 0.163526017153566,
+        "target_params": 28311552,
+        "target_zeros": 14156064,
+        "target_zero_frac": 0.5000101725260416
+      },
+      "sparsity_drift": 0.0,
+      "mask_preserved": true
+    },
+    "sparsegpt_whole_p33": {
+      "matched": {
+        "scope": "whole",
+        "head_ratio": 0.33,
+        "attn_weight_params": 28311552,
+        "target_removed_params": 9342812,
+        "target_layers": 72,
+        "target_layer_params": 84934656,
+        "matched_sparsity": 0.11
+      },
+      "prune_report": {
+        "model_params": 86567656,
+        "model_zeros": 9343152,
+        "model_zero_frac": 0.1079289012977318,
+        "target_params": 84934656,
+        "target_zeros": 9343152,
+        "target_zero_frac": 0.1100040011935764,
+        "method": "sparsegpt",
+        "sparsity": 0.11,
+        "calib_samples": 128,
+        "layers": 72,
+        "zeroed": 9343152
+      },
+      "prune_seconds": 28.0,
+      "one_shot": {
+        "accuracy": 0.78414,
+        "int4_accuracy": 0.77146
+      },
+      "recovered": {
+        "accuracy": 0.8161,
+        "int4_accuracy": 0.8016
+      },
+      "recovered_losses": [
+        0.5850595760283083,
+        0.2822869433209838
+      ],
+      "recover_seconds": 6694.9,
+      "sparsity_after_recovery": {
+        "model_params": 86567656,
+        "model_zeros": 9343152,
+        "model_zero_frac": 0.1079289012977318,
+        "target_params": 84934656,
+        "target_zeros": 9343152,
+        "target_zero_frac": 0.1100040011935764
+      },
+      "sparsity_drift": 0.0,
+      "mask_preserved": true
+    },
+    "sparsegpt_whole_p50": {
+      "matched": {
+        "scope": "whole",
+        "head_ratio": 0.5,
+        "attn_weight_params": 28311552,
+        "target_removed_params": 14155776,
+        "target_layers": 72,
+        "target_layer_params": 84934656,
+        "matched_sparsity": 0.16666666666666666
+      },
+      "prune_report": {
+        "model_params": 86567656,
+        "model_zeros": 14156424,
+        "model_zero_frac": 0.1635301757506291,
+        "target_params": 84934656,
+        "target_zeros": 14156424,
+        "target_zero_frac": 0.1666742960611979,
+        "method": "sparsegpt",
+        "sparsity": 0.16666666666666666,
+        "calib_samples": 128,
+        "layers": 72,
+        "zeroed": 14156424
+      },
+      "prune_seconds": 20.9,
+      "one_shot": {
+        "accuracy": 0.78348,
+        "int4_accuracy": 0.77
+      },
+      "recovered": {
+        "accuracy": 0.81674,
+        "int4_accuracy": 0.8016
+      },
+      "recovered_losses": [
+        0.5807324607715936,
+        0.28226700777774955
+      ],
+      "recover_seconds": 6951.2,
+      "sparsity_after_recovery": {
+        "model_params": 86567656,
+        "model_zeros": 14156424,
+        "model_zero_frac": 0.1635301757506291,
+        "target_params": 84934656,
+        "target_zeros": 14156424,
+        "target_zero_frac": 0.1666742960611979
+      },
+      "sparsity_drift": 0.0,
+      "mask_preserved": true
+    }
+  }
+}

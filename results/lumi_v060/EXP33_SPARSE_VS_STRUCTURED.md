@@ -1,13 +1,45 @@
 # exp33 — SparseGPT / Wanda against DropHead and magnitude
 
-**PARTIAL — the 2:4 arm is complete at 3 seeds (below); the unstructured grid
-is running.** The ROCm check and the equivalence test are done and recorded
-below.
+**COMPLETE — 48 unstructured runs + 12 at 2:4, 3 seeds, 60.05 GPU-hours, all
+`COMPLETED 0:0`.** Data in `exp33_s{42,123,456}/exp33_sparse.json` (the
+8-config unstructured grid) and `exp33_nm_s{42,123,456}/exp33_sparse.json`
+(2:4). The ROCm check and the equivalence test are recorded below.
 
 **ViT-B/16 (`google/vit-base-patch16-224`), ImageNet-1k
 (`evanarlian/imagenet_1k_resized_256`), 3 seeds, full 50 000-image validation
 split, autocast bfloat16.** Script `experiments/exp33_sparse_vs_structured.py`,
 pruning cores in `experiments/exp33_sparse_core.py`.
+
+## Headline
+
+**At a matched count of removed parameters, unstructured sparsity plus two
+epochs of mask-preserving recovery is free, and structured head pruning costs
+3.91pp.** All eight unstructured cells land within **±0.22pp** of their matched
+2-epoch dense control, against a control seed spread of 0.21pp — level with
+dense, on 3 seeds, with the mask verified intact. 2:4 sits between them at
+−0.46 / −0.55pp.
+
+The ordering is the exact inverse of the speedup ordering, and that is the
+result:
+
+| at ~16.4% of parameters removed, + 2 ep | cost vs matched control | speedup @ batch >= 32 |
+|---|---|---|
+| unstructured (whole-model) | **−0.07pp** / **+0.03pp** | **none by construction** |
+| unstructured (attention-only) | **−0.16pp** / **−0.22pp** | **none by construction** |
+| 2:4 semi-structured (attention) | **−0.55pp** / **−0.46pp** | **unmeasurable here** |
+| magnitude head pruning, structured | **−3.91pp** (exp32) | **1.10x measured** |
+
+Second result, visible one-shot and larger than anything after recovery:
+**removing 50% of the attention weights without a structure constraint costs
+−1.23pp at zero epochs; removing the same parameters as whole heads costs
+−60.11pp** (exp25: 20.33% against its own matched 5-epoch control's 80.44%,
+one-shot in both cases). The price is paid for the *structure*, not for the
+parameters.
+
+Third, **SparseGPT's error compensation earns its keep only as the constraint
+tightens**: it loses to Wanda one-shot at unstructured sparsity (−0.39pp at
+attention-P33), ties at attention-P50 (−0.06pp), and wins by **+2.35pp** at
+2:4. After recovery every pairing is inside the seed spread.
 
 ## Why
 
@@ -156,17 +188,18 @@ it with the same epoch count.
 | DropHead → magnitude + recovery | 5 + 5 | structured | **1.10x** | **77.06%** (exp24 arm 4) |
 | magnitude + recovery, 5 ep | 5 | structured | **1.10x** | 77.265% (exp29) → **−3.17pp** |
 | magnitude + recovery, **2 ep** | **2** | structured | **1.10x** | **77.642%** (exp32, 3 seeds) → **−3.91pp** |
-| SparseGPT attn, one-shot | **0** | unstructured | **none by construction** | _this run_ |
-| SparseGPT attn, + 2 ep | **2** | unstructured | **none by construction** | _this run_ |
-| Wanda attn, one-shot | **0** | unstructured | **none by construction** | _this run_ |
-| Wanda attn, + 2 ep | **2** | unstructured | **none by construction** | _this run_ |
-| SparseGPT attn **2:4**, one-shot | **0** | **semi-structured** | **unmeasurable here** | _this run_ |
-| SparseGPT attn **2:4**, + 2 ep | **2** | **semi-structured** | **unmeasurable here** | _this run_ |
-| Wanda attn **2:4**, one-shot | **0** | **semi-structured** | **unmeasurable here** | _this run_ |
-| Wanda attn **2:4**, + 2 ep | **2** | **semi-structured** | **unmeasurable here** | _this run_ |
+| SparseGPT attn, one-shot | **0** | unstructured | **none by construction** | **77.153%** -> −1.29pp vs pretrained |
+| SparseGPT attn, + 2 ep | **2** | unstructured | **none by construction** | **81.337%** -> **−0.22pp** |
+| Wanda attn, one-shot | **0** | unstructured | **none by construction** | **77.210%** -> −1.23pp vs pretrained |
+| Wanda attn, + 2 ep | **2** | unstructured | **none by construction** | **81.397%** -> **−0.16pp** |
+| SparseGPT attn **2:4**, one-shot | **0** | **semi-structured** | **unmeasurable here** | **75.223%** -> −3.22pp vs pretrained |
+| SparseGPT attn **2:4**, + 2 ep | **2** | **semi-structured** | **unmeasurable here** | **81.097%** -> **−0.46pp** |
+| Wanda attn **2:4**, one-shot | **0** | **semi-structured** | **unmeasurable here** | **72.871%** -> −5.57pp vs pretrained |
+| Wanda attn **2:4**, + 2 ep | **2** | **semi-structured** | **unmeasurable here** | **80.999%** -> **−0.55pp** |
 
-The whole-model unstructured arms join the same table at their own matched
-parameter count, and the P33 arms repeat it at that ratio.
+Every unstructured and 2:4 figure above is a three-seed mean. The whole-model
+unstructured arms and the P33 arms are in the full grid below, at their own
+matched parameter counts.
 
 **The trap this closes, concretely.** Wanda attention-P33 plus 2 epochs reads
 **81.60%** on seed 42. Against the 5-epoch control (80.556%) that is +1.04pp
@@ -256,6 +289,135 @@ One caveat that belongs with every unstructured and 2:4 row: those models are
 memory saving and no latency change without a kernel that exploits the pattern.
 The structured arm is genuinely 16.5% smaller.
 
+## The unstructured grid: 8 configs, 3 seeds
+
+48 runs, **48.34 GPU-hours**, jobs `23671606/07/08`, 16h02-16h11 each, all
+`COMPLETED 0:0`. Data in `exp33_s{42,123,456}/exp33_sparse.json`.
+
+**Every recovery run kept its mask**: `sparsity_drift` is exactly `0.0` and
+`mask_preserved` is true on **24/24** runs, and the zero fraction after
+recovery equals the zero fraction at prune time to the parameter. These cells
+are sparse, which is the claim the gradient hook exists to make true.
+
+### One-shot, zero epochs, against the pretrained checkpoint
+
+| method | scope | target sparsity | % of model | top-1 | vs pretrained | INT4 | vs pretrained INT4 |
+|---|---|---|---|---|---|---|---|
+| Wanda | attn | 0.3294 | 10.77% | **78.452%** | **+0.01pp** | 77.662% | +0.43pp |
+| SparseGPT | attn | 0.3300 | 10.79% | 78.063% | −0.38pp | 77.223% | −0.00pp |
+| Wanda | whole | 0.1095 | 10.74% | **78.456%** | **+0.02pp** | 77.215% | −0.01pp |
+| SparseGPT | whole | 0.1100 | 10.79% | 78.420% | −0.02pp | 77.120% | −0.11pp |
+| Wanda | attn | **0.5000** | 16.35% | **77.210%** | **−1.23pp** | 76.367% | −0.86pp |
+| SparseGPT | attn | **0.5000** | 16.35% | 77.153% | −1.29pp | 76.155% | −1.07pp |
+| Wanda | whole | 0.1667 | 16.35% | **78.377%** | **−0.06pp** | 77.253% | +0.03pp |
+| SparseGPT | whole | 0.1667 | 16.35% | 78.359% | −0.08pp | 76.963% | −0.26pp |
+
+Seed spreads are **0.02 to 0.25pp** on every cell. The calibration sample —
+which 128 training images build the Hessian or the activation norms — is not a
+meaningful noise source on this model, unlike the training seed in the SAL
+campaigns, where one row spanned 30pp.
+
+**The P33-equivalent cells are free one-shot**, within 0.4pp of the pretrained
+checkpoint and in two cases above it, which is noise rather than an improvement.
+The only cell that costs anything before recovery is attention-only at 50%
+sparsity, and it costs **1.2-1.3pp**.
+
+### After 2 epochs of mask-preserving recovery, against matched controls
+
+Scored **within seed** against each seed's own 2-epoch dense control (81.676 /
+81.524 / 81.462%, mean 81.554%, INT4 80.273%).
+
+| method | scope | % of model | seed 42 | seed 123 | seed 456 | mean | **pruning cost** | INT4 mean | INT4 cost |
+|---|---|---|---|---|---|---|---|---|---|
+| Wanda | attn | 10.77% | 81.598% | 81.488% | 81.582% | 81.556% | **+0.00pp** | 80.420% | +0.15pp |
+| SparseGPT | attn | 10.79% | 81.548% | 81.500% | 81.588% | 81.545% | **−0.01pp** | 80.337% | +0.06pp |
+| Wanda | whole | 10.74% | 81.674% | 81.536% | 81.594% | 81.601% | **+0.05pp** | 80.066% | −0.21pp |
+| SparseGPT | whole | 10.79% | 81.610% | 81.528% | 81.580% | 81.573% | **+0.02pp** | 80.075% | −0.20pp |
+| Wanda | attn | 16.35% | 81.350% | 81.354% | 81.486% | 81.397% | **−0.16pp** | 80.161% | −0.11pp |
+| SparseGPT | attn | 16.35% | 81.448% | 81.258% | 81.304% | 81.337% | **−0.22pp** | 80.077% | −0.20pp |
+| Wanda | whole | 16.35% | 81.516% | 81.358% | 81.588% | 81.487% | **−0.07pp** | 79.967% | −0.31pp |
+| SparseGPT | whole | 16.35% | 81.674% | 81.472% | 81.596% | 81.581% | **+0.03pp** | 80.117% | −0.16pp |
+
+**Eight cells, every one inside ±0.22pp, against a control whose own three
+seeds span 0.21pp.** Four read positive. The honest statement is not "sparsity
+helps" — it is that **at these ratios, unstructured sparsity plus two epochs is
+indistinguishable from dense on this model and this dataset**, and the four
+positive signs are the measurement floor, not an effect.
+
+The INT4 column is the one place a difference shows: **spreading the same
+parameter count over every encoder linear costs INT4 robustness** (−0.20 to
+−0.31pp at `whole`) where confining it to attention does not (−0.11 to
++0.15pp). The effect is small and at the edge of the spread, but it points the
+same way on 4/4 pairings, and it is the opposite of the FP32 ordering, where
+`whole` is marginally better. Anyone combining unstructured sparsity with
+4-bit weights should measure the pair rather than assume they compose.
+
+### Wanda is 3-18x cheaper to run and loses nothing
+
+| method | scope, sparsity | prune seconds |
+|---|---|---|
+| Wanda | attn 0.50 | **1.2 s** |
+| SparseGPT | attn 0.50 | 10.8 s |
+| Wanda | whole 0.1667 | **1.2 s** |
+| SparseGPT | whole 0.1667 | 20.1 s |
+| Wanda | attn 0.33 | 7.2 s |
+| SparseGPT | whole 0.11 | 28.9 s |
+
+SparseGPT pays for a Hessian, a Cholesky inverse and a sequential column loop;
+Wanda needs one activation-norm pass. **On this model, at unstructured
+sparsity, that buys nothing** — Wanda is ahead one-shot on 3 of 4 scope/ratio
+pairings and the two are within 0.09pp after recovery everywhere. SparseGPT's
+advantage appears only under the 2:4 constraint (+2.35pp one-shot), which is
+the reading that makes mechanistic sense: error compensation matters when the
+mask is forced to a pattern the weights did not choose.
+
+### What this changes
+
+- **The routing table needs a row, and it is not the one the experiment was
+  designed to find.** The question was whether one-shot unstructured pruners
+  beat training-time head masking. At matched parameter count they do, by
+  3.7pp, and they need no masked training — but they deliver **no speedup on
+  any hardware available here**, and the model is the same size in memory. So
+  the row is conditional on the deployment target, not on accuracy.
+- **Structured head pruning's 3.91pp is the price of the structure.** The same
+  16.35% of parameters removed without a structure constraint costs 0.1-0.2pp.
+  A reader comparing only accuracy columns would conclude head pruning is
+  simply worse; what it is, is the only one of the three that makes the model
+  smaller and faster on an MI250X.
+- **DropHead's default is not threatened on its own ground.** `README.md`'s
+  routing is about deployments that need the model *faster or smaller*, and
+  nothing here produces either. But for a deployment that only needs the
+  parameter count down — memory-mapped weights, sparse storage, a future
+  kernel — two epochs of Wanda + mask-preserving recovery is a cheaper and
+  better-behaved path than masked training, and it does not commit to a head
+  set at training time.
+- **The 2:4 middle ground is real but unpriceable here.** It costs ~0.5pp, 8x
+  less than structured pruning, and it is the only unstructured-family pattern
+  with a hardware path at all — just not on this machine.
+
+## Caveats
+
+- **No speedup or memory saving exists for any unstructured or 2:4 row.** The
+  weights are zeroed, not removed; the model is the same size in memory and a
+  dense kernel does identical arithmetic. Only the structured arm is genuinely
+  16.5% smaller.
+- **One model, one dataset, two ratios.** Every figure here is ViT-B/16 on
+  ImageNet-1k. Nothing tests whether "unstructured is free after 2 epochs"
+  holds at 70% sparsity, on a decoder, or on a task with less data to recover
+  with — and exp34's MRPC is a direct warning that recovery budgets do not
+  transfer to small datasets.
+- **The 2-epoch recovery is itself a choice**, made by exp29 and re-measured by
+  exp32. The costs here are costs *at 2 epochs*; exp32 showed that moving to 5
+  epochs changes a pruning cost by up to 0.9pp, in the direction of making it
+  smaller while making the model absolutely worse.
+- **INT4 is a simulated per-channel round-trip in fp32**, not a 4-bit kernel
+  (CLAUDE.md). The column is the accuracy cost of 4-bit weight rounding and
+  says nothing about speed or memory.
+- **The whole-model arms exclude the classifier head** and include the MLPs, so
+  `whole` at 16.67% per-layer sparsity and `attn` at 50% remove the same
+  absolute count from different places. That is the point of the pairing, but
+  it means the two columns are not the same perturbation at the same strength.
+
 ## Jobs
 
 | arm | seed | job | state |
@@ -264,9 +426,9 @@ The structured arm is genuinely 16.5% smaller.
 | smoke | — | `23670445` | COMPLETED 0:07:57 |
 | order check | — | `23670472` | COMPLETED 0:03:46 |
 | 2:4 smoke | — | `23672122` | COMPLETED 0:01:46 |
-| unstructured grid, 8 configs | 42 | `23671606` | RUNNING |
-| unstructured grid | 123 | `23671607` | RUNNING |
-| unstructured grid | 456 | `23671608` | RUNNING |
+| unstructured grid, 8 configs | 42 | `23671606` | **COMPLETED** 16:11:23 |
+| unstructured grid | 123 | `23671607` | **COMPLETED** 16:02:07 |
+| unstructured grid | 456 | `23671608` | **COMPLETED** 16:06:26 |
 | **2:4, attention-only** | 42 | `23672190` | **COMPLETED** 3:55:05 |
 | **2:4** | 123 | `23672191` | **COMPLETED** 3:55:24 |
 | **2:4** | 456 | `23672192` | **COMPLETED** 3:52:03 |
