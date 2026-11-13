@@ -1,14 +1,26 @@
 """CompressionPipeline — the validated path, in one object.
 
-The v0.4.0 benchmarks pointed at one specific recipe: **fully fine-tune with SAL,
-then quantize**. On GPT-2 Medium that produced a model with higher accuracy than
-the uncompressed baseline at a quarter of the size. Getting there by hand means
-wiring `SALConfig` → `HeadMasker` → your training loop → head selection →
-slicing → a quantization backend → an evaluation harness, and getting the
-training method wrong silently costs about three points of accuracy.
+Compressing a model by hand means wiring `SALConfig` → `HeadMasker` → your
+training loop → head selection → slicing → a quantization backend → an
+evaluation harness. This object does that wiring and measures every stage, so
+the output is a deployment decision rather than a number.
 
-This makes that path the default one, and measures every stage so the output is
-a deployment decision rather than a number:
+**Two limits to know before using it.**
+
+*It does not repair the model.* The stages are probe → scan → sal_train →
+compress → validate → export; nothing recovers the damage `compress()` does.
+Almost every accuracy this project publishes includes a post-pruning fine-tune,
+which is a step this pipeline does not perform -- at 50% of heads the gap
+between the two is 9.56% against 77.6%. `recover()` is v0.7.0 item 1. Until it
+ships, run your own fine-tune between `compress()` and `validate()`.
+
+*The v0.4.0 recipe it was built around is superseded.* "Fully fine-tune with SAL,
+then quantize" came from one model (GPT-2 Medium / SST-2, 355M, no recovery
+pass). The ImageNet-1k campaign -- three seeds, full validation split, a dense
+control trained for the same number of epochs -- measured that at a fixed head
+set SAL's weights are worth **+0.05pp** after a recovery pass, against the
+recovery pass itself being worth up to 68pp. If you can fine-tune after pruning,
+that is where the accuracy is.
 
     from sal import CompressionPipeline
 
@@ -185,39 +197,67 @@ class ProbeSummary:
         ]
         if self.route == "sal_aligned":
             lines += [
-                f"FRAGILE (drop > {FRAGILE_DROP_PP:.0f}pp). Train with SAL and prune "
-                "the set it trained without:",
-                "  sal_train(train_dataset, prune_fraction=0.5)  # uniform_per_layer "
-                "is the default",
-                "  compress(pruning=0.5, slice_heads=True)       # pass pruned_heads()",
-                "measured: SAL led DropHead on the identical head set by +31.0pp "
-                "(DINOv2-large, -94pp probe), +12.7pp (DeiT-small, -76pp) and "
-                "+2.0pp (ViT-B/16, -62pp).",
+                f"FRAGILE (drop > {FRAGILE_DROP_PP:.0f}pp). Head training pays "
+                "for itself here. Which method depends on one question:",
+                "  can you fine-tune AFTER pruning?",
+                "    yes -> prune by magnitude, then recover. Strongest option "
+                "measured: 77.6% at 50% of heads on ViT-B/16 / ImageNet-1k "
+                "after 2 epochs, 3 seeds, against SAL's 76.5% and DropHead's "
+                "72.5%. This pipeline has no recover() stage yet (v0.7.0 "
+                "item 1) -- run the fine-tune yourself between compress() and "
+                "validate().",
+                "    no  -> train with head masking first:",
+                "      sal_train(train_dataset, prune_fraction=0.5)  # SAL: ties "
+                "you to ONE head set, fixed before training",
+                "      compress(pruning=0.5, slice_heads=True)       # pass "
+                "pruned_heads()",
+                "      DropHead is the general alternative and is NOT callable "
+                "from this package yet (v0.7.0 item 2); see "
+                "scripts/run_sal_qat_prototype.py --mask-mode drophead.",
+                "measured (ViT-B/16 / ImageNet-1k, 3 seeds, full 50k val split, "
+                "against a dense control trained for the same epochs): SAL is "
+                "+1.48pp over DropHead on the one set it trained without, and "
+                "-42.66pp on any other set.",
             ]
         elif self.route == "drophead":
             lines += [
-                f"INTERMEDIATE ({ROBUST_DROP_PP:.0f}-{FRAGILE_DROP_PP:.0f}pp). Either "
-                "method works and the choice is about control of the head set:",
+                f"INTERMEDIATE ({ROBUST_DROP_PP:.0f}-{FRAGILE_DROP_PP:.0f}pp). "
+                "If you can fine-tune after pruning, do that and skip the "
+                "special training method -- on BERT-base across four GLUE "
+                "tasks, magnitude + 2 epochs of recovery beat DropHead on 8 of "
+                "8 cells (3 seeds). Otherwise the choice is about control of "
+                "the head set:",
                 "  you choose the deployed set  -> SAL, and prune exactly "
                 "pruned_heads()",
-                "  the set is out of your hands -> DropHead, which is robust on any "
-                "set of that size",
-                "measured on the one model in this band (I-JEPA ViT-H/14, -18.9pp "
-                "probe): SAL led by +2.6pp on the identical set.",
+                "  the set is out of your hands -> DropHead, robust on any set "
+                "of that size (not callable from this package yet; v0.7.0 "
+                "item 2)",
+                "measured on the one vision model in this band (I-JEPA "
+                "ViT-H/14, -18.9pp probe, ImageNet-100): SAL led by +2.6pp on "
+                "the identical set.",
             ]
         else:
             lines += [
-                f"ROBUST (drop < {ROBUST_DROP_PP:.0f}pp). Skip head training "
-                "altogether — it buys nothing here:",
+                f"ROBUST (drop < {ROBUST_DROP_PP:.0f}pp). Head TRAINING buys "
+                "nothing measurable here -- but this threshold is the one the "
+                "evidence contradicts, so verify rather than trust it:",
                 "  compress(pruning=0.5, quantization='int4', slice_heads=True)",
-                "measured: SAL and DropHead were indistinguishable on models in this "
-                "band (+0.08pp on BERT-base, +0.11pp on phi-2), and DropHead cost "
-                "1.1pp of clean accuracy on I-JEPA for no gain.",
+                "  then recover: a post-pruning fine-tune is worth far more "
+                "than any training-time method, and this pipeline does not run "
+                "one yet (v0.7.0 item 1).",
+                "measured: SAL and DropHead were indistinguishable on models in "
+                "this band (+0.08pp on BERT-base, +0.11pp on phi-2), and "
+                "DropHead cost 1.1pp of clean accuracy on I-JEPA for no gain. "
+                "BUT the same BERT-base probed at -5.15pp loses -4.17 to "
+                "-21.68pp one-shot at 50% of heads across four GLUE tasks, "
+                "i.e. mostly OUTSIDE this band. Probe on YOUR task.",
             ]
         lines.append(
-            "then: head pruning is the small half of the compression. Pruning FFN "
-            "neurons removes twice the parameters for less accuracy — at an "
-            "identical -16.5%, 25% of neurons cost 3.1pp against 10-12pp for 50% of "
+            "then: head pruning is the small half of the compression. Pruning "
+            "FFN neurons removes twice the parameters for less accuracy -- "
+            "measured on ViT-B/16 / ImageNet-1k with a recovery pass and a "
+            "dense control trained for the same epochs, at an identical "
+            "-16.5%, 25% of neurons cost 0.63pp against 3.17pp for 50% of "
             "heads. Neuron masking is not part of sal-torch; see ROADMAP.md.")
         lines.append("finally: torch.compile. Measured 1.12x on a dense ViT-B/16 at "
                      "batch 32 and 1.50x on a pruned one, and 2.2x at batch 1 where "
@@ -392,10 +432,24 @@ class CompressionPipeline:
         below = (stage.accuracy < self.accuracy_floor if self.metric == "accuracy"
                  else stage.accuracy > self.accuracy_floor)
         if below:
+            hint = ""
+            if self._compressed and stage.name not in ("original",):
+                # The floor currently fires on the UNREPAIRED model: this
+                # pipeline has no recover() stage, so a compressed model is
+                # scored before anything has repaired it. At 50% of heads that
+                # is 9.56% where two epochs of fine-tuning reach 77.6%. Say so,
+                # or the user reads a recoverable model as a broken one.
+                hint = (" This model has not been repaired: the pipeline has no "
+                        "recover() stage yet (v0.7.0 item 1), so a compressed "
+                        "model is scored one-shot. A short fine-tune after "
+                        "compress() is worth up to 68pp at 50% head pruning on "
+                        "the measured configuration. Run one before validate(), "
+                        "or lower accuracy_floor if you meant the one-shot "
+                        "number.")
             raise PipelineError(
                 f"Stage '{stage.name}' scored {stage.accuracy:.4f}, past the "
                 f"accuracy_floor of {self.accuracy_floor:.4f}. Stopping rather than "
-                "returning a model that is small and broken.")
+                "returning a model that is small and broken." + hint)
 
     def _baseline_stage(self):
         if not self._stages:
