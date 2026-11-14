@@ -539,10 +539,14 @@ projection directly.
 ## Reference docs
 
 - `SAL_TORCH_DESIGN.md` — architecture, target API, package structure, roadmap.
-  NOTE: §D5 mentions λ₂; that is superseded by cardinal rule 3 + the reference —
-  FI is the triangle-fragility score, not λ₂.
-- `SAL_ROADMAP_V3.md` — ablation results, validated claims (random > structured
-  selection; gains come from progressive training-time sparsification).
+- **The v3 ablation notes** — ablation results and validated claims (random
+  beats structured selection; the gains come from progressive training-time
+  sparsification). **Removed from this repository on 2026-11-14** and kept
+  only in the local working copy: it discussed selection criteria in terms
+  cardinal rule 3 forbids in a public file. It is in this repository's git
+  history, which was deliberately not rewritten, and it is `.gitignore`d so
+  it cannot be re-added by accident. The claims it carried that still matter
+  are in `ROADMAP.md` and `results/lumi_v060/`.
 - The **private research reference** — canonical mechanism, `random` branch.
   Not shipped, and deliberately not located here: this file is on the public
   remote, so a local path to unshipped research does not belong in it. The

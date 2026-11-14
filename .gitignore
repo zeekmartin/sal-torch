@@ -22,3 +22,9 @@ licenses/
 sal/experiments/
 scripts/modal_cumulant_experiment.py
 SKILL_EulerianCutSpectrum.md
+
+# Unpublished research notes. This file discussed selection
+# criteria in terms cardinal rule 3 forbids in a public file, and
+# this remote is public. Kept locally, removed from the index on
+# 2026-11-14 with `git rm --cached` (no history rewrite).
+SAL_ROADMAP_V3.md
