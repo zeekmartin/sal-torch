@@ -321,7 +321,7 @@ def main(argv=None) -> int:
         "n_calib": args.n_calib,
         "edge_density": args.density,
         "fi_definition": "fraction of head-graph edges with zero triangle "
-                         "support (sal.fi.compute_fi); NOT 1 - lambda2/lambda_max",
+                         "support (sal.fi.compute_fi)",
         "notes": {
             "asymmetry": "Structured pruning removes graph NODES (144 heads "
                          "-> 72 at P50), so its FI is computed on a smaller "
