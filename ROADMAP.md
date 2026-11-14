@@ -554,6 +554,31 @@ repairs.
   variant exists only in `scripts/run_sal_qat_prototype.py`. v0.7.0 adds it as a
   supported mode, with tests reproducing the prototype's behaviour at identical
   seeds and masks.
+- **A multi-probe layer classifier — item 3.** exp42 measured
+  `classify_layers_by_rank` over six independent probe draws on an unchanged
+  ViT-B/16: `k=1` and `k=5` return the same set on 6 of 6 draws and `k=3` —
+  the current default — shares **one layer of three** between draws. What is
+  stable is the top-5 *block*; the ordering inside it is not, so `k=3` cuts
+  through a block that has no reproducible internal order.
+  **The default is not changed to 5**: `k=5` is stable on this model, and
+  which `k` is stable is a property of the model's delta distribution, not of
+  the API. The fix is to stop asking for one draw. Add a variant that takes
+  several probe draws and returns layers partitioned into **stable /
+  unstable / undecided** rather than a single ranked list, so the caller sees
+  the reproducibility instead of inferring it. Same for `classify_layers`,
+  whose shipped `critical_thr = 0.25` leaves exactly one layer of twelve
+  undecided on this model (layer 3, CRITICAL on 4 of 6 draws) — the best
+  threshold in the swept range, and still not a stable partition.
+  Source: `results/lumi_v060/EXP42_FI_THRESHOLDS.md`.
+- **Say what a CRITICAL label is for — item 4.** `classify_layers`'
+  documentation must state that the label is **descriptive, not pruning
+  advice**: it says a layer's removal moves FI, not that the layer should be
+  kept or dropped. exp17 tested FI as a compression router across six
+  architectures and it fails at both ends (`PHASE2H.md`), and FI-weighted
+  head *selection* loses to uniform random on 0/10 seeds (`PHASE2E.md`).
+  A user who reads CRITICAL as "do not prune this" is reading a routing
+  claim the project has measured and rejected. Docs change only; the
+  classification itself is unaffected.
 - **An FFN-ratio router**, so step 2 covers the component that carries most of
   the compression rather than only the heads.
 - **Make DropHead's masking cheaper than a forward hook.** Measured on

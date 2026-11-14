@@ -50,8 +50,19 @@ Training-time sparsification that makes neural networks structurally resilient t
 >   it did not train for. It is supported, not recommended. Use it only where
 >   you cannot fine-tune after pruning, the deployed head set is fixed before
 >   training, and you have measured it ahead on your own model.
-> - **Most of the compression is in the FFN, not the heads.** 25% of FFN neurons
->   costs **−0.63pp** for 1.15x; 50% of heads costs −3.17pp for 1.20x.
+> - **Most of the compression is in the FFN, not the heads.** At two epochs of
+>   recovery against the matched 2-epoch control, 25% of FFN neurons costs
+>   **−0.83pp** and 50% of heads costs **−3.91pp** — heads are **4.7x more
+>   expensive per unit of size removed**. (At five epochs the same comparison
+>   read −0.63 and −3.17pp; the multiplier survives the control correction.)
+> - **Which heads you remove: random, not magnitude.** +1.17pp at 50% of
+>   heads, separated on 3/3 seeds, and a tie at 25% and 33%. The code default
+>   is already random. **For FFN neurons no criterion dominates** — magnitude
+>   is +0.43pp at 25% of neurons and random +0.30pp at 50%, so the answer
+>   depends on the ratio.
+> - **2.04x on CPU is the largest speedup measured**, at batch 32, for 50% of
+>   heads plus 50% of FFN neurons, and it costs **−9.73pp**. It is a
+>   backend-specific number: see [the speedups](#mlp-neurons-vs-attention-heads).
 >
 > See [the ImageNet-1k results](#v06x--the-imagenet-1k-replication).
 >
@@ -193,6 +204,30 @@ a tie. The five-seed run in [What we measured](#what-we-measured) settles it
 properly: with `random` selection, SAL leads head pruning by 2.45pp on 5 of 5
 seeds. See [ROADMAP.md](ROADMAP.md) for the full trail.
 
+**Replicated on ImageNet-1k, with a recovery pass, at three seeds.** The grid
+above is one seed of GPT-2 Medium with no recovery. exp40b removed heads by
+magnitude and at random on ViT-B/16, recovered each for two epochs, and scored
+against the matched 2-epoch control (81.554%), 3 seeds per cell:
+
+| heads removed | random | magnitude | random − magnitude | separated on 3/3? |
+|---|---|---|---|---|
+| 25% | −1.20pp | −1.30pp | +0.10pp | no — **a tie** |
+| 33% | −1.70pp | −1.93pp | +0.23pp | no — **a tie** |
+| **50%** | **−2.74pp** | **−3.91pp** | **+1.17pp** | **yes** (+1.60pp at INT4) |
+
+**Random selection is the recommendation, and it is `compress()`'s default
+already.** At 50% the separation is clean — random's worst seed (78.67%) beats
+magnitude's best (77.81%) — and the comparison is *unmatched in random's
+disfavour*, since random's seed also draws the head set while magnitude's
+choice is deterministic. At 25% and 33% the ranges overlap and the honest word
+is "tie", not "random wins".
+
+Worth keeping in view: one-shot, the seed-to-seed spreads here are 14.7–17.9pp
+and after two epochs of recovery they are 0.25–0.55pp. **The recovery pass
+dominates the selection criterion by more than an order of magnitude.** Choose
+random because it is free, not because it rescues a bad pruning decision.
+Full trail in `results/lumi_v060/EXP40B_RANDOM.md`.
+
 **It refuses LoRA/QLoRA models.** Not a warning — an error, with the reason and
 what to do instead. SAL works by letting the model reorganize around silenced
 heads, and adapters freeze the weights that would do the reorganizing; measured,
@@ -274,13 +309,17 @@ neurons → recover → `torch.compile`**:
    32, 1.50x on a pruned one, and 2.2x at batch 1 — where pruning alone buys
    almost nothing, also on GPU.
 
-**Report latency per batch size, and state the device.** At batch 32 the
-measured pruning speedups run 1.15x (25% of FFN neurons) to 1.74x (50% of
-heads + 50% of neurons). **At batch 1 on a GPU every
-pruning configuration is 1.00x** — a ViT-B/16 there is kernel-launch bound, and
-the only speedup available is the compiler's. That is a GPU statement and
-earlier revisions of this page did not say so: on CPU, where the same shape is
-arithmetic-bound rather than launch-bound, batch 1 does benefit from slicing.
+**Report latency per batch size, and state the device and the backend.** At
+batch 32 the measured pruning speedups run 1.15x (25% of FFN neurons) to
+**1.74x on GPU** and **2.04x on CPU** (50% of heads + 50% of neurons, torch /
+oneMKL — 1.95x through ONNX Runtime on the same CPU). **At batch 1 on a GPU
+every pruning configuration is 1.00x** — a ViT-B/16 there is kernel-launch
+bound, and the only speedup available is the compiler's. That is a GPU
+statement and earlier revisions of this page did not say so: on CPU, where the
+same shape is arithmetic-bound rather than launch-bound, batch 1 does benefit
+from slicing (1.944x for the joint arm). The full three-pass grids, and the
+reason a faster backend *lowers* the ratio, are in
+[the speedups](#the-speedups-with-their-backend).
 
 ### Where the thresholds come from
 
@@ -350,14 +389,38 @@ reading suggested. Measured against **the same checkpoint that saw the same five
 epochs with nothing pruned** (80.44% / 79.01% INT4), three seeds, full
 validation split:
 
-| ViT-B/16, ImageNet-1k, + 5 epochs recovery | params | accuracy | **vs matched baseline** | **speedup, batch 32** |
+**At two epochs**, which is the peak of this recovery recipe (exp29), against
+the matched 2-epoch control (**81.554%**, 3 seeds, nothing pruned):
+
+| ViT-B/16, ImageNet-1k, + 2 epochs recovery | params | accuracy | **cost** | INT4 cost |
 |---|---|---|---|---|
-| **25% of FFN neurons** | **−16.4%** | **79.81%** | **−0.63pp** | **1.15x** |
-| 33% of FFN neurons | −21.6% | 79.50% | −0.94pp | 1.19x |
-| 50% of heads | −16.5% | 77.27% | **−3.17pp** | 1.20x |
-| 50% of FFN neurons | −32.7% | 77.75% | −2.69pp | 1.36x |
-| 50% heads + 25% FFN | −32.7% | 76.20% | −4.24pp | 1.41x |
-| 50% heads + 50% FFN | −49.1% | 73.62% | −6.82pp | **1.74x** |
+| **25% of FFN neurons** (magnitude) | **−16.4%** | **80.73%** | **−0.83pp** | −0.99pp |
+| 25% of FFN neurons (random) | −16.4% | 80.30% | −1.25pp | −1.50pp |
+| 50% of FFN neurons (random) | −32.7% | 78.28% | −3.28pp | −3.68pp |
+| 50% of FFN neurons (magnitude) | −32.7% | 77.97% | −3.58pp | −3.97pp |
+| 50% of heads (magnitude) | −16.5% | 77.64% | **−3.91pp** | −4.85pp |
+| 50% heads + 50% FFN (magnitude) | −49.1% | 71.83% | **−9.73pp** | −11.27pp |
+
+3 seeds per cell, full 50 000-image validation split
+(`sal-torch-pro/results/EXP35_FFN_AT_2EP.md`, 22.9 GPU-hours).
+
+**For FFN neurons, no selection criterion dominates.** Magnitude is better at
+25% of neurons (+0.43pp, separated on 3/3 seeds by 0.32pp) and random is
+better at 50% (+0.30pp, separated on 3/3 but by only **0.07pp** — one more
+seed could close it). That is the opposite shape from the head case, where
+random wins at 50% by 1.17pp with no overlap. **A single "prune by X"
+recommendation does not survive both structures**; prune heads at random and
+choose the FFN criterion by the ratio you are using.
+
+The spreads are not comparable to each other either: magnitude's seed only
+moves the data order, while random's also draws the neuron set, so random's
+spread (0.17–0.37pp) is 3–9x magnitude's (0.02–0.11pp) and the 50% comparison
+rests on random's noisier side.
+
+The earlier **five-epoch** table read −0.63pp for 25% of FFN neurons and
+−3.17pp for 50% of heads against the 5-epoch control. Both readings are true
+and must be stated together: two epochs gives a *better model* and a *larger
+pruning cost*, because the control is itself better at two epochs.
 
 **The FFN tooling is in `sal-torch-pro`, not in this package.** `MLPMasker` and
 `slice_mlp_neurons` are part of the commercial extension
@@ -365,12 +428,43 @@ validation split:
 with them (exp26, 22 jobs, 97.2 GPU-hours). Head masking, `slice_heads()`, the
 probe and the Fragility Index are all in this package.
 
-**At comparable size removed, FFN pruning costs roughly five times less than head
-pruning** — 0.63pp at −16.4% against 3.17pp at −16.5%. At a matched −32.7%,
-all-FFN beats head+FFN by **1.55pp** (77.75 vs 76.20), so the joint arm's extra
-0.05x of throughput is not free. **1.74x is the highest speedup measured**, and
-it costs 6.82pp. **At batch 1 every arm above is 1.00x** (8.09–8.37 ms against
-8.16 ms dense).
+**At comparable size removed, FFN pruning costs 4.7x less than head pruning** —
+0.83pp at −16.4% against 3.91pp at −16.5%, measured at two epochs against the
+matched control. The joint arm is worse than the sum of its parts: −9.73pp
+against −3.58 for the FFN half and −3.91 for the head half, so head and FFN
+pruning **interact unfavourably**, by about 2.2pp.
+
+### The speedups, with their backend
+
+**2.04x is the largest speedup measured.** It is `50% of heads + 50% of FFN
+neurons` at **batch 32 on CPU**, and every term in that sentence is
+load-bearing:
+
+| | value |
+|---|---|
+| speedup | **2.044x** (median of three passes: 1307.11 / 1307.02 / 1306.53 ms) |
+| accuracy cost | **−9.725pp**, −11.270pp at INT4 |
+| CPU | **AMD EPYC 7A53 64-Core**, 7 threads (`OMP_NUM_THREADS=MKL_NUM_THREADS=7`) |
+| backend | torch 2.5.1, **oneMKL** (`BLAS_INFO=mkl`, `USE_MKLDNN=ON`), eager, AVX2 |
+| batch | **32**. At batch 1 the same arm reads 1.944x, and on GPU 1.74x |
+
+**A second backend does not reach 2x.** Through ONNX Runtime 1.31.1 on the same
+CPU at the same thread count, the same arm reads **1.952x** — while being
+*faster in absolute terms* than torch on every arm at every batch (1118 ms
+against 1317 ms for this cell). The reason is the denominator: ORT speeds the
+dense model up by 1.23x and the pruned one by 1.18x, so **a better backend
+shrinks the measured benefit of pruning**. The 2x is a property of
+torch/oneMKL on this CPU, not of the model.
+
+So quote it as: *2.04x on torch/oneMKL, 1.95x on ONNX Runtime, both at batch 32
+on an EPYC 7A53 at 7 threads, at a cost of −9.73pp.* Two backends, one honest
+range, and no configuration measured clears 2x on both. Trail:
+`sal-torch-pro/results/EXP41_WIDTH.md` (three-pass CPU and GPU grids) and
+`EXP43_ORT_CPU.md` (ORT).
+
+**On GPU, every arm is 1.00x at batch 1** (8.09–8.37 ms against 8.16 ms dense),
+because a ViT-B/16 there is kernel-launch bound. **Any latency claim must state
+its batch size, its device and its backend**, or it is not a claim.
 
 The reference matters here and is easy to get wrong: against the *pretrained*
 checkpoint's 78.44%, 25% of FFN neurons reads **+1.37pp** — but that compares a
@@ -1149,13 +1243,16 @@ the adaptation cannot.
   faster?](#does-the-smaller-model-actually-run-faster). Where the two regimes
   cross over is somewhere between 1 and 32 and has not been located, and the
   whole sweep is one GPU (MI250X), one architecture and one image size.
-- **That 2x is reachable by pruning this model at all.** It is not, and the
-  target has been withdrawn. Joint head+FFN pruning has since been measured:
-  **1.74x at batch 32** with half the parameters removed, costing 6.82pp, and
-  **1.00x at batch 1** in every configuration. 1.37x is what 50% of heads buys
-  with compilation on top. Attention is roughly a third of a transformer block,
-  so the headroom is in the FFN — which is in
-  [sal-torch-pro](#sal-torch-pro), not this package.
+- **That 2x is reachable by pruning this model at all.** **The withdrawal was
+  a GPU statement and it stands as one; on CPU 2x is reached.** On GPU, joint
+  head+FFN pruning measures **1.74x at batch 32** with half the parameters
+  removed and **1.00x at batch 1** in every configuration, so the GPU target
+  stays withdrawn. On CPU the same arm reads **2.044x at batch 32** under
+  torch/oneMKL and **1.952x** under ONNX Runtime — so it clears 2x on one
+  backend and not the other, at a cost of −9.73pp against the matched
+  2-epoch control. 1.37x is what 50% of heads buys with compilation on top.
+  Attention is roughly a third of a transformer block, so the headroom is in
+  the FFN — which is in [sal-torch-pro](#sal-torch-pro), not this package.
 - **That the aligned/sliced result travels.** It has been measured on **one
   architecture** — ViT-B/16, now on both ImageNet-100 and ImageNet-1k, where the
   aligned-set effect replicated (+56.18pp over the matched baseline on the
@@ -1220,7 +1317,7 @@ is to measure your own model instead of inheriting someone else's regime.
 | **The probe says > 10pp and the pruning is out of your hands** | **DropHead, not SAL.** Per-step resampled head dropout: **+57.2pp** over a standard fine-tune at 50% pruning + INT4 on ViT-B/16 / ImageNet-1k, 3 seeds, and **+63.5pp** on a fixed magnitude set. 33% of heads leaves it **+0.14pp above its own dense row** and **−2.75pp against a matched dense control** — its training costs 2.90pp on its own. SAL on an arbitrary set is **42.7pp behind** it. DropHead is also the stable one: seed-to-seed sd 0.02–0.92pp against SAL's 0.50–17.55pp. |
 | **The probe says < 10pp** | **Verify before trusting this row.** On BERT-base and phi-2 both head methods landed within 0.1pp of a standard fine-tune, and on I-JEPA DropHead cost 1.1pp of clean accuracy for no gain — but BERT-base, probed at −5.15pp, loses **−4.17 to −21.68pp** one-shot at 50% of heads across four GLUE tasks, mostly outside this band, and magnitude + 2 epochs of recovery beats DropHead there on 8/8 cells. Compress, then recover, and measure on your own task. |
 | **Where your compression actually comes from** | **FFN neurons, not heads** — measured on ImageNet-1k with a matched control, **roughly five times cheaper per unit of size**: 25% of neurons costs 0.63pp at −16.4%, where 50% of heads costs 3.17pp at −16.5%. Not in this package; see [MLP neurons vs. attention heads](#mlp-neurons-vs-attention-heads). |
-| **You need 2x** | **Not from magnitude pruning on a ViT-B/16 GPU.** The highest measured GPU speedup is **1.74x**, at half the parameters removed and a cost of 6.82pp, **at batch 32**; at batch 1 on a GPU every configuration is 1.00x. Both figures are GPU figures and the CPU picture is different — a revision covering it is pending. |
+| **You need 2x** | **On CPU, yes, on one backend, at batch 32, for −9.73pp. On GPU, no.** CPU: 50% of heads + 50% of FFN neurons reads **2.044x at batch 32** under torch 2.5.1 / oneMKL on an AMD EPYC 7A53 at 7 threads (three passes within 0.6 ms), and **1.952x** through ONNX Runtime 1.31.1 on the same CPU — which is *faster in absolute terms* and yet a lower ratio, because a better backend speeds the dense denominator up more than the pruned arm. At batch 1 on CPU the same arm is 1.944x. It costs **−9.725pp** against the matched 2-epoch control, −11.270pp at INT4. GPU: the highest measured speedup is **1.74x** at batch 32 and every configuration is 1.00x at batch 1, so the GPU 2x target stays withdrawn. **No configuration measured clears 2x on both backends.** |
 | **Full fine-tuning, and you prune heads** | **Measure, and prefer a recovery pass.** The GPT-2 Medium result (+2.45pp at 33% pruning on 5/5 seeds, no cost to clean accuracy) stands as measured, but it is one model on one binary task with no recovery pass, and ImageNet-1k supersedes it where the cells overlap: at a fixed head set SAL's weights are worth **+0.05pp** after recovery. If you can fine-tune after pruning, do that; the training method is close to irrelevant. |
 | **Vision transformers, pruning at ≥50%** | **Yes, and read the ImageNet-1k numbers.** SAL over its own baseline at 50% + INT4 is **+14.57pp** on 3/3 seeds of ImageNet-1k, replicating the +14.5 ± 4.3 from 15 seeds of ImageNet-100 — but on the same cell DropHead reads +57.2pp. SAL's clean-accuracy cost is **−3.93pp** (80.44 → 76.51 on its own set, at a 16.5% smaller model); the earlier "0.3–1.5pp" claim is withdrawn, and so is the **+22pp** headline published from three seeds. |
 | **Vision transformers, pruning at 33%** | **Measure first.** On ViT-B/16/ImageNet-100 the benefit is weak and inconsistent (one recurring seed below baseline), while on ViT-base/CIFAR-10 it was +14 to +20pp on 3/3 and on GPT-2 Medium +2.45pp on 5/5. Same ratio, three different answers — this is where your model and task decide. |
