@@ -1,0 +1,74 @@
+{
+  "experiment": "exp42_fi_thresholds",
+  "model": "google/vit-base-patch16-224",
+  "dataset": "evanarlian/imagenet_1k_resized_256",
+  "dataset_label": "ImageNet-1k (resized 256px, evanarlian/imagenet_1k_resized_256)",
+  "num_classes": 1000,
+  "n_probe": 64,
+  "probe_seeds": [
+    0
+  ],
+  "edge_density": 0.1,
+  "thresholds": [
+    0.05,
+    0.25
+  ],
+  "immune_thr": 0.01,
+  "gate": true,
+  "fi_definition": "fraction of edges with zero triangle support",
+  "gpu": "AMD Instinct MI250X",
+  "torch_version": "2.5.1+rocm6.2",
+  "platform": "Linux-6.4.0-150600.23.73_15.0.14-cray_shasta_c-x86_64-with-glibc2.38",
+  "notes": {
+    "scope": "pretrained checkpoint only; nothing trained, nothing compressed. The thresholds are a property of the classification arithmetic, not of any downstream task.",
+    "deltas_saved": "per-layer relative FI deltas are stored, so any future threshold question is answerable from this JSON with no GPU."
+  },
+  "probes": {
+    "0": {
+      "fi": 0.15145631067961166,
+      "edges": 1030,
+      "nodes": 144,
+      "layer_deltas": {
+        "0": 0.3320962663067925,
+        "1": 0.25565135955564156,
+        "2": 0.4577089577089576,
+        "3": 0.6593286099865047,
+        "4": 0.23646549289144145,
+        "5": 0.0835376744467653,
+        "6": 0.061794000638847636,
+        "7": 0.046535259890308725,
+        "8": 0.08905800082270672,
+        "9": 0.1616891328328894,
+        "10": 0.13464846127384833,
+        "11": 0.15196424370736294
+      },
+      "splits": {
+        "0.05": {
+          "immune": 0,
+          "buffer": 1,
+          "critical": 11
+        },
+        "0.25": {
+          "immune": 0,
+          "buffer": 8,
+          "critical": 4
+        }
+      },
+      "seconds": 57.8
+    }
+  },
+  "fi_noise": {
+    "probes": 1,
+    "min": 0.15145631067961166,
+    "max": 0.15145631067961166,
+    "spread": 0.0,
+    "spread_pct_of_mean": 0.0,
+    "meaning": "the probe-to-probe spread of global FI on an UNCHANGED model. Any FI difference smaller than this is not evidence of anything."
+  },
+  "usable_thresholds": [
+    0.25
+  ],
+  "shipped_default": 0.25,
+  "shipped_default_usable": true,
+  "five_percent_in_edges": 7.8
+}

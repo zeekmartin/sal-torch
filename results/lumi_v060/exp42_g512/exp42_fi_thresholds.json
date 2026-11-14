@@ -1,0 +1,224 @@
+{
+  "experiment": "exp42_fi_thresholds",
+  "model": "google/vit-base-patch16-224",
+  "dataset": "evanarlian/imagenet_1k_resized_256",
+  "dataset_label": "ImageNet-1k (resized 256px, evanarlian/imagenet_1k_resized_256)",
+  "num_classes": 1000,
+  "n_probe": 500,
+  "probe_seeds": [
+    0,
+    1,
+    2
+  ],
+  "edge_density": 0.1,
+  "thresholds": [
+    0.05,
+    0.1,
+    0.15,
+    0.2,
+    0.25,
+    0.3,
+    0.35
+  ],
+  "immune_thr": 0.01,
+  "gate": false,
+  "fi_definition": "fraction of edges with zero triangle support",
+  "gpu": "AMD Instinct MI250X",
+  "torch_version": "2.5.1+rocm6.2",
+  "platform": "Linux-6.4.0-150600.23.73_15.0.14-cray_shasta_c-x86_64-with-glibc2.38",
+  "notes": {
+    "scope": "pretrained checkpoint only; nothing trained, nothing compressed. The thresholds are a property of the classification arithmetic, not of any downstream task.",
+    "deltas_saved": "per-layer relative FI deltas are stored, so any future threshold question is answerable from this JSON with no GPU."
+  },
+  "probes": {
+    "0": {
+      "fi": 0.07864077669902912,
+      "edges": 1030,
+      "nodes": 144,
+      "layer_deltas": {
+        "0": 0.40189908888568643,
+        "1": 0.31882202304737517,
+        "2": 0.6378124385842671,
+        "3": 0.3999320421338772,
+        "4": 0.40737525720164613,
+        "5": 0.0776313036200042,
+        "6": 0.01544219610377363,
+        "7": 0.14513953729640003,
+        "8": 0.11766187956664143,
+        "9": 0.20444494275641265,
+        "10": 0.1632509877774084,
+        "11": 0.1589582343119691
+      },
+      "splits": {
+        "0.05": {
+          "immune": 0,
+          "buffer": 1,
+          "critical": 11
+        },
+        "0.10": {
+          "immune": 0,
+          "buffer": 2,
+          "critical": 10
+        },
+        "0.15": {
+          "immune": 0,
+          "buffer": 4,
+          "critical": 8
+        },
+        "0.20": {
+          "immune": 0,
+          "buffer": 6,
+          "critical": 6
+        },
+        "0.25": {
+          "immune": 0,
+          "buffer": 7,
+          "critical": 5
+        },
+        "0.30": {
+          "immune": 0,
+          "buffer": 7,
+          "critical": 5
+        },
+        "0.35": {
+          "immune": 0,
+          "buffer": 8,
+          "critical": 4
+        }
+      },
+      "seconds": 65.0
+    },
+    "1": {
+      "fi": 0.06407766990291262,
+      "edges": 1030,
+      "nodes": 144,
+      "layer_deltas": {
+        "0": 0.5195374800637957,
+        "1": 0.363060989643268,
+        "2": 0.8637453673424896,
+        "3": 0.6043613707165109,
+        "4": 0.3324708926261319,
+        "5": 0.16490736751400245,
+        "6": 0.012713147008374644,
+        "7": 0.1138514482363063,
+        "8": 0.09599039172209903,
+        "9": 0.22523103374167203,
+        "10": 0.1381268304345228,
+        "11": 0.17699381878486362
+      },
+      "splits": {
+        "0.05": {
+          "immune": 0,
+          "buffer": 1,
+          "critical": 11
+        },
+        "0.10": {
+          "immune": 0,
+          "buffer": 2,
+          "critical": 10
+        },
+        "0.15": {
+          "immune": 0,
+          "buffer": 4,
+          "critical": 8
+        },
+        "0.20": {
+          "immune": 0,
+          "buffer": 6,
+          "critical": 6
+        },
+        "0.25": {
+          "immune": 0,
+          "buffer": 7,
+          "critical": 5
+        },
+        "0.30": {
+          "immune": 0,
+          "buffer": 7,
+          "critical": 5
+        },
+        "0.35": {
+          "immune": 0,
+          "buffer": 8,
+          "critical": 4
+        }
+      },
+      "seconds": 2.3
+    },
+    "2": {
+      "fi": 0.0766990291262136,
+      "edges": 1030,
+      "nodes": 144,
+      "layer_deltas": {
+        "0": 0.3987760918769384,
+        "1": 0.31377551020408156,
+        "2": 0.6556158328310225,
+        "3": 0.35526315789473684,
+        "4": 0.5659186303995769,
+        "5": 0.13171480606270405,
+        "6": 0.010318753394326802,
+        "7": 0.09894625223672883,
+        "8": 0.17430599552630555,
+        "9": 0.15714103055875214,
+        "10": 0.11454699491677464,
+        "11": 0.2038874317355331
+      },
+      "splits": {
+        "0.05": {
+          "immune": 0,
+          "buffer": 1,
+          "critical": 11
+        },
+        "0.10": {
+          "immune": 0,
+          "buffer": 2,
+          "critical": 10
+        },
+        "0.15": {
+          "immune": 0,
+          "buffer": 4,
+          "critical": 8
+        },
+        "0.20": {
+          "immune": 0,
+          "buffer": 6,
+          "critical": 6
+        },
+        "0.25": {
+          "immune": 0,
+          "buffer": 7,
+          "critical": 5
+        },
+        "0.30": {
+          "immune": 0,
+          "buffer": 7,
+          "critical": 5
+        },
+        "0.35": {
+          "immune": 0,
+          "buffer": 8,
+          "critical": 4
+        }
+      },
+      "seconds": 1.8
+    }
+  },
+  "fi_noise": {
+    "probes": 3,
+    "min": 0.06407766990291262,
+    "max": 0.07864077669902912,
+    "spread": 0.014563106796116498,
+    "spread_pct_of_mean": 19.91150442477875,
+    "meaning": "the probe-to-probe spread of global FI on an UNCHANGED model. Any FI difference smaller than this is not evidence of anything."
+  },
+  "usable_thresholds": [
+    0.15,
+    0.2,
+    0.25,
+    0.3,
+    0.35
+  ],
+  "shipped_default": 0.25,
+  "shipped_default_usable": true,
+  "five_percent_in_edges": 3.8
+}
