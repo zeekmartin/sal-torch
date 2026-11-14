@@ -51,11 +51,17 @@ _REGISTRY = {
     "gemma": "layers.{}.self_attn",
     "gemma2": "layers.{}.self_attn",
     "qwen2": "layers.{}.self_attn",
+    # OPT nests its stack one level deeper than the llama-style families: the
+    # only child of OPTModel is ``decoder``, so the container is
+    # ``decoder.layers.{}.self_attn`` relative to base_model. Verified on
+    # facebook/opt-125m, whose self_attn exposes ``out_proj``.
+    "opt": "decoder.layers.{}.self_attn",
 }
 
 # Fallback attention-container patterns, tried in order when no pattern is known.
 _FALLBACK_PATTERNS = [
     "layers.{}.self_attn",              # llama / mistral / phi / gemma / qwen
+    "decoder.layers.{}.self_attn",      # opt (and other decoder-nested stacks)
     "h.{}.attn",                        # gpt2 (relative to base model)
     "transformer.h.{}.attn",            # gpt2-like from root (e.g. tiny test model)
     "encoder.layer.{}.attention",       # bert / roberta
