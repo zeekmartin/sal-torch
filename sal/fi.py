@@ -158,27 +158,50 @@ def classify_layers(model: nn.Module, adjacency: np.ndarray, num_heads_per_layer
     CRITICAL : relative FI change >= ``critical_thr`` (default 25%)
     BUFFER   : in between
 
-    **``critical_thr`` was 0.05 and is now 0.25.** At 5% the classification
-    saturates: on ViT-B/16 / ImageNet-1k it called nearly every layer of twelve
-    CRITICAL on three probes, which is not a classification. 5% of an FI around
-    0.07 is a few edges out of ~1030 — barely above the two-edge resolution of
-    the graph itself, so almost every layer clears it. Sweeping the threshold
-    on stored deltas, a band around 0.25 put all three probes in a usable
-    range.
+    **``critical_thr`` was 0.05 and is now 0.25.** Sweeping the threshold over
+    stored per-layer deltas on ViT-B/16 / ImageNet-1k across **six**
+    independent probe draws, and asking which layers are CRITICAL on *every*
+    draw rather than how many::
 
-    **Source**: an internal threshold-sensitivity run, **not published in this
-    repository** — so the per-probe counts are not quoted here, under the rule
-    that a figure in a public file must be traceable to a published result.
-    Treat the default as a calibration for one architecture, not as evidence.
+        critical_thr   always CRITICAL        undecided
+              0.05     0,1,2,3,4,5,7..11      none  (11 of 12: saturated)
+              0.10     0,1,2,3,4,9,10,11      L5, L7, L8
+              0.15     0,1,2,3,4,9            L5, L7, L8, L10, L11
+              0.20     0,1,2,3,4              L5, L8, L9, L11
+              0.25     0,1,2,4                L3 (4 of 6)  <- shipped default
+              0.30     0,1,2,4                L3 (4 of 6)
+              0.35     0,2                    L1, L3, L4
 
-    That measurement is **one architecture**: 12 layers x 12 heads at FI 0.05-0.08.
-    A model with a very different graph may well want a different number, and
-    the deltas are not scale-free, so pass ``critical_thr`` explicitly rather
-    than assuming either default transfers. If you want a classification that
-    does not depend on picking a number at all, use
-    :func:`classify_layers_by_rank` — across those three probes the *ordering*
-    was stable (one layer most sensitive 3/3, another least 3/3) where no
-    absolute threshold was.
+    0.25 and 0.30 are the only informative thresholds at which a single layer
+    of twelve is probe-dependent; every other one leaves three to five
+    undecided. At 5% the classification saturates — eleven of twelve layers
+    come back CRITICAL on every draw, which has not classified anything —
+    because 5% of an FI of 0.073 on a 1030-edge graph is **3.8 edges**
+    against a graph resolution of one edge, a bar almost every layer clears.
+
+    **The default is the best available threshold and it is not stable.** On
+    this model it returns ``{0,1,2,4}`` on every draw plus layer 3 on about
+    two thirds of them, because layer 3's relative delta straddles 0.25
+    (0.240 to 0.604 over the six draws). **Count on the four, not the five.**
+    Two earlier three-draw runs reached opposite conclusions about this same
+    default; three draws can show a spread and cannot bound one.
+
+    ``immune_thr = 0.01`` is a different story: across those six draws it
+    labels **one** layer IMMUNE on one draw and none on the other five, 1% of
+    0.073 being 0.7 edges, below the graph's own resolution. The IMMUNE class
+    is effectively unreachable on this architecture at this probe size. Pass
+    your own threshold if you need one.
+
+    **Source**: ``results/lumi_v060/EXP42_FI_THRESHOLDS.md``.
+
+    That measurement is **one architecture and one probe size**: 12 layers x
+    12 heads, FI 0.064-0.083, 1030 edges, 500-512 images. The deltas are not
+    scale-free — they depend on the model, the probe and the edge density — so
+    pass ``critical_thr`` explicitly rather than assuming either default
+    transfers. If you want a classification that does not depend on picking a
+    number at all, use :func:`classify_layers_by_rank`, but read its docstring
+    first: it removes the threshold, not the probe dependence, and its own
+    default ``k`` is the least reproducible value of ``k`` on this model.
     """
     deltas = layer_fi_deltas(model, adjacency, num_heads_per_layer)
     result = {}
@@ -202,14 +225,36 @@ def classify_layers_by_rank(fi_deltas: dict[int, float], k: int = 3) -> list[int
     **Why a rank and not a threshold.** The deltas are not scale-free: they
     depend on the model, the probe and the graph's edge density, so a number
     that classifies one model sensibly saturates on another (see
-    ``critical_thr`` in :func:`classify_layers`). The *ordering* is the part
-    that held across probes in the only place it has been measured — three
-    probes of the same ViT-B/16, where one layer ranked most sensitive 3/3 and
-    another least 3/3 while no fixed threshold put all three probes in a usable
-    range. That run is **internal and not published in this repository**, so
-    read it as the reason for the API rather than as a citable result. ``k`` is
-    a budget the caller already has ("I can afford to protect three layers"),
-    not a property of the model that has to be guessed.
+    ``critical_thr`` in :func:`classify_layers`). ``k`` is a budget the caller
+    already has ("I can afford to protect three layers"), not a property of
+    the model that has to be guessed.
+
+    **What a rank does NOT buy you is probe independence, and the default
+    ``k`` is the worst value of ``k``.** On ViT-B/16 / ImageNet-1k over six
+    independent probe draws on an unchanged model::
+
+        k    same set on all 6 draws   result
+        1    yes                       {2}
+        3    NO                        one layer in common out of three
+        5    yes                       {0, 1, 2, 3, 4}
+
+    What is stable is the *block*, not the order inside it. Layer 2 ranks
+    most sensitive 6/6 and layer 6 least 6/6, but layers 0, 1, 3 and 4
+    permute freely among ranks 2-5 while collectively staying above every
+    other layer — so ``k=3`` cuts through a block with no stable internal
+    ordering and returns {2, 0, 4} on one draw and {2, 3, 1} on another.
+
+    **On a model shaped like this one, prefer ``k=5`` (or ``k=1``).** The
+    default of 3 is kept for compatibility and is the single least
+    reproducible choice available; it will change in a future major version.
+    Whether a given ``k`` is stable is a property of the model's delta
+    distribution, not of this function, so **intersect the results of several
+    probe draws** if you need a layer set that survives re-probing — three
+    draws recover {0, 1, 2, 3, 4} on this model.
+
+    Still prefer this over a threshold: it asks you for a budget instead of a
+    magic number.
+    **Source**: ``results/lumi_v060/EXP42_FI_THRESHOLDS.md``.
 
     ``k`` is clamped to the number of layers; ``k <= 0`` returns ``[]``.
     """

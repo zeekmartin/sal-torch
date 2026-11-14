@@ -96,6 +96,11 @@ MODEL_ID = "google/vit-base-patch16-224"
 DATASET_ID = "clane9/imagenet-100"
 # Printed wherever a result names its data. ImageNet-1k here is the ungated
 # mirror: ILSVRC/imagenet-1k is gated and needs an accepted-terms token.
+# The class count each dataset must load. build_data refuses a mismatch.
+DATASET_CLASSES = {
+    "clane9/imagenet-100": 100,
+    "evanarlian/imagenet_1k_resized_256": 1000,
+}
 DATASET_LABELS = {
     "clane9/imagenet-100": "ImageNet-100",
     "evanarlian/imagenet_1k_resized_256":
@@ -257,6 +262,201 @@ def normalize(x_uint8: torch.Tensor) -> torch.Tensor:
     return (x_uint8.float() / 255.0 - 0.5) / 0.5
 
 
+def validate_probe(probe, where: str = "probe") -> dict:
+    """Check a probe is what FI assumes it is, and say so loudly if not.
+
+    FI is a function of the **(model, probe)** pair, so a malformed probe does
+    not raise anywhere -- it silently returns a different number. Two failures
+    in this campaign were exactly that:
+
+    * **Unnormalized input.** exp37 and exp42 built their probes from the raw
+      uint8 cache without passing it through :func:`normalize`. Both runs
+      completed, wrote JSON and produced a table; the numbers were of a
+      different quantity and two full GPU runs had to be redone. Nothing in
+      the stack objected, because ``model(pixel_values=...)`` accepts any
+      float tensor of the right shape.
+    * **An unrecorded probe size.** The same checkpoint and the same
+      normalized construction read FI 0.151 at 64 images and 0.071-0.082 at
+      500 (``results/lumi_v060/EXP42_FI_THRESHOLDS.md``). Ragged batches make
+      the recorded ``num_samples`` a fiction.
+
+    Returns the probe's statistics so a caller can record them. Raises
+    ``ValueError`` on anything it cannot vouch for.
+    """
+    if not isinstance(probe, (list, tuple)) or not probe:
+        raise ValueError(
+            "{} must be a non-empty list of batches, got {!r}".format(
+                where, type(probe).__name__))
+    sizes, lo, hi, total = set(), None, None, 0
+    for i, batch in enumerate(probe):
+        if not isinstance(batch, dict) or "pixel_values" not in batch:
+            raise ValueError(
+                "{}[{}] must be a dict with a 'pixel_values' key, got "
+                "{!r}".format(where, i, batch))
+        x = batch["pixel_values"]
+        if not torch.is_floating_point(x):
+            raise ValueError(
+                "{}[{}]['pixel_values'] has dtype {}, not a float type. An "
+                "integer probe is the unnormalized cache: pass it through "
+                "normalize() or build it with build_probe(). FI computed "
+                "from uint8 input is a different quantity and nothing "
+                "downstream will tell you.".format(where, i, x.dtype))
+        if not bool(torch.isfinite(x).all()):
+            raise ValueError(
+                "{}[{}]['pixel_values'] contains non-finite values".format(
+                    where, i))
+        sizes.add(int(x.shape[0]))
+        total += int(x.shape[0])
+        bl, bh = float(x.min()), float(x.max())
+        lo = bl if lo is None else min(lo, bl)
+        hi = bh if hi is None else max(hi, bh)
+    # A mean/std-normalized image tensor always straddles zero; uint8/255 does
+    # not. This is the check that would have caught exp37 and exp42 on their
+    # first gate instead of after two full runs.
+    if lo >= -0.01:
+        raise ValueError(
+            "{} looks unnormalized: values span [{:.3f}, {:.3f}] and a "
+            "mean/std-normalized probe straddles zero. Raw uint8/255 input "
+            "lands in [0, 1] and raw bytes in [0, 255]; either produces a "
+            "valid-looking FI that measures something else. Build the probe "
+            "with build_probe().".format(where, lo, hi))
+    if len(sizes) > 1:
+        raise ValueError(
+            "{} has ragged batch sizes {}. num_samples and batch_size are "
+            "recorded on every FI figure and a ragged probe makes both "
+            "meaningless.".format(where, sorted(sizes)))
+    return {"batches": len(probe), "batch_size": sizes.pop(),
+            "images": total, "min": lo, "max": hi}
+
+
+def build_probe(images_uint8, n_batches: int, batch_size: int, device=None,
+                where: str = "probe"):
+    """The one probe builder. Every experiment calls this, none rolls its own.
+
+    Rule 1 of audit 2. Before this existed there were six independent probe
+    constructions across the three repositories -- two of them unnormalized,
+    one of them normalizing conditionally on a flag -- and FI numbers from
+    different scripts were not comparable without reading each script. The
+    cross-harness check (exp45) only proved the *scanner* agrees; what
+    disagreed was what each script fed it.
+
+    ``images_uint8`` is a uint8 ``[N, 3, H, W]`` block from the cache. The
+    first ``n_batches * batch_size`` images are taken in order, so the caller
+    controls the draw by slicing the block it passes, and two callers passing
+    the same block get the same probe.
+    """
+    need = n_batches * batch_size
+    have = int(images_uint8.shape[0])
+    if have < need:
+        raise ValueError(
+            "{} needs {} images ({} batches of {}), got {}".format(
+                where, need, n_batches, batch_size, have))
+    probe = [{"pixel_values": normalize(
+        images_uint8[i * batch_size:(i + 1) * batch_size]).to(device)
+        if device is not None else normalize(
+            images_uint8[i * batch_size:(i + 1) * batch_size])}
+        for i in range(n_batches)]
+    validate_probe(probe, where)
+    return probe
+
+
+# Values a new script must reproduce before it is allowed to report new ones.
+# Rule 2 of audit 2. Every entry is published, with its source, and every one
+# of them is a (model, probe, protocol) triple -- not a property of the model
+# alone. Quote the source, not this dict.
+REFERENCE_VALUES = {
+    "vit_b16_in1k_pretrained_top1": {
+        "value": 0.7844, "tol": 0.0005,
+        "source": "results/lumi_v060/PHASE3_IMAGENET1K.md",
+        "note": "ViT-B/16 on the resized-256 mirror, full 50k val split"},
+    "vit_b16_in1k_pretrained_int4_top1": {
+        "value": 0.77228, "tol": 0.0005,
+        "source": "results/lumi_v060/PHASE3_IMAGENET1K.md",
+        "note": "fp32 rounding, scored under fp16 autocast"},
+    "vit_b16_in1k_control_2ep_top1": {
+        "value": 0.81554, "tol": 0.0015,
+        "source": "results/lumi_v060/CONTROL_CONVENTION.md",
+        "note": "3 seeds, nothing pruned; the matched control"},
+    # A band, not a point, and deliberately a generous one.
+    #
+    # The dense FI of this checkpoint has been measured on eleven independent
+    # probe draws across three scripts, and it spans **0.064078 to 0.082524**
+    # (exp37 0.080583 / 0.069903 / 0.065049 and 0.067961 / 0.066019 /
+    # 0.074757; exp42 0.079612 / 0.070874 / 0.081553 and 0.078641 / 0.064078;
+    # exp47 0.066990 / 0.070874 / 0.082524). That spread is not error -- it is
+    # the probe-noise floor, and it is the measurement
+    # (EXP42_FI_THRESHOLDS.md). So a script that draws its probe at random
+    # cannot be gated on a point.
+    #
+    # It cannot be gated on the measured min/max either. A min/max over
+    # eleven draws is not a tolerance interval: the twelfth draw exceeds it
+    # about as often as not, and a gate that fires on a legitimate reading one
+    # edge outside the previous extreme teaches everyone to pass
+    # --no-reference-gate. That happened on the first run of this gate, where
+    # 0.064078 (a real reading, and one exp30 also recorded) sat 0.001 under a
+    # band built from the earlier draws.
+    #
+    # So the band is set to what the gate is *for*: catching a probe that is
+    # wrong by an order of magnitude, which is the failure this campaign
+    # actually had. The unnormalized uint8 run read **0.132039** (136 edges,
+    # roughly double) and a 64-image probe reads **0.151456**. Both are far
+    # outside 0.05-0.10, while every normalized 512-image draw sits well
+    # inside it with ~15 edges of margin at the bottom and ~18 at the top.
+    "vit_b16_dense_fi_band": {
+        "lo": 0.050, "hi": 0.100,
+        "source": "results/lumi_v060/EXP42_FI_THRESHOLDS.md",
+        "note": "11 normalized draws span 0.064078-0.082524; the band is "
+                "wider on purpose. It catches an unnormalized probe (0.132) "
+                "or the wrong probe size (0.151), not sampling noise. A "
+                "reading outside it means the probe is wrong, not that the "
+                "model is interesting."},
+    "vit_b16_dense_fi_500img": {
+        "value": 0.070874, "tol": 0.0,
+        "source": "results/lumi_v060/EXP42_FI_THRESHOLDS.md",
+        "note": "first 512 images of the seed-42 val shuffle, 32 batches of "
+                "16, num_samples=500, edge density 0.10. Exact: the scan is "
+                "deterministic on a fixed probe (exp45). A different probe "
+                "reads 0.067-0.083 -- that spread is the floor, not an "
+                "error bar, so this value is only a reference gate for THIS "
+                "probe."},
+}
+
+
+def check_reference(key: str, measured: float, log_fn=None) -> float:
+    """Fail the run if a known value does not reproduce.
+
+    Rule 2 of audit 2: a script reproduces something already published before
+    it reports anything new. The campaign's two silent-wrong-number failures
+    (an unnormalized probe, a 5-epoch arm scored against a 2-epoch control)
+    would both have been caught in the gate by one line of this.
+    """
+    if key not in REFERENCE_VALUES:
+        raise KeyError(
+            "no reference value named {!r}. Known: {}".format(
+                key, sorted(REFERENCE_VALUES)))
+    ref = REFERENCE_VALUES[key]
+    if "lo" in ref:
+        ok = ref["lo"] <= measured <= ref["hi"]
+        expected = "[{:.6f}, {:.6f}]".format(ref["lo"], ref["hi"])
+        delta = 0.0 if ok else min(abs(measured - ref["lo"]),
+                                   abs(measured - ref["hi"]))
+    else:
+        delta = abs(measured - ref["value"])
+        ok = delta <= ref["tol"]
+        expected = "{:.6f} +/- {:.6f}".format(ref["value"], ref["tol"])
+    (log_fn or log)("  reference {}: measured {:.6f} vs {} ({}) -> {}".format(
+        key, measured, expected, ref["source"],
+        "OK" if ok else "MISMATCH"))
+    if not ok:
+        raise RuntimeError(
+            "reference gate {} failed: measured {:.6f}, expected {} (off by "
+            "{:.6f}). Source: {}. {}\nA new number from this run would not "
+            "be comparable to anything already published, so the run stops "
+            "here.".format(key, measured, expected, delta, ref["source"],
+                           ref["note"]))
+    return delta
+
+
 def _split_names(ds) -> tuple[str, str]:
     """``(train_key, val_key)`` for this dataset.
 
@@ -368,6 +568,20 @@ def build_data(sizes: dict, seed: int, workers: int = 8,
     train = encode(ds[train_key], sizes["n_train"], "train")
     val = encode(ds[val_key], sizes["n_val"], "val")
     num_classes = len(ds[train_key].features["label"].names)
+    # Audit 2, rule 1: fail loudly rather than train a classifier with the
+    # wrong head width. A dataset that silently loads a different class count
+    # -- a changed mirror, a wrong --dataset, a cached split from another run
+    # -- produces an accuracy that is not comparable to anything published,
+    # and nothing downstream objects. exp29, exp31 and exp33 each read a split
+    # without this check; the assertion belongs here, in the one builder, not
+    # in each of them.
+    expected = DATASET_CLASSES.get(dataset_id or DATASET_ID)
+    if expected is not None and num_classes != expected:
+        raise RuntimeError(
+            "{} loaded {} classes, expected {}. Every accuracy in this "
+            "project is on a fixed class count; a different one is not a "
+            "variant of the same measurement. Check --dataset and the "
+            "cache.".format(dataset_id or DATASET_ID, num_classes, expected))
     return train, val, num_classes
 
 
@@ -1366,10 +1580,16 @@ def main(argv=None):
         dataset_id=args.dataset, cache_dir=args.data_cache)
     log(f"  {train_split[0].shape[0]} train / {val_split[0].shape[0]} val images, "
         f"{num_classes} classes")
+    # The probe goes through the shared builder like every other script's,
+    # so this file is not a seventh construction with its own conventions.
     n_fi = min(sizes["n_fi"], val_split[0].shape[0])
-    fi_x = normalize(val_split[0][:n_fi]).to(device)
-    fi_batches = [{"pixel_values": fi_x[i:i + 16]} for i in range(0, n_fi, 16)]
-    verify_batch = {"pixel_values": fi_x[:4]}
+    # A uniform batch size, chosen so the probe is never ragged and never
+    # empty: validate_probe refuses both, and a tiny split (the unit-test
+    # fixture has twelve val images) would otherwise ask for zero batches.
+    probe_bs = min(16, n_fi)
+    fi_batches = build_probe(val_split[0], n_fi // probe_bs, probe_bs, device,
+                             where="fi probe")
+    verify_batch = {"pixel_values": fi_batches[0]["pixel_values"][:4]}
 
     results, training, budget = {}, {}, {}
     for key, label, mask_mode, use_qat in ALL_VARIANTS:

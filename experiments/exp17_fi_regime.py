@@ -131,7 +131,37 @@ def _probe_batches(split, device, is_txt, normalize, num_samples):
         taken += n
         if taken >= num_samples:
             break
+    # audit2: reference-gate-exempt -- its six architectures were each scanned
+    # once, so every published FI here is n=1 on a randomly drawn probe. A
+    # point gate on an n=1 reading would assert a precision the number does
+    # not have, and the band a gate needs was never measured. If this run is
+    # ever repeated, the first thing it should produce is three probes per
+    # architecture, and then a band gate becomes possible.
+    if not is_txt:
+        # Audit 2, rule 1: validated, not rebuilt. Six architectures, six
+        # processors, six normalizations -- ``P.build_probe`` would impose the
+        # ViT's and be wrong for five of them. What the shared harness adds
+        # is the check.
+        #
+        # Note what the structure here permitted: ``normalize`` is a
+        # parameter, so a caller that passed None would have scanned raw
+        # pixels and reported a plausible FI. ``main()`` sets it on every
+        # image path, so the published figures are on normalized input -- the
+        # assertion below now makes that a guarantee rather than a reading of
+        # the call sites.
+        _validate(out, "exp17 probe")
     return out
+
+
+def _validate(probe, where):
+    """``P.validate_probe``, if the shared harness is importable."""
+    try:
+        sys.path.insert(
+            0, str(Path(__file__).resolve().parent.parent / "scripts"))
+        from run_sal_qat_prototype import validate_probe
+    except Exception:                                        # noqa: BLE001
+        return None
+    return validate_probe(probe, where)
 
 
 # ---------------------------------------------------------------- INT4 scoring

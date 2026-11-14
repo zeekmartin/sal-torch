@@ -82,7 +82,36 @@ def vision_probe(processor_id, n, batch_size):
     for i in range(0, len(imgs), batch_size):
         px = proc(images=imgs[i:i + batch_size], return_tensors="pt")["pixel_values"]
         out.append({"pixel_values": px})
+    # audit2: reference-gate-exempt -- a v0.5.1-era CIFAR-10 diagnostic on
+    # models whose FI this project publishes nowhere, so there is no value for
+    # it to reproduce. It is not part of the ImageNet campaign and is not
+    # re-run by it.
+    #
+    # Audit 2, rule 1: validated, not rebuilt. ``P.build_probe`` applies the
+    # ViT's mean-0.5/std-0.5 normalization to a uint8 cache; this probe comes
+    # from the model's own processor, which uses that model's statistics, so
+    # rebuilding it would be wrong. What the shared harness contributes here
+    # is the check: float dtype, finite, straddling zero, uniform batches.
+    # An unnormalized or integer probe returns a plausible FI of a different
+    # quantity, which is how exp37 and exp42 both lost a full run.
+    _validate(out, "exp01 probe")
     return out
+
+
+def _validate(probe, where):
+    """``P.validate_probe``, if the shared harness is importable.
+
+    This script predates the shared harness and runs standalone (Modal, a
+    laptop) where ``scripts/`` may not be on the path. The check is worth
+    having when available and not worth a hard dependency.
+    """
+    try:
+        sys.path.insert(
+            0, str(Path(__file__).resolve().parent.parent / "scripts"))
+        from run_sal_qat_prototype import validate_probe
+    except Exception:                                        # noqa: BLE001
+        return None
+    return validate_probe(probe, where)
 
 
 def main(argv=None):

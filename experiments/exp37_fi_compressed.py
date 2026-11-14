@@ -64,33 +64,42 @@ from exp33_sparse_core import (attention_linear_layers,            # noqa: E402
 DATASET = "evanarlian/imagenet_1k_resized_256"
 # FI's own probe size. 500 is sal.fi's default and what every published scan
 # used; keeping it means these numbers sit on the same scale as PHASE1's.
+# 32 batches of 16 = 512 images, scanned at num_samples=500. exp30's
+# geometry, so an FI from this script and one from the certification
+# harness are the same measurement (exp45).
 N_PROBE = 500
+PROBE_BATCHES = 32
+PROBE_BATCH = 16
+PROBE_IMAGES = PROBE_BATCHES * PROBE_BATCH
 EDGE_DENSITY = 0.10
 
 
-def make_probe(images_uint8, device, batch_size=16):
-    """The probe in the shape ``sal.fi`` actually expects.
+def make_probe(images_uint8, device, n_batches=PROBE_BATCHES,
+               batch_size=PROBE_BATCH):
+    """The shared builder (audit 2, rule 1).
 
-    A raw ``(images, labels)`` tuple walks into two traps at once, and neither
-    one raises:
+    This used to be a local construction, and it was the local
+    construction that produced the campaign's most expensive wrong
+    number: the first version handed ``build_data``'s **uint8** cache
+    straight to the scanner. ``nn.Conv2d`` promotes uint8 silently,
+    so the scan ran on inputs two orders of magnitude outside the
+    ViT's [-1, 1] range and reported a perfectly plausible FI. Two
+    full runs were redone. ``P.validate_probe`` now refuses that
+    input, and ``P.build_probe`` is the only way to make a probe.
 
-    * ``sal.fi._iter_data`` treats any iterable as a sequence of **batches**,
-      so a 2-tuple yields the whole image tensor and then the label tensor.
-      The images arrive as one N-image batch, and the labels are spared only
-      because ``num_samples`` is already reached and the loop breaks first.
-    * ``extract_activation_graph`` does **not** normalise, and ``build_data``
-      returns **uint8 in [0, 255]**. ``nn.Conv2d`` promotes uint8 silently
-      instead of raising, so the scan runs on inputs two orders of magnitude
-      outside the ViT's [-1, 1] range and reports a perfectly plausible number.
-
-    ``run_sal_qat_prototype`` normalises on its own FI path (``fi_x =
-    normalize(val_split[0][:n_fi])``), and so does the certification harness.
-    Building the probe here the same way is what makes the three comparable.
+    The second change is geometry. The old batching was
+    ``range(0, n, 16)``, which at n=500 gives 31 batches of 16 and
+    one of 4 -- a ragged probe whose recorded ``batch_size`` is a
+    fiction, and which the shared builder refuses. The probe is now
+    ``PROBE_BATCHES x PROBE_BATCH`` = 512 images scanned at
+    ``num_samples`` 500: exp30's geometry, and the one the
+    certification path uses. Every FI figure in the project then
+    comes from one probe geometry, which is what makes them
+    comparable at all. It does move this script's numbers, so the
+    results it produced before this change were re-measured.
     """
-    return [{"pixel_values": P.normalize(
-        images_uint8[i:i + batch_size]).to(device)}
-        for i in range(0, images_uint8.shape[0], batch_size)]
-
+    return P.build_probe(images_uint8, n_batches, batch_size,
+                         device, where="exp37 probe")
 
 def fi_of(model, probe, device, n_probe=N_PROBE, density=EDGE_DENSITY) -> dict:
     """FI plus the graph shape it was computed on."""
@@ -205,6 +214,14 @@ def main(argv=None) -> int:
     p.add_argument("--dataset", default=DATASET)
     p.add_argument("--data-cache", default=None)
     p.add_argument("--n-probe", type=int, default=N_PROBE)
+    p.add_argument("--no-reference-gate", action="store_true",
+                   help="skip the published-value check. For a "
+                        "deliberate change of probe geometry, "
+                        "nothing else.")
+    p.add_argument("--probe-batches", type=int, default=PROBE_BATCHES,
+                   help="batches of PROBE_BATCH images in the probe. "
+                        "32 x 16 = 512 is exp30's geometry and the "
+                        "default; the gate shrinks it.")
     p.add_argument("--probe-seeds", type=int, nargs="+", default=[0],
                    help="independent probe draws. Every arm is scanned under "
                         "each of them, so dFI can be reported per probe. One "
@@ -229,6 +246,7 @@ def main(argv=None) -> int:
 
     if args.gate:
         args.n_probe, args.n_calib = 64, 16
+        args.probe_batches = 4          # 4 x 16 = 64 images
         args.skip = ["head25_magnitude", "head33_magnitude",
                      "head50_random_s1", "wanda_whole", "sparsegpt_whole",
                      "sparsegpt_attn", "sparsegpt_attn_nm"]
@@ -238,7 +256,10 @@ def main(argv=None) -> int:
     device, _ = P.detect_device()
     use_amp = device.type == "cuda"
     P.log("\n=== exp37 - FI on compressed models (tier A: one-shot) ===")
-    P.log(f"  probe {args.n_probe} images | calib {args.n_calib} | "
+    # The geometry that was built, not the argument -- see exp42.
+    P.log(f"  probe {args.probe_batches * PROBE_BATCH} images "
+          f"({args.probe_batches} batches of {PROBE_BATCH}), scanned at "
+          f"num_samples={args.n_probe} | calib {args.n_calib} | "
           f"edge density {args.density}")
 
     P.set_seed(args.seed)
@@ -257,7 +278,7 @@ def main(argv=None) -> int:
     # n_probe every seed would permute the same images and the "independent
     # probes" would be one probe in three orders.
     sizes = {"n_train": max(args.n_calib * 8, 2000),
-             "n_val": max(args.n_probe * len(args.probe_seeds), args.n_probe),
+             "n_val": max(args.probe_batches * PROBE_BATCH * len(args.probe_seeds), args.n_probe),
              "n_fi": args.n_probe}
     train_split, val_split, num_classes = P.build_data(
         sizes, args.seed, args.workers, dataset_id=args.dataset,
@@ -278,8 +299,9 @@ def main(argv=None) -> int:
     probes = {}
     for ps in args.probe_seeds:
         g = torch.Generator().manual_seed(1000 + ps)
-        pidx = torch.randperm(n_val, generator=g)[:args.n_probe]
-        probes[ps] = make_probe(val_split[0][pidx], device)
+        pidx = torch.randperm(n_val, generator=g)[:args.probe_batches * PROBE_BATCH]
+        probes[ps] = make_probe(val_split[0][pidx], device,
+                                args.probe_batches)
     # exp33's calibration shape exactly: normalised, in batches of 16, drawn
     # with the run's seed. prune_model pushes these through the model once.
     g = torch.Generator().manual_seed(args.seed)
@@ -338,6 +360,13 @@ def main(argv=None) -> int:
             scan = fi_of(model, probe, device, args.n_probe, args.density)
             if name == "dense_pretrained":
                 baseline_fi[ps] = scan["fi"]
+                # Audit 2, rule 2: the dense arm reproduces a published band
+                # before any compressed arm reports a delta against it. The
+                # band is nine measured draws; outside it, the probe is
+                # wrong -- which is how this script's first two runs failed.
+                if not args.gate and not args.no_reference_gate:
+                    P.check_reference("vit_b16_dense_fi_band",
+                                      float(scan["fi"]), P.log)
             if ps in baseline_fi:
                 scan["fi_delta"] = scan["fi"] - baseline_fi[ps]
                 scan["fi_relative_change"] = (
