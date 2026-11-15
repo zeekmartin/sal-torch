@@ -228,6 +228,11 @@ def main(argv=None):
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--ratios", type=float, nargs="+", default=list(RATIOS))
     p.add_argument("--epochs", type=int, default=EPOCHS)
+    p.add_argument("--recover-drophead", action="store_true",
+                   help="also recover the pruned DropHead model for "
+                        "--recover-epochs, so the two arms see the same "
+                        "number of passes over the data. Off by default, so "
+                        "the published behaviour is unchanged.")
     p.add_argument("--recover-epochs", type=int, default=RECOVER_EPOCHS,
                    help="default 2 (exp29: the recovery curve peaks there)")
     p.add_argument("--batch-size", type=int, default=BATCH)
@@ -369,6 +374,24 @@ def main(argv=None):
             cell["drophead_accuracy"] = evaluate(dh_small, vl, device, use_amp)
             log(f"    DropHead: dense {cell['drophead_dense_accuracy']*100:.2f}%"
                 f" | sliced {cell['drophead_accuracy'] * 100:.2f}%")
+
+            # 2b ------------------------- DropHead + the SAME recovery
+            # Without this the comparison below is not budget-matched:
+            # the magnitude arm gets args.recover_epochs extra passes over
+            # the data and DropHead gets none. Mirrors arm 3 exactly --
+            # same loop, same lr, same epochs, same seed reset -- so the
+            # only difference left is the weights each starts from.
+            if args.recover_drophead:
+                set_seed(args.seed)
+                t0 = time.time()
+                cell["drophead_recovery_losses"] = train_loop(
+                    dh_small, tl, args.recover_epochs, device, use_amp,
+                    label=f"{task}/drophead-recover-{rk}", lr=args.lr)
+                cell["drophead_recovery_seconds"] = round(time.time() - t0, 1)
+                cell["drophead_recovery_accuracy"] = evaluate(
+                    dh_small, vl, device, use_amp)
+                log(f"    DropHead +{args.recover_epochs}ep "
+                    f"{cell['drophead_recovery_accuracy'] * 100:.2f}%")
             save()
 
             # 3 --------------------------------- magnitude + recovery
@@ -391,6 +414,25 @@ def main(argv=None):
             cell["drophead_minus_magnitude_pp"] = round(
                 (cell["drophead_accuracy"]
                  - cell["magnitude_recovery_accuracy"]) * 100, 3)
+            cell["budgets"] = {
+                "drophead_train_epochs": args.epochs,
+                "drophead_recover_epochs": (args.recover_epochs
+                                            if args.recover_drophead else 0),
+                "magnitude_train_epochs": args.epochs,
+                "magnitude_recover_epochs": args.recover_epochs,
+                "matched": bool(args.recover_drophead),
+                "why": ("drophead_minus_magnitude_pp compares an arm with "
+                        "no recovery against one with recovery, so it is "
+                        "not budget-matched; the _matched_pp field below "
+                        "is, and exists only when --recover-drophead ran"),
+            }
+            if args.recover_drophead:
+                cell["drophead_minus_magnitude_matched_pp"] = round(
+                    (cell["drophead_recovery_accuracy"]
+                     - cell["magnitude_recovery_accuracy"]) * 100, 3)
+                cell["oneshot_drophead_minus_magnitude_pp"] = round(
+                    (cell["drophead_accuracy"]
+                     - cell["magnitude_oneshot_accuracy"]) * 100, 3)
             cell["drophead_vs_control_pp"] = round(
                 (cell["drophead_accuracy"] - entry["dense_accuracy"]) * 100, 3)
             entry[rk] = cell

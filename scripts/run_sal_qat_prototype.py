@@ -1152,6 +1152,67 @@ def train_variant(key, mask_mode, use_qat, num_classes, train_split, epochs, bat
     return model, info
 
 
+
+# ---------------------------------------------------- test-mode presets
+class PresetConflict(SystemExit):
+    """Raised when a test flag would overwrite an explicit argument."""
+
+
+def apply_test_preset(args, preset: dict, flag: str, argv=None) -> dict:
+    """Apply a test-mode preset without overriding explicit arguments.
+
+    ``preset`` maps argparse destinations to the values the test mode
+    wants. Anything the caller passed on the command line wins -- and
+    rather than let the preset win silently, or let the caller's value win
+    silently, a conflict **stops the run**:
+
+        $ exp34.py --gate --n-train 64
+        --gate would set --n-train to 512, but you passed 64.
+
+    Why refuse instead of preferring one: a test mode exists to exercise a
+    specific path cheaply, and an operator who overrides part of it is
+    usually trying to reach a cell the preset makes unreachable. Silently
+    choosing either value produces a run that is not the one anybody
+    asked for. ``--smoke`` disabling INT4, and ``--gate`` resizing a
+    deliberately tiny micro-test, are the two cases this campaign already
+    paid for.
+
+    Returns the values actually applied, so a caller can record them.
+    """
+    argv = sys.argv[1:] if argv is None else list(argv)
+    given = set()
+    for tok in argv:
+        if tok.startswith("--"):
+            given.add(tok.split("=", 1)[0])
+
+    conflicts = []
+    for dest, value in preset.items():
+        opt = "--" + dest.replace("_", "-")
+        if opt in given:
+            conflicts.append((opt, getattr(args, dest, None), value))
+    if conflicts:
+        lines = ["%s cannot be combined with an explicit value for the "
+                 "arguments it sets:" % flag]
+        for opt, mine, theirs in conflicts:
+            lines.append("  %s would set %s to %r, but you passed %r."
+                         % (flag, opt, theirs, mine))
+        lines += [
+            "",
+            "Drop %s and pass the sizes you want, or drop the explicit "
+            "argument and let %s choose. The script refuses rather than "
+            "picking one, because both choices produce a run that is not "
+            "the one you asked for: this is the third time a test flag has "
+            "silently redefined a run in this project." % (flag, flag),
+        ]
+        raise PresetConflict("\n".join(lines))
+
+    applied = {}
+    for dest, value in preset.items():
+        setattr(args, dest, value)
+        applied[dest] = value
+    return applied
+
+
 # --------------------------------------------------------------- memory
 #: Filled by ``accuracy()`` on every call; read it right after.
 LAST_EVAL_MEMORY: dict = {}
