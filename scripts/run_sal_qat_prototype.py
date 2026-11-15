@@ -1152,6 +1152,89 @@ def train_variant(key, mask_mode, use_qat, num_classes, train_split, epochs, bat
     return model, info
 
 
+# --------------------------------------------------------------- memory
+#: Filled by ``accuracy()`` on every call; read it right after.
+LAST_EVAL_MEMORY: dict = {}
+
+#: Set to a path before calling ``accuracy()`` to have it write that
+#: evaluation's per-image predictions there as a compressed ``.npz``
+#: (``pred`` int16, ``label`` int16). Example-level disagreement needs to
+#: know WHICH images an arm loses, and collecting the argmax inside the
+#: evaluation every arm already runs makes that free; a separate pass would
+#: be a forward over the whole split per arm per seed. Reset to None after
+#: each use so one stale path cannot silently overwrite another arm's file.
+COLLECT_PREDICTIONS: "str | None" = None
+
+
+def rss_bytes():
+    """Current resident set size, or None where /proc is unavailable."""
+    try:
+        with open("/proc/self/status", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    return None
+
+
+def peak_rss_bytes():
+    """Process high-water RSS.
+
+    Monotonic: it never falls, so inside a process that scores several
+    arms it is a property of the process and not of an arm. Recorded for
+    completeness, named so it cannot be misread.
+    """
+    try:
+        import resource
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
+    except (ImportError, OSError, AttributeError):
+        return None
+
+
+def memory_probe(device):
+    """Begin a peak-memory measurement; the returned closure ends it.
+
+    The GPU peak is reset at the start, so what the closure reports
+    belongs to the region between the two calls. Three quantities, because
+    they answer different questions:
+
+    * ``max_memory_allocated`` -- peak tensor bytes the allocator handed
+      out in the region. This is the figure that scales with the arm.
+    * ``max_memory_reserved`` -- the caching allocator's high-water mark
+      against the driver. Always larger and history-dependent, so it is
+      recorded but is not the per-arm number.
+    * RSS -- current before and after, plus the process high-water mark.
+    """
+    on_gpu = getattr(device, "type", str(device)) == "cuda"
+    if on_gpu and torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.reset_peak_memory_stats()
+    before = rss_bytes()
+
+    def finish() -> dict:
+        out = {"rss_bytes_before": before,
+               "rss_bytes_after": rss_bytes(),
+               "process_peak_rss_bytes": peak_rss_bytes(),
+               "rss_note": ("process_peak_rss_bytes is a high-water mark "
+                            "for the whole process and cannot be "
+                            "attributed to a single arm")}
+        if on_gpu and torch.cuda.is_available():
+            torch.cuda.synchronize()
+            out["max_memory_allocated_bytes"] = int(
+                torch.cuda.max_memory_allocated())
+            out["max_memory_reserved_bytes"] = int(
+                torch.cuda.max_memory_reserved())
+            out["gpu_note"] = ("allocated is the peak tensor bytes inside "
+                               "the measured region, whose counter is "
+                               "reset at its start; reserved is the "
+                               "caching allocator's high-water mark and "
+                               "depends on allocation history")
+        return out
+
+    return finish
+
+
 # ------------------------------------------------------------------- scoring
 @torch.no_grad()
 def accuracy(model, val_split, device, use_amp: bool, batch_size: int = 128) -> float:
@@ -1161,11 +1244,35 @@ def accuracy(model, val_split, device, use_amp: bool, batch_size: int = 128) -> 
     correct = n = 0
     autocast = (torch.autocast("cuda", dtype=torch.float16)
                 if (use_amp and dev.type == "cuda") else contextlib.nullcontext())
+    # The signature stays a bare float: changing it would touch every call
+    # site in two repositories. The measurement goes to a module-level
+    # record that the caller reads immediately after.
+    mem = memory_probe(dev)
+    want_preds = COLLECT_PREDICTIONS is not None
+    preds: list = []
+    labels: list = []
     for x, y in batches(val_split, batch_size, workers=LOADER_WORKERS):
         with autocast:
             logits = model(pixel_values=normalize(x.to(dev))).logits
-        correct += int((logits.argmax(-1).cpu() == y).sum())
+        pred = logits.argmax(-1).cpu()
+        correct += int((pred == y).sum())
         n += y.shape[0]
+        if want_preds:
+            preds.append(pred.to(torch.int16))
+            labels.append(y.to(torch.int16))
+    LAST_EVAL_MEMORY.clear()
+    LAST_EVAL_MEMORY.update(mem())
+    LAST_EVAL_MEMORY["batch_size"] = batch_size
+    LAST_EVAL_MEMORY["n_images"] = n
+    if want_preds and preds:
+        import numpy as _np
+        out = Path(COLLECT_PREDICTIONS)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        _np.savez_compressed(
+            out,
+            pred=torch.cat(preds).numpy().astype(_np.int16),
+            label=torch.cat(labels).numpy().astype(_np.int16))
+        LAST_EVAL_MEMORY["predictions"] = str(out)
     return correct / max(n, 1)
 
 
