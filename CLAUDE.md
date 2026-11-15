@@ -231,16 +231,25 @@ the three shipped, `ExpertMasker`.
     with architecture and dataset; nothing measured separates them.
   - **The probe routes compression; FI does not.** exp17 (`PHASE2H.md`) tested
     whether FI read off a pretrained checkpoint predicts the pruning regime,
-    across **six architectures** (DeiT-small, BERT-base, ViT-B/16,
-    DINOv2-large, I-JEPA ViT-H/14, phi-2). **It fails at both ends**:
-    BERT-base has a *higher* FI than ViT-B/16 and loses 5.15pp where ViT-B/16
-    loses 62.21; DINOv2-large has an FI 25x *lower* than DeiT-small and
-    collapses to 0.96% — chance on a 100-class task — on the same dataset,
-    protocol, class count and seed count. Parameter count does not rescue it
-    either (drops run −76, −62, −5, −94, −19, −4 by size). What does order the
-    table is **the baseline's own drop under pruning**, measured directly by a
-    probe: >30pp → SAL, 10-30pp → either, <10pp → skip head training. FI stays
-    in the product for diagnosis and certification, **not** as a router.
+    across **four architectures** — DeiT-small and DINOv2-large on
+    ImageNet-100, BERT-base and phi-2 on SST-2, `n_eval` 872 in each case,
+    so **not** the ImageNet-1k protocol the rest of the campaign uses.
+    (PHASE2H's table shows six rows; the ViT-B/16 and I-JEPA ones are, in
+    that page's own words, "the published points, from `PHASE2F.md` and
+    `PHASE2G.md`" — imported from other runs on ImageNet-100, which cardinal
+    rule 7 supersedes. Do not build a claim on a comparison between an exp17
+    row and an imported one.)
+    **It fails at both ends, inside exp17**: DINOv2-large has an FI **25x
+    lower** than DeiT-small and loses *more* (−94.02 against −76.30pp), while
+    BERT-base sits between them in FI (0.0935) and loses least of the three
+    (−5.15pp). Ranked by FI the four read phi-2 < DINOv2-large < BERT-base <
+    DeiT-small; ranked by what they actually lose, DINOv2-large < DeiT-small
+    < BERT-base < phi-2 — **4 of 6 pairs inverted**. Parameter count does not
+    rescue it either. What does order the table is **the baseline's own drop
+    under pruning**, measured directly by a probe: >30pp → SAL, 10-30pp →
+    either, <10pp → skip head training. FI stays in the product for diagnosis
+    and certification, **not** as a router. The four-architecture table is
+    generated into the canonical tables, outside this repository.
   - **FI-weighted head *selection* loses to uniform random on 0/10 seeds**, at
     both mask ratios: −5.02pp (CI [−5.64, −4.40]) at 0.3 and −4.77pp
     (CI [−5.15, −4.39]) at 0.5 (`PHASE2E.md`). This is cardinal rule 1,
@@ -431,8 +440,12 @@ match**. `tests/test_matched_control.py` pins that behaviour.
   one-shot); what sinks it is that it pays for that resilience in dense
   accuracy, up to −12.58pp on MRPC. And the probe's prediction fails: one-shot
   drops at P50 are **−4.17 / −12.42 / −21.68 / −17.56pp**, i.e. mostly outside
-  the skip band. DropHead's hooks also cost **~37% of training throughput** on
-  BERT (453 → 284 samples/s).
+  the skip band. DropHead's hooks also cost training throughput, and **the
+  cost scales with the mask quota**: **24-30% at 33% of heads and 33-39% at
+  50%**, over the eight cells' own `dense_seconds` and `drophead_seconds`.
+  A single "~37%" is the 50% figure on three of the four tasks, not a number
+  for the experiment; the per-cell table is generated into the canonical
+  tables, outside this repository.
 
 **Precision, stated exactly**: training and recovery run under **bfloat16**
 autocast; scoring runs under **float16** autocast

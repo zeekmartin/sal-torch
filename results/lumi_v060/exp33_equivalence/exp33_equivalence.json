@@ -1,0 +1,71 @@
+{
+ "experiment": "exp33_equivalence",
+ "what": "our vendored SparseGPT and Wanda against the upstream reference implementations, layer by layer on one linear layer and a fixed calibration set",
+ "why": "the preprint states this comparison as done; before this run the four tier-2 tests had never executed, because they skip unless SAL_SPARSE_REFS is set and neither CI nor any LUMI job sets it",
+ "test_file": "tests/test_exp33_sparse_equivalence.py",
+ "command": "python -m pytest tests/test_exp33_sparse_equivalence.py -v --tb=short -p no:warnings",
+ "started_at": "2026-11-15T11:16:13+00:00",
+ "finished_at": "2026-11-15T11:16:28+00:00",
+ "exit_code": 0,
+ "passed": true,
+ "references": {
+  "sparsegpt": {
+   "name": "sparsegpt",
+   "present": true,
+   "remote": "https://github.com/IST-DASLab/sparsegpt",
+   "commit": "147d2159dc4f3e9f73e47b32c04d7b3708f44436",
+   "commit_date": "2024-05-26T14:11:40+02:00",
+   "subject": "Merge pull request #29 from Donyme/patch-1",
+   "describe": "147d215"
+  },
+  "wanda": {
+   "name": "wanda",
+   "present": true,
+   "remote": "https://github.com/locuslab/wanda",
+   "commit": "8e8fc87b4a2f9955baa7e76e64d5fce7fa8724a6",
+   "commit_date": "2023-11-03T01:37:59-04:00",
+   "subject": "add dense ft",
+   "describe": "8e8fc87"
+  }
+ },
+ "tolerances_asserted": {
+  "wanda.scaler_row": "allclose, atol=1e-6 (activation-norm accumulation)",
+  "wanda.mask": "torch.equal on the zero pattern",
+  "wanda.weights": "allclose, atol=1e-6",
+  "sparsegpt.H": "allclose, atol=1e-5 (Hessian)",
+  "sparsegpt.mask": "torch.equal on the zero pattern",
+  "sparsegpt.weights": "allclose, atol=1e-5",
+  "nm_2of4": "torch.equal on the zero pattern, both pruners"
+ },
+ "outcomes": {
+  "test_wanda_zeroes_exactly_the_requested_fraction_per_row": "PASSED",
+  "test_wanda_mask_agrees_with_the_metric_ordering": "PASSED",
+  "test_wanda_leaves_surviving_weights_untouched": "PASSED",
+  "test_sparsegpt_hits_the_requested_sparsity_and_updates_survivors": "PASSED",
+  "test_sparsegpt_is_deterministic_given_the_calibration_set": "PASSED",
+  "test_zero_sparsity_is_a_no_op_for_wanda": "PASSED",
+  "test_wanda_24_zeroes_two_of_every_four": "PASSED",
+  "test_sparsegpt_24_zeroes_two_of_every_four": "PASSED",
+  "test_24_ignores_the_sparsity_argument": "PASSED",
+  "test_wanda_matches_the_reference": "PASSED",
+  "test_sparsegpt_matches_the_reference": "PASSED",
+  "test_wanda_24_matches_the_reference": "PASSED",
+  "test_sparsegpt_24_matches_the_reference": "PASSED"
+ },
+ "tier2_outcomes": {
+  "test_wanda_matches_the_reference": "PASSED",
+  "test_sparsegpt_matches_the_reference": "PASSED",
+  "test_wanda_24_matches_the_reference": "PASSED",
+  "test_sparsegpt_24_matches_the_reference": "PASSED"
+ },
+ "n_tests": 13,
+ "n_tier2": 4,
+ "tier2_all_passed": true,
+ "environment": {
+  "python": "3.13.3",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "torch": "2.6.0+cpu",
+  "pytest": "9.0.2"
+ },
+ "caveat": "a layer-level equivalence, on CPU, at one sparsity and one calibration set. It shows the pruning arithmetic matches upstream; it does not reproduce the papers' end-to-end perplexities, which are measured on models and a pipeline this campaign does not run."
+}

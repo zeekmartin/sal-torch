@@ -1,0 +1,23 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.3, pytest-9.0.2, pluggy-1.6.0 -- <python>
+cachedir: .pytest_cache
+rootdir: <repo>
+configfile: pyproject.toml
+plugins: anyio-4.11.0, datalad-1.4.1, fast-array-utils-1.4.1, cov-7.1.0, typeguard-4.5.1, zarr-3.2.1
+collecting ... collected 13 items
+
+tests/test_exp33_sparse_equivalence.py::test_wanda_zeroes_exactly_the_requested_fraction_per_row PASSED [  7%]
+tests/test_exp33_sparse_equivalence.py::test_wanda_mask_agrees_with_the_metric_ordering PASSED [ 15%]
+tests/test_exp33_sparse_equivalence.py::test_wanda_leaves_surviving_weights_untouched PASSED [ 23%]
+tests/test_exp33_sparse_equivalence.py::test_sparsegpt_hits_the_requested_sparsity_and_updates_survivors PASSED [ 30%]
+tests/test_exp33_sparse_equivalence.py::test_sparsegpt_is_deterministic_given_the_calibration_set PASSED [ 38%]
+tests/test_exp33_sparse_equivalence.py::test_zero_sparsity_is_a_no_op_for_wanda PASSED [ 46%]
+tests/test_exp33_sparse_equivalence.py::test_wanda_24_zeroes_two_of_every_four PASSED [ 53%]
+tests/test_exp33_sparse_equivalence.py::test_sparsegpt_24_zeroes_two_of_every_four PASSED [ 61%]
+tests/test_exp33_sparse_equivalence.py::test_24_ignores_the_sparsity_argument PASSED [ 69%]
+tests/test_exp33_sparse_equivalence.py::test_wanda_matches_the_reference PASSED [ 76%]
+tests/test_exp33_sparse_equivalence.py::test_sparsegpt_matches_the_reference PASSED [ 84%]
+tests/test_exp33_sparse_equivalence.py::test_wanda_24_matches_the_reference PASSED [ 92%]
+tests/test_exp33_sparse_equivalence.py::test_sparsegpt_24_matches_the_reference PASSED [100%]
+
+============================= 13 passed in 5.02s ==============================
