@@ -1,0 +1,417 @@
+{
+  "experiment": "exp29_recovery_epochs",
+  "model": "google/vit-base-patch16-224",
+  "dataset": "evanarlian/imagenet_1k_resized_256",
+  "dataset_label": "ImageNet-1k (resized 256px, evanarlian/imagenet_1k_resized_256)",
+  "seed": 123,
+  "gate": false,
+  "selection": "random",
+  "ratio_epochs": 2,
+  "num_classes": 1000,
+  "n_train": 1281167,
+  "n_val": 50000,
+  "batch_size": 64,
+  "epoch_points": [
+    1,
+    2,
+    3,
+    5,
+    10
+  ],
+  "curve_ratio": 0.5,
+  "dense": {
+    "accuracy": 0.78442,
+    "int4_accuracy": 0.7723
+  },
+  "curve": {},
+  "ratios": {
+    "0.25": {
+      "accuracy": 0.80406,
+      "int4_accuracy": 0.78668,
+      "ratio": 0.25,
+      "epochs": 2,
+      "heads_removed": 36,
+      "accuracy_before_recovery": 0.5209,
+      "epoch_losses": [
+        0.7336747477367849,
+        0.3468091990185553
+      ],
+      "train_seconds": 6470.940447092056,
+      "head_set": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          4
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          4
+        ],
+        [
+          1,
+          6
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          2,
+          6
+        ],
+        [
+          2,
+          8
+        ],
+        [
+          3,
+          5
+        ],
+        [
+          3,
+          8
+        ],
+        [
+          3,
+          10
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          4,
+          2
+        ],
+        [
+          4,
+          10
+        ],
+        [
+          5,
+          5
+        ],
+        [
+          5,
+          8
+        ],
+        [
+          5,
+          11
+        ],
+        [
+          6,
+          2
+        ],
+        [
+          6,
+          3
+        ],
+        [
+          6,
+          11
+        ],
+        [
+          7,
+          0
+        ],
+        [
+          7,
+          1
+        ],
+        [
+          7,
+          6
+        ],
+        [
+          8,
+          1
+        ],
+        [
+          8,
+          6
+        ],
+        [
+          8,
+          9
+        ],
+        [
+          9,
+          0
+        ],
+        [
+          9,
+          5
+        ],
+        [
+          9,
+          7
+        ],
+        [
+          10,
+          0
+        ],
+        [
+          10,
+          1
+        ],
+        [
+          10,
+          11
+        ],
+        [
+          11,
+          2
+        ],
+        [
+          11,
+          10
+        ],
+        [
+          11,
+          11
+        ]
+      ]
+    },
+    "0.33": {
+      "accuracy": 0.79864,
+      "int4_accuracy": 0.78506,
+      "ratio": 0.33,
+      "epochs": 2,
+      "heads_removed": 48,
+      "accuracy_before_recovery": 0.45152,
+      "epoch_losses": [
+        0.7778068185857474,
+        0.36841100652439446
+      ],
+      "train_seconds": 6221.135677576065,
+      "head_set": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          4
+        ],
+        [
+          0,
+          6
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          4
+        ],
+        [
+          1,
+          6
+        ],
+        [
+          2,
+          5
+        ],
+        [
+          2,
+          8
+        ],
+        [
+          2,
+          9
+        ],
+        [
+          2,
+          11
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          3,
+          2
+        ],
+        [
+          3,
+          5
+        ],
+        [
+          3,
+          10
+        ],
+        [
+          4,
+          2
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          4,
+          8
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          5,
+          1
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          5,
+          10
+        ],
+        [
+          6,
+          0
+        ],
+        [
+          6,
+          1
+        ],
+        [
+          6,
+          5
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          7,
+          0
+        ],
+        [
+          7,
+          1
+        ],
+        [
+          7,
+          2
+        ],
+        [
+          7,
+          11
+        ],
+        [
+          8,
+          0
+        ],
+        [
+          8,
+          2
+        ],
+        [
+          8,
+          4
+        ],
+        [
+          8,
+          6
+        ],
+        [
+          9,
+          4
+        ],
+        [
+          9,
+          7
+        ],
+        [
+          9,
+          9
+        ],
+        [
+          9,
+          10
+        ],
+        [
+          10,
+          0
+        ],
+        [
+          10,
+          4
+        ],
+        [
+          10,
+          5
+        ],
+        [
+          10,
+          8
+        ],
+        [
+          11,
+          3
+        ],
+        [
+          11,
+          7
+        ],
+        [
+          11,
+          8
+        ],
+        [
+          11,
+          9
+        ]
+      ],
+      "exp24_arm1": {
+        "accuracy": 0.7885,
+        "int4_accuracy": 0.7709
+      },
+      "vs_exp24_pp": 1.0140000000000038
+    }
+  },
+  "exp24_arm1_reference": {
+    "0.33": {
+      "accuracy": 0.7885,
+      "int4_accuracy": 0.7709
+    },
+    "0.50": {
+      "accuracy": 0.7727,
+      "int4_accuracy": 0.7506
+    }
+  },
+  "notes": {
+    "schedule": "each curve point is its own recovery with a completed warmup+cosine schedule; a mid-run checkpoint of a longer run is a different quantity",
+    "int4": "quantize_weights(model, 4) \u2014 a simulated per-channel quantize/dequantize round-trip in fp32, not a 4-bit kernel; says nothing about speed or memory",
+    "exp26": "exp26's 25% and 33% are MLP neuron ratios, not head ratios; its only head arm is 50%"
+  },
+  "gpu": "AMD Instinct MI250X",
+  "torch_version": "2.5.1+rocm6.2"
+}
