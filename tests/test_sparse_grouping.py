@@ -142,3 +142,39 @@ def test_group_size_larger_than_the_model_is_one_group():
                 group_size=999)
     for n in l1:
         assert torch.equal(l1[n].weight.data, l2[n].weight.data)
+
+
+@pytest.mark.parametrize("method", ["sparsegpt", "wanda"])
+def test_n_m_sparsity_is_equivalent_too(method):
+    """The 2:4 path, which the 6.7B gate exercises and the tests above did not.
+
+    `prunen`/`prunem` travel through the grouped call like everything
+    else, but "it is passed through" is an argument, not a measurement:
+    n:m picks its zeros within each group of m consecutive weights, so a
+    bug there would show as a different pattern rather than a crash.
+    """
+    m1, l1, c1 = _fresh()
+    prune_model(m1, l1, c1, method, 0.5, log=lambda *a, **k: None,
+                prunen=2, prunem=4)
+    m2, l2, c2 = _fresh()
+    prune_model(m2, l2, c2, method, 0.5, log=lambda *a, **k: None,
+                prunen=2, prunem=4, group_size=2)
+    for n in l1:
+        assert torch.equal(l1[n].weight.data, l2[n].weight.data), n
+
+
+def test_n_m_really_produced_an_n_m_pattern():
+    """Equivalence between two wrong results would also pass.
+
+    Exactly two zeros in every run of four along the input dimension.
+    """
+    m, layers, calib = _fresh()
+    prune_model(m, layers, calib, "wanda", 0.5, log=lambda *a, **k: None,
+                prunen=2, prunem=4, group_size=2)
+    for n, lyr in layers.items():
+        w = lyr.weight.data
+        blocks = w.reshape(w.shape[0], -1, 4)
+        zeros = (blocks == 0).sum(dim=2)
+        assert int(zeros.min()) == 2 and int(zeros.max()) == 2, (
+            "%s: runs of four hold %d..%d zeros, not 2"
+            % (n, int(zeros.min()), int(zeros.max())))
