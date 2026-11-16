@@ -200,7 +200,17 @@ A deliberate, disclosed difference from the reference implementations of SparseG
 
 Both references walk the decoder **sequentially**: a layer's Hessian (SparseGPT) or activation norm (Wanda) is accumulated from a model whose **earlier layers are already pruned**, so each layer is fitted to the input it will actually receive at inference. Ours accumulates every target's statistics from the **dense** model in one calibration pass, and every figure in this work was measured that way.
 
-The practical consequence is that our one-shot numbers should be, if anything, slightly *worse* than a sequential implementation's at the same sparsity, because a sequential pass can compensate for upstream error. What we measure says the gap is small at this scale: against SparseGPT Table 1 on OPT-6.7B, dense reads 10.8601 (published 10.86), 50% unstructured 11.6766 (published 11.55) and 2:4 14.0128 (published 14.20) -- two of the three land *below* the published value, so the dense-activation choice is not flattering our results. The verdicts are in `results/opt67_gate/gate_verdict.json`.
+The expectation is that our one-shot numbers should be, if anything, slightly *worse* than a sequential implementation's at the same sparsity, because a sequential pass can compensate for upstream error. The measurement neither confirms nor refutes that, and the table below is generated from `results/opt67_gate/gate_verdict.json` rather than written out, because the first draft of this paragraph got the sign wrong and drew a conclusion from it.
+
+| cell | measured | published | difference | |
+|---|---|---|---|---|
+| `dense` | 10.8601 | 10.8600 | **+0.0001** | no calibration |
+| `sparsegpt50` | 11.6766 | 11.5500 | **+0.1266** | worse |
+| `sparsegpt2to4` | 14.0128 | 14.2000 | **-0.1872** | better |
+| `magnitude50` | 968.9918 | 969.0000 | **-0.0082** | no calibration |
+
+Across all four cells the agreement is within **0.19 perplexity** in absolute value. Only 2 of them involve calibration data at all: the dense row is a pure evaluation and magnitude pruning reads only the weights, so neither says anything about this choice. Of the 2 calibration-sensitive cells, 1 lands above the published value and 1 below. **There is no systematic direction**, and on a sample of 2 there could not be one: these numbers show that the grouped dense-activation calibration reproduces the published values to within +/-0.2 perplexity, and they do **not** establish that the choice is neutral, nor that it is unfavourable to us.
+
 
 Memory forced a second implementation detail that is **not** a semantic one. Holding one pruner per target needs 42.0 GiB of fp32 Hessians on OPT-6.7B (7.9 at 1.3B), which with fp32 weights exceeds a 64 GiB MI250X GCD, so the targets are pruned in groups of 8 with one calibration pass each. Each group's pruned weights are buffered and the originals restored before the next pass, so **every pass still sees the dense model**; `sal-torch/tests/test_sparse_grouping.py` requires grouped and whole-model passes to produce bit-identical masks and weights for both pruners, at four group sizes, unstructured and 2:4. Grouping therefore changes the memory and the runtime, not the measurement.
 
