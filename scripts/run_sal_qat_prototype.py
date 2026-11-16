@@ -84,6 +84,7 @@ import contextlib
 import copy
 import json
 import math
+import os
 import random
 import sys
 import time
@@ -544,9 +545,25 @@ def build_data(sizes: dict, seed: int, workers: int = 8,
             log(f"  cache {xpath.name} has shape {mm.shape}, expected "
                 f"{(n, 3, IMAGE_SIZE, IMAGE_SIZE)}; re-encoding")
             del mm
-        # Written to a .part and renamed, so an interrupted encode cannot leave a
-        # half-filled cache that the shape check would happily accept.
-        part = xpath.with_suffix(".part.npy")
+        # The rename protects against interruption; the lock protects
+        # against concurrency. Without it, several jobs starting together
+        # for a new seed all encode the same file, share one .part buffer,
+        # and all but one die on FileNotFoundError when the winner renames
+        # it. That is what wave 3 lost most of its new-seed jobs to.
+        want_shape = (n, 3, IMAGE_SIZE, IMAGE_SIZE)
+        lock = _claim_cache_lock(xpath)
+        if lock is None:
+            got = _wait_for_cache(xpath, ypath, n, want_shape)
+            if got is not None:
+                prog.done()
+                return got
+            lock = _claim_cache_lock(xpath)
+
+        # Per process, so two writers can never share one buffer even if a
+        # lock is ever taken over wrongly.
+        part = xpath.with_suffix(".part.%s.npy"
+                                 % os.environ.get("SLURM_JOB_ID",
+                                                  str(os.getpid())))
         out = np.lib.format.open_memmap(part, mode="w+", dtype=np.uint8,
                                         shape=(n, 3, IMAGE_SIZE, IMAGE_SIZE))
         ys, i = [], 0
@@ -561,6 +578,11 @@ def build_data(sizes: dict, seed: int, workers: int = 8,
         labels = torch.cat(ys)
         np.save(ypath, labels.numpy())
         part.replace(xpath)
+        if lock is not None:
+            try:
+                lock.unlink()
+            except OSError:
+                pass
         mm = np.load(xpath, mmap_mode="r")
         log(f"  cached {xpath.name} ({mm.nbytes / 1e9:.1f} GB)")
         return torch.from_numpy(mm), labels
@@ -1211,6 +1233,77 @@ def apply_test_preset(args, preset: dict, flag: str, argv=None) -> dict:
         setattr(args, dest, value)
         applied[dest] = value
     return applied
+
+
+
+#: How long a cache lock may be held before another job assumes the holder
+#: died. Encoding the full 1.28M-image training cache takes about 25
+#: minutes on a quiet node and longer under load, so this is deliberately
+#: generous: taking a lock from a live writer is worse than waiting.
+CACHE_LOCK_TIMEOUT_S = 5400
+CACHE_POLL_S = 20
+
+
+def _claim_cache_lock(xpath):
+    """Try to become the one process that builds this cache.
+
+    Returns the lock path if we own it, or None if someone else does. An
+    exclusive create is the whole mechanism: the filesystem decides, and
+    exactly one caller can win.
+    """
+    import os
+    lock = xpath.with_suffix(".lock")
+    try:
+        fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        age = None
+        try:
+            age = time.time() - lock.stat().st_mtime
+        except OSError:
+            pass
+        if age is not None and age > CACHE_LOCK_TIMEOUT_S:
+            # The holder is almost certainly dead. Say so: a silent
+            # takeover would hide a crashed job.
+            log("  cache lock %s is %.0f min old, taking it over"
+                % (lock.name, age / 60))
+            try:
+                lock.unlink()
+            except OSError:
+                pass
+            return _claim_cache_lock(xpath)
+        return None
+    with os.fdopen(fd, "w") as fh:
+        fh.write("%s %s\n" % (os.environ.get("SLURM_JOB_ID", "local"),
+                               os.getpid()))
+    return lock
+
+
+def _wait_for_cache(xpath, ypath, n, shape):
+    """Wait for another job's encode to land, then load it.
+
+    Returns the arrays, or None if the wait timed out -- in which case the
+    caller encodes rather than hanging forever.
+    """
+    import numpy as np
+    waited = 0
+    while waited < CACHE_LOCK_TIMEOUT_S:
+        if xpath.exists() and ypath.exists():
+            try:
+                mm = np.load(xpath, mmap_mode="r")
+            except (OSError, ValueError):
+                mm = None
+            if mm is not None and mm.shape == shape:
+                log("  another job built %s while we waited (%.0f s)"
+                    % (xpath.name, waited))
+                return torch.from_numpy(mm), torch.from_numpy(np.load(ypath))
+        time.sleep(CACHE_POLL_S)
+        waited += CACHE_POLL_S
+        if waited % 300 == 0:
+            log("  waiting for another job to build %s (%.0f min)"
+                % (xpath.name, waited / 60))
+    log("  gave up waiting for %s after %.0f min; encoding it here"
+        % (xpath.name, waited / 60))
+    return None
 
 
 # --------------------------------------------------------------- memory

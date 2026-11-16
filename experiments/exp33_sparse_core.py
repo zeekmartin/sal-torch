@@ -279,18 +279,84 @@ def sparsity_report(model: nn.Module, layers: dict | None = None) -> dict:
 
 
 @torch.no_grad()
+
+def _prune_in_groups(model, layers, calib_batches, method, sparsity,
+                     device, log, prunen, prunem, group_size):
+    """``prune_model`` over groups of targets, one calibration pass each.
+
+    Buffers each group's pruned weights on CPU and restores the originals
+    before the next pass, so every pass sees the dense model. Writes the
+    buffered weights back once at the end.
+    """
+    names = list(layers)
+    groups = [names[i:i + group_size]
+              for i in range(0, len(names), group_size)]
+    log("  grouping: %d target(s) in %d group(s) of up to %d, one "
+        "calibration pass each; activations stay those of the DENSE model"
+        % (len(names), len(groups), group_size))
+
+    pruned_weights = {}
+    report = {}
+    for gi, group in enumerate(groups):
+        sub = {n: layers[n] for n in group}
+        # The originals, so the model is dense again for the next pass.
+        originals = {n: sub[n].weight.data.detach().clone() for n in group}
+        r = prune_model(model, sub, calib_batches, method, sparsity,
+                        device=device, log=(lambda *a, **k: None),
+                        prunen=prunen, prunem=prunem)
+        for n in group:
+            pruned_weights[n] = sub[n].weight.data.detach().to("cpu").clone()
+            sub[n].weight.data.copy_(originals[n])
+        del originals
+        if device is not None and getattr(device, "type", device) == "cuda":
+            torch.cuda.empty_cache()
+        for k, v in (r or {}).items():
+            if isinstance(v, (int, float)):
+                report[k] = report.get(k, 0) + v
+        log("    group %d/%d: %d layer(s) pruned" % (gi + 1, len(groups),
+                                                     len(group)))
+
+    with torch.no_grad():
+        for n, w in pruned_weights.items():
+            layers[n].weight.data.copy_(w.to(layers[n].weight.device))
+    log("  grouping: wrote back %d pruned weight tensor(s)"
+        % len(pruned_weights))
+    return report
+
+
 def prune_model(model: nn.Module, layers: dict, calib_batches, method: str,
                 sparsity: float, device=None, log=print, prunen: int = 0,
-                prunem: int = 0) -> dict:
-    """Prune ``layers`` with ``method`` at ``sparsity``, one forward pass.
+                prunem: int = 0, group_size: int | None = None) -> dict:
+    """Prune ``layers`` with ``method`` at ``sparsity``.
 
     Both methods need the *input* to each target layer, so every target gets a
     forward hook and the calibration set is pushed through the model once. The
     reference implementations walk block by block to keep activations off the
     GPU for a 70B model; at ViT-B/16 and BERT-base scale the whole-model pass
     is simpler and measures the same thing.
+
+    ``group_size`` bounds the memory of that pass without changing what it
+    computes. Every pruner holds an ``in_features**2`` fp32 Hessian, so
+    keeping them all alive costs 7.9 GiB on OPT-1.3B and 42.0 GiB on
+    OPT-6.7B, which with fp32 weights exceeds a 64 GiB GCD. With a group
+    size, the targets are pruned in groups of that many, one calibration
+    pass each, and only one group's pruners exist at a time.
+
+    **Grouping does not change the result.** A group's pruned weights are
+    buffered and the originals restored before the next pass, so every
+    pass sees the DENSE model exactly as the single-pass version does;
+    the buffered weights are written back at the end. This matters because
+    the reference implementations are sequential -- a layer there sees
+    activations from a model whose earlier layers are already pruned --
+    and every figure this campaign has published was measured the other
+    way. ``tests/test_sparse_grouping.py`` pins that grouped and
+    whole-model passes produce bit-identical masks and weights.
     """
     assert method in ("sparsegpt", "wanda"), method
+    if group_size:
+        return _prune_in_groups(model, layers, calib_batches, method,
+                                sparsity, device, log, prunen, prunem,
+                                group_size)
     cls = SparseGPTPruner if method == "sparsegpt" else WandaPruner
     pruners = {name: cls(lyr) for name, lyr in layers.items()}
 

@@ -53,12 +53,71 @@ __all__ = ["Control", "ControlLadder", "ControlError", "cost_table",
 # only so the fine-tuning gain can be reported beside the pruning cost.
 PRETRAINED = {"accuracy": 0.7844, "int4_accuracy": 0.77228}
 
-# Where each control is measured. Nothing else may be used as a control.
+#: The model every figure in CONTROL_SOURCES belongs to. A control is only
+#: a control for the model it was measured on, and the ladder refuses to
+#: hand a ViT control to an OPT arm.
+DEFAULT_MODEL = "google/vit-base-patch16-224"
+
+# The controls whose values are PUBLISHED and therefore verifiable. These
+# are checked against PUBLISHED on load; discovery below can find more, but
+# finding is not the same as having been checked.
 CONTROL_SOURCES: dict[int, list[str]] = {
     2: [f"results/lumi_v060/exp32_ctrl_s{s}/exp31_dense_control.json"
         for s in (42, 123, 456)],
     5: ["results/lumi_v060/exp31_s42/exp31_dense_control.json"],
 }
+
+#: Where a dense control may live. Globbed, then each candidate is read and
+#: believed only about itself: the model, the budget and the seed come from
+#: the file, never from its path, so a run written to an unexpected
+#: directory is still found and a mislabelled one is still rejected.
+CONTROL_GLOBS = (
+    "results/lumi_v060/*/exp31_dense_control.json",
+    "results/lumi_v060/*/*dense_control*.json",
+    "results/*/exp31_dense_control.json",
+    "results/w3_ctrl*/exp31_dense_control.json",
+)
+
+
+def discover_controls(root: Path | None = None, model: str | None = None,
+                      globs: Iterable[str] = CONTROL_GLOBS) -> list[dict]:
+    """Every dense control on disk, as records keyed by what they are.
+
+    A record is ``{model, epochs, seed, accuracy, int4_accuracy, source}``.
+    Only files that actually describe a dense control are returned: one
+    with ``heads_removed`` greater than zero, or with no ``control`` block,
+    is not a control whatever its filename says.
+    """
+    root = root or REPO_ROOT
+    seen, out = set(), []
+    for pat in globs:
+        for fp in sorted(root.glob(pat)):
+            if fp in seen:
+                continue
+            seen.add(fp)
+            try:
+                d = load_result(fp, strict=False)
+            except (OSError, ValueError):
+                continue
+            c = d.get("control")
+            if not isinstance(c, dict) or c.get("accuracy") is None:
+                continue
+            if d.get("heads_removed"):
+                # Pruned: not a dense control, whatever it is called.
+                continue
+            m = d.get("model") or DEFAULT_MODEL
+            if model is not None and m != model:
+                continue
+            ep = c.get("epochs", d.get("epochs"))
+            if ep is None:
+                continue
+            out.append({
+                "model": m, "epochs": int(ep), "seed": d.get("seed"),
+                "accuracy": c["accuracy"],
+                "int4_accuracy": c.get("int4_accuracy"),
+                "source": _rel(fp, root),
+            })
+    return out
 
 # What the write-ups publish, so a drifting control is caught rather than
 # silently redefining every cost downstream of it. Tolerance is the measured
@@ -190,18 +249,42 @@ class Control:
 
 @dataclass
 class ControlLadder:
-    """Every control the corpus has, keyed by epoch count."""
+    """Every control the corpus has, for ONE model, keyed by epoch count."""
 
     controls: dict[int, Control]
     per_seed: dict[tuple[int, int], Control] = field(default_factory=dict)
+    #: A control belongs to the model it was measured on. Part of the key,
+    #: not decoration: at() refuses to hand this ladder's control to an arm
+    #: of a different model.
+    model: str = DEFAULT_MODEL
+    #: Second measurements of a control that is already registered. The
+    #: registered value is used; these are kept so the run-to-run variance
+    #: of the control can be read off rather than guessed at.
+    repeats: list = field(default_factory=list)
 
     # ------------------------------------------------------------- loading
     @classmethod
     def load(cls, epochs: Iterable[int] = (2, 5), verify: bool = True,
-             root: Path | None = None) -> "ControlLadder":
+             root: Path | None = None, model: str | None = None,
+             discover: bool = True) -> "ControlLadder":
+        """The control ladder for one model.
+
+        ``model`` defaults to ViT-B/16, which is what every published
+        figure here is. It is part of the key, not decoration: handing an
+        OPT arm a ViT control would be a silent category error, so the
+        ladder records which model it is for and ``at()`` refuses a
+        mismatch.
+
+        ``discover`` adds every control found on disk for that model, so a
+        new seed is visible the moment its job has written its JSON. The
+        registered sources are still the ones ``verify()`` checks: being
+        found is not being checked.
+        """
         root = root or REPO_ROOT
+        model = model or DEFAULT_MODEL
         controls: dict[int, Control] = {}
         per_seed: dict[tuple[int, int], Control] = {}
+        found = discover_controls(root, model=model) if discover else []
         for ep in epochs:
             registered = CONTROL_SOURCES.get(ep, [])
             resolved = [(rel, _resolve_source(rel, root)) for rel in registered]
@@ -243,7 +326,43 @@ class ControlLadder:
                 seed=None, seeds=len(accs),
                 source="; ".join(CONTROL_SOURCES[ep]),
                 per_seed={s: a for s, a in zip(seeds, accs) if s is not None})
-        ladder = cls(controls=controls, per_seed=per_seed)
+
+        # Discovered controls fill in seeds and budgets the registry does
+        # not list. They never REPLACE a registered one: the registered
+        # values are the verified ones, and a discovered file that claims
+        # the same (epochs, seed) is a duplicate to be reported, not a
+        # silent override.
+        # A second measurement of the same (model, budget, seed) is a
+        # REPEAT, not a contradiction. Wave 3 re-ran the 2-epoch controls
+        # for seeds 42/123/456, and the first version of this guard read
+        # that as two files disagreeing and refused to load at all.
+        #
+        # The registered, verified value stays authoritative -- it is the
+        # one checked against the published figure -- and the repeat is
+        # recorded beside it with its delta, because the run-to-run
+        # variance of a control is worth knowing and is otherwise
+        # invisible.
+        repeats = []
+        for rec in found:
+            key = (rec["epochs"], rec["seed"])
+            if key in per_seed:
+                delta = rec["accuracy"] - per_seed[key].accuracy
+                if abs(delta) > 1e-12:
+                    repeats.append({
+                        "epochs": key[0], "seed": key[1],
+                        "authoritative": per_seed[key].source,
+                        "authoritative_accuracy": per_seed[key].accuracy,
+                        "repeat": rec["source"],
+                        "repeat_accuracy": rec["accuracy"],
+                        "delta_pp": delta * 100,
+                    })
+                continue
+            per_seed[key] = Control(
+                epochs=rec["epochs"], accuracy=rec["accuracy"],
+                int4_accuracy=rec["int4_accuracy"], seed=rec["seed"],
+                seeds=1, source=rec["source"])
+        ladder = cls(controls=controls, per_seed=per_seed, model=model,
+                     repeats=repeats)
         if verify:
             ladder.verify()
         return ladder
@@ -279,7 +398,8 @@ class ControlLadder:
         return report
 
     # ------------------------------------------------------------- lookups
-    def at(self, epochs: int, seed: int | None = None) -> Control:
+    def at(self, epochs: int, seed: int | None = None,
+           for_model: str | None = None) -> Control:
         """The control for ``epochs``; that seed's own control when given.
 
         Prefer passing ``seed``. Where an arm is single-seed, scoring it against
@@ -287,6 +407,13 @@ class ControlLadder:
         (CONTROL_CONVENTION.md); exp28 measured a 7.56pp spread from evaluation
         shuffling alone.
         """
+        if for_model is not None and for_model != self.model:
+            raise ControlError(
+                "this ladder is for %r and you asked for a control for "
+                "%r. A control belongs to the model it was measured on; "
+                "scoring an arm of one model against another model's "
+                "control is not a cost, it is a category error."
+                % (self.model, for_model))
         if seed is not None:
             c = self.per_seed.get((epochs, seed))
             if c is None:
