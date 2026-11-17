@@ -92,6 +92,10 @@ def main(argv=None):
     p.add_argument("--loader-block", type=int, default=512)
     p.add_argument("--skip-int4", action="store_true")
     p.add_argument("--output", default="results/exp31")
+    p.add_argument("--save-checkpoint", action="store_true",
+                   help="keep the trained control's weights, "
+                        "which an image-level comparison "
+                        "against it needs")
     p.add_argument("--gate", action="store_true",
                    help="1 epoch, 2000 images -- a small NON-smoke run")
     args = p.parse_args(argv)
@@ -187,6 +191,27 @@ def main(argv=None):
         row["accuracy"] - EXP25_BASELINE["accuracy"]) * 100
     out["control"] = row
     save()
+
+    # The control's weights, kept only on request. An image-level
+    # comparison of an arm against its matched control needs the
+    # control's own per-image predictions, and a control that was not
+    # saved has to be retrained for two epochs to produce them -- which
+    # is how the first seven controls of wave 3 came to be unusable for
+    # that question. The JSON is written before this, so a failure here
+    # cannot lose the measurement.
+    if args.save_checkpoint:
+        models = outdir / "models"
+        models.mkdir(parents=True, exist_ok=True)
+        ckpt = models / "dense_control.pt"
+        torch.save({"state_dict": model.state_dict(),
+                    "config": model.config.to_dict(),
+                    "arm": "dense_control", "seed": args.seed,
+                    "epochs": args.epochs,
+                    "accuracy": row["accuracy"]}, ckpt)
+        out["control"]["checkpoint"] = str(ckpt)
+        save()
+        P.log(f"    saved {ckpt} "
+              f"({ckpt.stat().st_size / 1e6:.0f} MB)")
 
     P.log(f"    dense + {args.epochs} ep:  {row['accuracy'] * 100:.2f}%"
           + (f" | INT4 {row['int4_accuracy'] * 100:.2f}%"

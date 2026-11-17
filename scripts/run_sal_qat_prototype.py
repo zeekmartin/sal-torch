@@ -1331,6 +1331,34 @@ LAST_EVAL_MEMORY: dict = {}
 #: each use so one stale path cannot silently overwrite another arm's file.
 COLLECT_PREDICTIONS: "str | None" = None
 
+#: A directory named here makes EVERY ``accuracy()`` call dump its
+#: predictions, without any experiment script having to opt in. The
+#: mechanism above existed for a year and exactly one gate ever set it,
+#: so the example-level question stayed unanswerable while the data was
+#: a line of code away. Each dump is named for its call order within the
+#: process plus the label the caller passed, because a run scores many
+#: models and a single filename would keep only the last.
+#:
+#: Set ``SAL_DUMP_PREDICTIONS=/path/to/dir`` in the environment. An
+#: explicit ``COLLECT_PREDICTIONS`` still wins, so a driver that wants
+#: one specific file is unaffected.
+DUMP_PREDICTIONS_DIR: "str | None" = os.environ.get(
+    "SAL_DUMP_PREDICTIONS") or None
+
+#: How many evaluations have been dumped by this process, for the names.
+_DUMP_SEQ: list = []
+
+
+def _auto_dump_path(label: str = "") -> "str | None":
+    """Where this call's dump goes under SAL_DUMP_PREDICTIONS, if set."""
+    if not DUMP_PREDICTIONS_DIR:
+        return None
+    _DUMP_SEQ.append(label)
+    safe = "".join(c if (c.isalnum() or c in "-_.") else "_"
+                   for c in (label or "eval"))
+    return str(Path(DUMP_PREDICTIONS_DIR)
+               / ("%03d_%s.npz" % (len(_DUMP_SEQ), safe or "eval")))
+
 
 def rss_bytes():
     """Current resident set size, or None where /proc is unavailable."""
@@ -1403,8 +1431,13 @@ def memory_probe(device):
 
 # ------------------------------------------------------------------- scoring
 @torch.no_grad()
-def accuracy(model, val_split, device, use_amp: bool, batch_size: int = 128) -> float:
-    """Top-1 accuracy of the model's own classifier on the val split."""
+def accuracy(model, val_split, device, use_amp: bool, batch_size: int = 128,
+             label: str = "") -> float:
+    """Top-1 accuracy of the model's own classifier on the val split.
+
+    ``label`` only names the prediction dump when one is being written;
+    it defaults to empty so no call site has to change.
+    """
     model.eval()
     dev = next(model.parameters()).device
     correct = n = 0
@@ -1414,7 +1447,8 @@ def accuracy(model, val_split, device, use_amp: bool, batch_size: int = 128) -> 
     # site in two repositories. The measurement goes to a module-level
     # record that the caller reads immediately after.
     mem = memory_probe(dev)
-    want_preds = COLLECT_PREDICTIONS is not None
+    dump_to = COLLECT_PREDICTIONS or _auto_dump_path(label)
+    want_preds = dump_to is not None
     preds: list = []
     labels: list = []
     for x, y in batches(val_split, batch_size, workers=LOADER_WORKERS):
@@ -1432,7 +1466,7 @@ def accuracy(model, val_split, device, use_amp: bool, batch_size: int = 128) -> 
     LAST_EVAL_MEMORY["n_images"] = n
     if want_preds and preds:
         import numpy as _np
-        out = Path(COLLECT_PREDICTIONS)
+        out = Path(dump_to)
         out.parent.mkdir(parents=True, exist_ok=True)
         _np.savez_compressed(
             out,
