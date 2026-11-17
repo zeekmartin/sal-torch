@@ -396,20 +396,45 @@ The control ladder (ViT-B/16, ImageNet-1k, nothing pruned):
 | epochs | accuracy | INT4 | seeds |
 |---|---|---|---|
 | 0 (pretrained) | 78.44% | 77.228% | — |
+| **1** | **81.727%** | **80.567%** | 3 (81.738 / 81.744 / 81.700) |
 | **2** | **81.554%** | **80.273%** | 3 (81.676 / 81.524 / 81.462) |
+| 2 (re-measured) | 81.623% | 80.336% | 3 (81.636 / 81.600 / 81.632) |
+| 3 | 81.158% | 79.821% | 3 (81.074 / 81.202 / 81.198) |
 | 5 | 80.556% | 78.956% | 1 (exp31) |
 | 5 | 80.44% | 79.01% | 3 (exp25 arm 1a) |
+| 5 (re-measured) | 80.456% | 78.947% | 3 (80.636 / 80.404 / 80.328) |
+
+**The dense control peaks at ONE epoch, not two.** The 1-epoch rows read
+81.738 / 81.744 / 81.700% and **every** 2-epoch seed is below all three, on
+the published set (81.462 / 81.524 / 81.676) and on wave 3's re-measured set
+(81.600 / 81.632 / 81.636) alike, so the two ranges are disjoint rather than
+overlapping inside seed noise. The INT4 column orders the same way. The
+1-epoch and 3-epoch rungs were measured in wave 3 and sat uncopied on scratch
+until 2026-11-17; this page previously claimed the control also peaked at 2.
+
+**This changes no cost.** `CONTROL_CONVENTION.md` compares an arm against the
+control trained for the SAME number of epochs, so every cost measured at 2
+epochs stands and nothing is recomputed. What the peak changes is the
+*framing*: a 2-epoch cost is measured against a control that is already past
+its own best, which is one reason the matched cost shrinks as recovery
+lengthens. The re-measured rows are **repeats**, not replacements: the
+published exp32 and exp25 values stay authoritative and the delta is the
+record, per the duplicate-control rule.
 
 Use `experiments/matched_control.py` rather than copying these numbers: it loads
 the control from exp32's JSONs, verifies it against the published mean before
 deriving anything, and **emits `pruning_cost_pp` only when the epoch counts
 match**. `tests/test_matched_control.py` pins that behaviour.
 
-- **exp29 — two epochs of recovery, not five.** The curve peaks at 2 and
-  declines: 5 is below 2 on 3/3 seeds in FP and INT4, and 10 is below 1. Two
-  epochs is 39% of the cost. **The peak is a property of this recipe on this
-  dataset, not of recovery** — the dense control with nothing pruned also peaks
-  at 2, and by a larger margin. Do not assume the knee transfers.
+- **exp29 — two epochs of recovery, not five.** The *pruned* curve peaks at 2
+  and declines: 5 is below 2 on 3/3 seeds in FP and INT4, and 10 is below 1.
+  Two epochs is 39% of the cost. **The peak is a property of this recipe on
+  this dataset, not of recovery** — the dense control with nothing pruned
+  declines too, and faster. **Corrected 2026-11-17**: this said the control
+  "also peaks at 2, and by a larger margin". The control peaks at **1** (see
+  the ladder above, disjoint ranges), so the two curves do not share a knee
+  and the pruned arm's peak at 2 is its own. Do not assume either knee
+  transfers.
 - **exp31/exp32 — the ratio sweep at 2 epochs, and the bug that motivated the
   audit.** exp32 measures 33/40/50% of heads + 2 epochs against the verified
   2-epoch control, 3 seeds: **−1.93 / −2.27 / −3.91pp** (FP) and −4.85pp at

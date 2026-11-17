@@ -35,8 +35,15 @@ not sampled from one trajectory. That is why the run costs 81.7 GPU-hours instea
    2 epochs beats 5 epochs by **+0.34 / +0.15 / +0.42pp** (3/3 seeds) and beats 10 epochs by
    **1.12pp** on the seed where 10 was run. Ten epochs (76.51%) is **below one epoch** (76.60%).
    **This is a property of the fine-tuning recipe, not of recovery**: the dense control with nothing
-   pruned peaks at 2 epochs too, and by a *larger* margin (+1.11pp from 5→2 against the pruned arm's
-   +0.30pp). The measurement stands; the explanation changed. See the reframing below.
+   pruned declines too, and faster (+1.11pp from 5→2 against the pruned arm's +0.30pp).
+   **Correction, 2026-11-17**: this sentence said the control "peaks at 2 epochs too". It does not.
+   The control's 1-epoch and 3-epoch rungs were run in wave 3 and their JSONs were read for the
+   first time on 2026-11-17: the control reads **81.727% at 1 epoch** against 81.554 at 2, and its
+   three 1-epoch seeds are above all three 2-epoch seeds on the published set and on wave 3's
+   re-measured set alike, so the ranges do not overlap. The control therefore peaks at **1**, the
+   two curves do not share a knee, and the pruned arm's peak near 2 is its own. The 5→2 comparison
+   quoted here is unaffected; only the location of the control's own peak was wrong.
+   The measurement stands; the explanation changed. See the reframing below.
 2. **One epoch already reaches 98.8-99.1% of the 5-epoch gain, 3/3.** The question as posed — "if
    3 epochs reach 95% of the 5-epoch gain, that is the recommendation" — is answered one point
    earlier than expected: the 95% threshold is cleared at **epoch 1** on all three seeds.
@@ -238,7 +245,9 @@ dense arm does.
 Block A's measurement is unchanged — 2 epochs beats 5 on 3/3 seeds, in FP and in INT4 — and so is the
 recommendation. What changes is the claim attached to it. "Recovery saturates at 2 epochs and then
 overfits the pruned model" is **not supported**; the dense control overfits harder. The supported
-statement is **"this recipe peaks at 2 epochs whether or not anything was pruned"** — which also
+statement is **"this recipe degrades past a short recovery whether or not anything was pruned,
+and the unpruned model turns over sooner"** — the pruned arm near 2 epochs, the dense control at
+1 (corrected 2026-11-17; this read "peaks at 2 epochs whether or not anything was pruned") — which also
 means the knee must not be assumed to transfer to another dataset, another LR schedule, or a model
 that is not already heavily fine-tuned for its task. The caveat below that recovery hyperparameters
 are fixed now carries more weight, not less.

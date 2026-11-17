@@ -81,9 +81,17 @@ before `compress()`, matching the existing stage discipline.
   three ratios on three seeds. Two is both better and 39% of the cost of five.
 - **The docstring must carry exp29's reframing.** The peak at 2 epochs is a
   property of *this fine-tuning recipe on this dataset*, not of recovery: the
-  dense control with nothing pruned also peaks at 2, and by a larger margin.
-  A user on another dataset must not assume the knee transfers, so the parameter
-  is documented as "measured default, re-measure on your data", not "optimal".
+  dense control with nothing pruned declines too, and faster.
+  **Corrected 2026-11-17** — this read "the dense control with nothing pruned
+  also peaks at 2, and by a larger margin", and the docstring must NOT carry
+  that. The control's 1-epoch and 3-epoch rungs were measured in wave 3 and
+  read for the first time on 2026-11-17: the control peaks at **1** epoch
+  (81.727% against 81.554 at 2), and its 1-epoch seeds are above every
+  2-epoch seed on the published and the re-measured sets alike. So the two
+  curves do not share a knee, and the pruned arm's peak near 2 is its own.
+  A user on another dataset must not assume either knee transfers, so the
+  parameter is documented as "measured default, re-measure on your data", not
+  "optimal".
 - **Reuse the training recipe**, do not write a second one. `experiments/
   exp23_baselines.py:recover()` is the reference: AdamW, 10x LR on the
   classifier, linear warmup then cosine decay over `len(loader) * epochs`,

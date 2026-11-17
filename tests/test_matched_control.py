@@ -27,6 +27,21 @@ def ladder():
     return ControlLadder.load()
 
 
+@pytest.fixture(scope="module")
+def registered_only():
+    """The ladder without disk discovery.
+
+    Two tests below are about the WORDING of an error, and they used the
+    discovering ladder, so they asserted facts about which measurements
+    happened to exist: "there is no 1-epoch control" and "seed 7 has no
+    2-epoch control". Both became false the day wave 3's 1-, 3- and
+    5-epoch controls were committed, and the tests failed while nothing
+    was wrong. A message test gets a fixed inventory; what discovery
+    finds is tested separately, below.
+    """
+    return ControlLadder.load(discover=False)
+
+
 # --------------------------------------------------------------------------- #
 # the ladder
 # --------------------------------------------------------------------------- #
@@ -69,7 +84,8 @@ def test_asking_for_a_missing_epoch_count_lists_what_exists(ladder):
         ladder.at(3)
 
 
-def test_a_missing_epoch_count_with_a_seed_says_which_epochs_exist(ladder):
+def test_a_missing_epoch_count_with_a_seed_says_which_epochs_exist(
+        registered_only):
     """The first exp35 gate hit this and the message said 'have []'.
 
     A 1-epoch control does not exist, so filtering the seed list by epochs
@@ -77,16 +93,56 @@ def test_a_missing_epoch_count_with_a_seed_says_which_epochs_exist(ladder):
     epoch counts DO exist, because that is the actionable part.
     """
     with pytest.raises(ControlError) as e:
-        ladder.at(1, seed=42)
+        registered_only.at(1, seed=42)
     msg = str(e.value)
     assert "no 1-epoch control at all" in msg
     assert "[2, 5]" in msg
     assert "CONTROL_CONVENTION.md" in msg
 
 
-def test_a_missing_seed_at_an_existing_epoch_count_lists_the_seeds(ladder):
-    with pytest.raises(ControlError, match=r"Seeds at 2 epochs: \[42, 123, 456\]"):
-        ladder.at(2, seed=7)
+def test_a_missing_seed_at_an_existing_epoch_count_lists_the_seeds(
+        registered_only):
+    with pytest.raises(ControlError,
+                       match=r"Seeds at 2 epochs: \[42, 123, 456\]"):
+        registered_only.at(2, seed=7)
+
+
+def test_discovery_finds_the_rungs_the_registry_does_not_list(ladder):
+    """1, 3 and 5 epochs at three seeds each, measured in wave 3.
+
+    These ran and their JSONs sat on scratch until 2026-11-17, which is
+    how the project came to state that the dense control peaks at 2
+    epochs. The discovering ladder must see them, so the next question
+    about another recovery length is answered from data instead of from
+    a gap.
+    """
+    for ep in (1, 3, 5):
+        for sd in (42, 123, 456):
+            c = ladder.at(ep, seed=sd)
+            assert 0.75 < c.accuracy < 0.85, (ep, sd, c.accuracy)
+
+
+def test_the_control_peaks_at_one_epoch(ladder):
+    """The correction, pinned: 1 epoch beats 2 on every seed.
+
+    Not a mean comparison. Every 1-epoch seed is above every 2-epoch
+    seed, so the ordering does not depend on which seeds are averaged,
+    and it holds against the registered 2-epoch control rather than
+    against wave 3's re-measurement of it.
+    """
+    one = [ladder.at(1, seed=s).accuracy for s in (42, 123, 456)]
+    two = [ladder.at(2, seed=s).accuracy for s in (42, 123, 456)]
+    assert min(one) > max(two), (sorted(one), sorted(two))
+    assert sum(one) / 3 == pytest.approx(0.81727, abs=5e-5)
+
+
+def test_a_cost_still_pairs_equal_epoch_counts_only(ladder):
+    """The peak changes no cost, which is only true if this still holds."""
+    c = ladder.at(1, seed=42)
+    row = c.cost(0.80, arm_epochs=2, label="arm at 2 epochs")
+    assert row.get("pruning_cost_pp") is None, row
+    row_ok = ladder.at(2, seed=42).cost(0.80, arm_epochs=2, label="arm")
+    assert row_ok["pruning_cost_pp"] is not None
 
 
 def test_a_control_file_whose_epochs_disagree_is_refused(tmp_path, monkeypatch):
