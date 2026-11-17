@@ -659,7 +659,19 @@ def batches(split, batch_size: int, shuffle: bool = False, seed: int = 0,
     dataset = TensorDataset(*split)
     kw = {}
     if workers:
-        kw = {"num_workers": workers, "persistent_workers": True,
+        # persistent_workers only when shuffling, i.e. for training, where
+        # the loader is iterated once per epoch and keeping the workers
+        # alive is the point. An evaluation pass is iterated ONCE, so
+        # persistence buys nothing and costs the workers' lifetime: they
+        # and their POSIX semaphores survive until the loader is
+        # collected, and over a long job the semaphores accumulate.
+        # exp33 seed 8888 died that way after 4h16 -- the recovery had
+        # finished and `score()` could no longer create a DataLoader
+        # ("SemLock ... FileNotFoundError"), so the cell's recovered
+        # accuracy was never computed. Non-persistent workers shut down
+        # when the iterator is exhausted, which is exactly what an
+        # evaluation pass wants.
+        kw = {"num_workers": workers, "persistent_workers": bool(shuffle),
               "prefetch_factor": 4}
     if shuffle and block:
         return DataLoader(dataset, batch_size=batch_size,
