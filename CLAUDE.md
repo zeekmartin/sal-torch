@@ -97,6 +97,37 @@ see wave 1 below.
    before it are retracted — see "What the ImageNet-1k series retracted" below.
    Do not reinstate a retracted number from an older doc, a commit message or
    the README.
+8. **An end-to-end CPU micro-test of the whole assembly before any LUMI
+   gate**, for every new or modified experiment path. The test must reach
+   the stage that changed. A flag that disables that stage certifies the
+   half nobody touched: `--micro` switched the recovery stage off outright,
+   so the rule was not satisfiable through it, exactly as `skip_int4` tied
+   to `--smoke` meant a smoke run never populated the key cell. **Shorten
+   the budget, never the pipeline** — `--micro` now runs recovery at 8
+   sequences (two optimizer steps) instead of skipping it.
+9. **A memory budget is checked stage by stage across the whole pipeline —
+   prune, recovery, eval, write — not only at the stage that just failed.**
+   Wave 5's three `sparsegpt_unstructured_50` failures walked downstream one
+   stage at a time: the Hessian allocation (8 min, fixed by grouping the
+   calibration passes), the first recovery backward (37 min, fixed by
+   releasing the cached blocks before recovery), and the post-recovery
+   perplexity eval (3 h 35, fixed by releasing them again). Every fix was
+   correct and every one left the next stage unexamined, so each bought a
+   later and more expensive failure. Budget each stage's own peak, and
+   release the allocator's pool at every boundary where the memory profile
+   changes. `expandable_segments` is not a substitute: torch 2.5.1+rocm6.2
+   reports it unsupported and ignores it.
+10. **Every measured stage writes its result to disk as soon as it
+    completes, before the next stage starts** — not at the end of the cell,
+    and not merely before the thing that presents it. A ROCm HSA abort is
+    **not** a Python exception: it kills the process under the interpreter,
+    so there is no `aborted` field and no partial JSON to recover from. Job
+    23842429 lost a completed 3 h 35 recovery — loss curve, timings, memory
+    figures, drift — because its write sat behind the perplexity eval that
+    crashed. This is "write measurements before anything that presents
+    them" (in the LUMI notes below) one level finer: writing before the
+    thing that presents the measurement is not enough when the next stage
+    can take the process with it.
 
 ## The validated mechanism (source of truth: reference research code)
 
