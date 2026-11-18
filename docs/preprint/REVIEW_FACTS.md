@@ -212,7 +212,9 @@ The expectation is that our one-shot numbers should be, if anything, slightly *w
 Across all four cells the agreement is within **0.19 perplexity** in absolute value. Only 2 of them involve calibration data at all: the dense row is a pure evaluation and magnitude pruning reads only the weights, so neither says anything about this choice. Of the 2 calibration-sensitive cells, 1 lands above the published value and 1 below. **There is no systematic direction**, and on a sample of 2 there could not be one: these numbers show that the grouped dense-activation calibration reproduces the published values to within +/-0.2 perplexity, and they do **not** establish that the choice is neutral, nor that it is unfavourable to us.
 
 
-Memory forced a second implementation detail that is **not** a semantic one. Holding one pruner per target needs 42.0 GiB of fp32 Hessians on OPT-6.7B (7.9 at 1.3B), which with fp32 weights exceeds a 64 GiB MI250X GCD, so the targets are pruned in groups of 8 with one calibration pass each. Each group's pruned weights are buffered and the originals restored before the next pass, so **every pass still sees the dense model**; `sal-torch/tests/test_sparse_grouping.py` requires grouped and whole-model passes to produce bit-identical masks and weights for both pruners, at four group sizes, unstructured and 2:4. Grouping therefore changes the memory and the runtime, not the measurement.
+Memory forced a second implementation detail that is **not** a semantic one. Holding one pruner per target needs 42.0 GiB of fp32 Hessians on OPT-6.7B (7.9 at 1.3B), which with fp32 weights exceeds a 64 GiB MI250X GCD, so the 192 target layers are pruned in **8 groups of 24** with one calibration pass each. Each group's pruned weights are buffered and the originals restored before the next pass, so **every pass still sees the dense model**; `sal-torch/tests/test_sparse_grouping.py` requires grouped and whole-model passes to produce bit-identical masks and weights for both pruners, at four group sizes, unstructured and 2:4. Grouping therefore changes the memory and the runtime, not the measurement.
+
+A third memory detail, of the same kind. Mask-preserving recovery has to re-apply the sparsity mask after every optimiser step, so a mask is resident for the whole fine-tune, and at 6.7B a mask is a large object. It is held as `bool`, one byte an entry. It was previously cast to the weight's own dtype, which on an fp32 model spends four bytes to record a single zero: 6.00 GiB of mask a rank where 1.50 GiB says the same thing. The sharded path also built a second, full-size copy before sharding which it then never read, because the mask has to be re-read from the parameters once they are sharded; that copy is no longer built at all. **Neither change moves a reported number**: multiplying a float by `False` is exactly zero and by `True` exactly itself, in any float dtype, with no rounding either way, and the dropped copy was dead weight. What they changed is whether the job finishes. Three identical attempts at the 6.7B SparseGPT 50% cell died in the first backward pass of recovery on a 64 GiB GCD, one of them 770 MiB short with 424 MiB free; with the first change the same arm crossed that point and ran to the end, with 1.66 GiB of the GCD's reserved capacity to spare. Recovery at this scale is memory-bound at the margin, and that is a property of the recipe worth stating beside the results it produced.
 
 ### A4.3 WikiText-2 perplexity, exactly as computed
 
@@ -253,10 +255,10 @@ Two units appear in this project and they differ by exactly a factor of two, so 
 
 | unit | what it counts | the campaign total |
 |---|---|---|
-| GCD-h | sacct elapsed time, one GCD per job, which is what every job in this campaign requested | **1174.9** |
-| billed GPU-h | the allocation's unit: one GPU is one MI250X module of two GCDs | **587.5** |
+| GCD-h | sacct elapsed time, one GCD per job, which is what every job in this campaign requested | **1744.1** |
+| billed GPU-h | the allocation's unit: one GPU is one MI250X module of two GCDs | **872.1** |
 
-`lumi-allocations` reports 587 of 5000 GPU-hours used, which matches the right-hand column. **The preprint's compute figure is in GCD-hours**; writing it as GPU-hours overstates the charge by two.
+Both figures are this campaign's own, summed over the jobs whose logs are in its log directory and joined to `sacct` by job id. The allocation's own counter reads **higher** than the right-hand column, because the allocation is shared with work that is not this campaign; it is therefore not the number to quote for this campaign and it is not quoted. **The preprint's compute figure is in GCD-hours**; writing it as GPU-hours overstates the charge by two.
 
 ### A4.5 What the archive will contain
 
