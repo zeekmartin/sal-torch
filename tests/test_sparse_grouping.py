@@ -178,3 +178,109 @@ def test_n_m_really_produced_an_n_m_pattern():
         assert int(zeros.min()) == 2 and int(zeros.max()) == 2, (
             "%s: runs of four hold %d..%d zeros, not 2"
             % (n, int(zeros.min()), int(zeros.max())))
+
+
+# ---------------------------------------------------------------------------
+# The report the grouped path returns, which is not the weights it writes.
+#
+# The tests above prove the WEIGHTS are bit-identical, and they were right
+# and they were not enough. The grouped path also returns a report dict,
+# and it used to build it by adding up every numeric key of every pass:
+#
+#     for k, v in (r or {}).items():
+#         if isinstance(v, (int, float)):
+#             report[k] = report.get(k, 0) + v
+#
+# Correct for counts, wrong for fractions and for configuration. Eight
+# groups at a zero fraction of 0.500001 reported 4.000012, and `sparsity`
+# 0.5 reported 4.0. Job 23839962 pruned correctly, recovered correctly,
+# measured 0.500001 after recovery, and then failed its own drift guard
+# against a fraction that cannot exist. 2.6 billed GPU-h, and the arm was
+# never wrong.
+#
+# No published number is affected: grouping is used only on the SparseGPT
+# 6.7B path and no cell on it has ever completed. The completed Wanda
+# cells all report 0.5 with zero drift.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("method", ["sparsegpt", "wanda"])
+def test_a_fraction_stays_a_fraction(method):
+    """Whatever else grouping does, it cannot report 4.0 of anything."""
+    m, layers, calib = _fresh()
+    rep = prune_model(m, layers, calib, method, SPARSITY,
+                      log=lambda *a, **k: None, group_size=2)
+    for k, v in rep.items():
+        if k.endswith("_frac"):
+            assert 0.0 <= v <= 1.0, "%s reads %r" % (k, v)
+
+
+@pytest.mark.parametrize("method", ["sparsegpt", "wanda"])
+def test_the_configured_sparsity_is_reported_not_multiplied(method):
+    """Configuration is carried through, never accumulated.
+
+    `calib_samples` counts samples and not batches, so it reads 24 for
+    NCALIB=6 batches of four. The claim here is that grouping does not
+    multiply it by the number of groups, so the reference is the
+    ungrouped run rather than a constant written out by hand.
+    """
+    m1, l1, c1 = _fresh()
+    one = prune_model(m1, l1, c1, method, SPARSITY,
+                      log=lambda *a, **k: None)
+    m2, l2, c2 = _fresh()
+    rep = prune_model(m2, l2, c2, method, SPARSITY,
+                      log=lambda *a, **k: None, group_size=2)
+    assert rep["sparsity"] == SPARSITY
+    assert rep["method"] == method
+    assert rep["calib_samples"] == one["calib_samples"]
+    assert rep["grouped"]["groups"] == 3
+
+
+@pytest.mark.parametrize("group_size", [1, 2, 3, 6])
+def test_the_grouped_report_equals_the_single_pass_report(group_size):
+    """The report must not depend on how the pass was split up.
+
+    This is the assertion that makes the rest of the file complete: the
+    weights were already pinned, and the thing the experiment reads to
+    decide whether the arm is valid was not.
+    """
+    m1, l1, c1 = _fresh()
+    one = prune_model(m1, l1, c1, "wanda", SPARSITY,
+                      log=lambda *a, **k: None)
+    m2, l2, c2 = _fresh()
+    many = prune_model(m2, l2, c2, "wanda", SPARSITY,
+                       log=lambda *a, **k: None, group_size=group_size)
+    for k, v in one.items():
+        assert k in many, "the grouped report lost %r" % k
+        if isinstance(v, float):
+            assert many[k] == pytest.approx(v, abs=1e-12), k
+        else:
+            assert many[k] == v, k
+
+
+def test_the_target_count_is_measured_and_cross_checked():
+    """Summed counts and the measured model are two routes to one number."""
+    m, layers, calib = _fresh()
+    rep = prune_model(m, layers, calib, "wanda", SPARSITY,
+                      log=lambda *a, **k: None, group_size=2)
+    assert rep["target_params"] == sum(l.weight.numel()
+                                       for l in layers.values())
+    assert rep["grouped"]["target_params_summed"] == rep["target_params"]
+    assert rep["layers"] == len(layers)
+
+
+def test_the_report_describes_the_model_that_now_exists():
+    """Measured on the final weights, not combined from the passes.
+
+    Each pass saw a dense model with only its own group pruned, so no
+    per-group whole-model figure describes the end state, and no sum of
+    them does either.
+    """
+    m, layers, calib = _fresh()
+    rep = prune_model(m, layers, calib, "wanda", SPARSITY,
+                      log=lambda *a, **k: None, group_size=2)
+    zeros = sum(int((l.weight.data == 0).sum()) for l in layers.values())
+    assert rep["target_zeros"] == zeros
+    assert rep["target_zero_frac"] == pytest.approx(
+        zeros / rep["target_params"], abs=1e-12)
+    assert rep["model_params"] == sum(p.numel() for p in m.parameters())

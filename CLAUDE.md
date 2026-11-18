@@ -560,7 +560,7 @@ both until the pre-report audit.
 
 ## Integration tests
 
-The CPU unit suite must stay all-green (**459 passed, 13 skipped** as of wave 4;
+The CPU unit suite must stay all-green (**469 passed, 13 skipped** as of wave 5;
 it read 418 at wave 2, 330 at v0.7.0 batch 1 and 319 at v0.6.1); integration
 tests are marked
 `@pytest.mark.integration` and **skipped by default** (need network + model

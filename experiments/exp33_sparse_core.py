@@ -296,7 +296,18 @@ def _prune_in_groups(model, layers, calib_batches, method, sparsity,
         % (len(names), len(groups), group_size))
 
     pruned_weights = {}
+    # Only the ADDITIVE keys are accumulated. The per-group reports also
+    # carry fractions and configuration values, and summing those is how
+    # job 23839962 came to claim a zero fraction of 4.000012: eight
+    # groups at 0.500001 each. It had pruned correctly and recovered
+    # correctly -- the post-recovery measurement read 0.500001 -- and
+    # then failed its own drift guard against a number that cannot
+    # exist, since a fraction lies in [0, 1]. `sparsity` read 4.0 in the
+    # same message for the same reason.
+    _ADDITIVE = ("target_params", "target_zeros", "zeroed")
     report = {}
+    totals = {k: 0 for k in _ADDITIVE}
+    last = {}
     for gi, group in enumerate(groups):
         sub = {n: layers[n] for n in group}
         # The originals, so the model is dense again for the next pass.
@@ -310,9 +321,12 @@ def _prune_in_groups(model, layers, calib_batches, method, sparsity,
         del originals
         if device is not None and getattr(device, "type", device) == "cuda":
             torch.cuda.empty_cache()
-        for k, v in (r or {}).items():
+        r = r or {}
+        last = r
+        for k in _ADDITIVE:
+            v = r.get(k)
             if isinstance(v, (int, float)):
-                report[k] = report.get(k, 0) + v
+                totals[k] += v
         log("    group %d/%d: %d layer(s) pruned" % (gi + 1, len(groups),
                                                      len(group)))
 
@@ -321,6 +335,32 @@ def _prune_in_groups(model, layers, calib_batches, method, sparsity,
             layers[n].weight.data.copy_(w.to(layers[n].weight.device))
     log("  grouping: wrote back %d pruned weight tensor(s)"
         % len(pruned_weights))
+
+    # The report describes the model that now exists, so it is MEASURED
+    # on it rather than arithmetically combined from the passes. Every
+    # group saw a dense model with only its own targets pruned, so no
+    # per-group whole-model figure describes the end state and none of
+    # them can be made to by addition.
+    report = sparsity_report(model, layers)
+    report.update(method=last.get("method"),
+                  sparsity=last.get("sparsity"),
+                  calib_samples=last.get("calib_samples"),
+                  nm=last.get("nm"),
+                  layers=len(layers),
+                  zeroed=totals["zeroed"],
+                  grouped=dict(groups=len(groups), group_size=group_size,
+                               target_params_summed=totals["target_params"],
+                               target_zeros_summed=totals["target_zeros"]))
+    # The summed counts and the measured ones are two routes to the same
+    # quantity, so a disagreement means a target was pruned twice or not
+    # at all. Cheap, and it is the check that would have caught this.
+    if report.get("target_params") != totals["target_params"]:
+        raise RuntimeError(
+            "grouping covered %d target parameter(s) across %d group(s) "
+            "but the pruned model holds %d. Every target must appear in "
+            "exactly one group."
+            % (totals["target_params"], len(groups),
+               report.get("target_params")))
     return report
 
 
