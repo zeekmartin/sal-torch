@@ -14,6 +14,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "experiments"))
 
+import matched_control as mc                                   # noqa: E402
 from matched_control import (  # noqa: E402
     PRETRAINED, PUBLISHED, Control, ControlError, ControlLadder, cost_table)
 
@@ -47,7 +48,7 @@ def registered_only():
 # --------------------------------------------------------------------------- #
 
 def test_ladder_loads_and_verifies(ladder):
-    assert set(ladder.controls) == {2, 5}
+    assert set(ladder.controls) == set(mc.CONTROL_SOURCES)
     report = ladder.verify()
     assert report[2]["checked"] and report[2]["seeds"] == 3
     assert report[5]["checked"] and report[5]["seeds"] == 1
@@ -80,23 +81,39 @@ def test_asking_for_a_missing_seed_names_the_ones_it_has(ladder):
 
 
 def test_asking_for_a_missing_epoch_count_lists_what_exists(ladder):
-    with pytest.raises(ControlError, match=r"no 3-epoch control"):
-        ladder.at(3)
+    """3 epochs is a rung now; 7 is the length nothing ever trained.
+
+    Taken from the registry so that registering another rung cannot
+    silently turn this into a test of nothing.
+    """
+    absent = next(e for e in range(1, 50) if e not in mc.CONTROL_SOURCES)
+    with pytest.raises(ControlError,
+                       match=r"no %d-epoch control" % absent):
+        ladder.at(absent)
 
 
 def test_a_missing_epoch_count_with_a_seed_says_which_epochs_exist(
         registered_only):
     """The first exp35 gate hit this and the message said 'have []'.
 
-    A 1-epoch control does not exist, so filtering the seed list by epochs
+    Filtering the seed list by an epoch count that has no control at all
     returned nothing and the error named no alternative. It must say which
     epoch counts DO exist, because that is the actionable part.
+
+    The absent rung used to be 1 epoch. It is registered now, so the test
+    asks for 7 -- a length nothing in this campaign ever trained -- and
+    expects the message to list the rungs that do exist. The assertion is
+    built from the registry rather than typed, so registering a sixth rung
+    does not make this test wrong a second time.
     """
+    absent = 7
+    assert absent not in mc.CONTROL_SOURCES, (
+        "pick a length the registry does not carry")
     with pytest.raises(ControlError) as e:
-        registered_only.at(1, seed=42)
+        registered_only.at(absent, seed=42)
     msg = str(e.value)
-    assert "no 1-epoch control at all" in msg
-    assert "[2, 5]" in msg
+    assert "no %d-epoch control at all" % absent in msg
+    assert str(sorted(mc.CONTROL_SOURCES)) in msg
     assert "CONTROL_CONVENTION.md" in msg
 
 
@@ -108,18 +125,18 @@ def test_a_missing_seed_at_an_existing_epoch_count_lists_the_seeds(
 
 
 def test_discovery_finds_the_rungs_the_registry_does_not_list(ladder):
-    """1, 3 and 5 epochs at three seeds each, measured in wave 3.
+    """The registry lists three seeds at 2 epochs; wave 3 ran ten.
 
-    These ran and their JSONs sat on scratch until 2026-11-17, which is
-    how the project came to state that the dense control peaks at 2
-    epochs. The discovering ladder must see them, so the next question
-    about another recovery length is answered from data instead of from
-    a gap.
+    The rungs this test used to be about -- 1, 3 and 5 epochs -- are
+    registered now, and the registered values are the verified ones. What
+    discovery still has to find is the seven extra 2-epoch seeds behind the
+    7-seed FFN work, because a cost is taken against THAT seed's own
+    control and the registry names only 42, 123 and 456.
     """
-    for ep in (1, 3, 5):
-        for sd in (42, 123, 456):
-            c = ladder.at(ep, seed=sd)
-            assert 0.75 < c.accuracy < 0.85, (ep, sd, c.accuracy)
+    for sd in (7, 555, 1234, 2024, 8888, 31337, 90210):
+        c = ladder.at(2, seed=sd)
+        assert 0.75 < c.accuracy < 0.85, (sd, c.accuracy)
+        assert c.seeds == 1, "a per-seed control is one measurement"
 
 
 def test_the_control_peaks_at_one_epoch(ladder):

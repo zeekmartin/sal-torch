@@ -1,0 +1,385 @@
+{
+  "experiment": "exp34_bert_glue",
+  "model": "bert-base-uncased",
+  "dataset": "nyu-mll/glue",
+  "seed": 456,
+  "gate": false,
+  "epochs": 3,
+  "recover_epochs": 2,
+  "batch_size": 32,
+  "lr": 2e-05,
+  "max_len": 128,
+  "ratios": [
+    0.33,
+    0.5
+  ],
+  "control_tolerance_pp": 2.5,
+  "notes": {
+    "control": "The dense fine-tune is the matched control; the gain of every head arm is measured against it, not against the published reference. The reference only gates whether the control is sane.",
+    "head_set": "Both head arms are scored on the same magnitude set, uniform per layer, so neither faces a perturbation the other did not (exp27's protocol).",
+    "recovery": "2 epochs by default (exp29: the curve peaks at 2 and 5 is worse on 3/3 seeds)."
+  },
+  "gpu": "AMD Instinct MI250X",
+  "torch_version": "2.5.1+rocm6.2",
+  "tasks": {
+    "sst2": {
+      "n_train": 67349,
+      "n_val": 872,
+      "num_labels": 2,
+      "reference_accuracy": 0.925,
+      "dense_losses": [
+        0.25754118420077476,
+        0.11611003029799517,
+        0.07370780005790027
+      ],
+      "dense_seconds": 528.8,
+      "dense_accuracy": 0.9277522935779816,
+      "dense_vs_reference_pp": 0.275,
+      "control_gate": {
+        "passed": true
+      },
+      "p33": {
+        "heads_removed": 48,
+        "drophead_losses": [
+          0.28275224608933275,
+          0.13734764947142283,
+          0.10014933501536163
+        ],
+        "drophead_seconds": 712.2,
+        "drophead_dense_accuracy": 0.9220183486238532,
+        "drophead_accuracy": 0.9128440366972477,
+        "drophead_recovery_losses": [
+          0.10852857036715166,
+          0.0721223246385819
+        ],
+        "drophead_recovery_seconds": 293.5,
+        "drophead_recovery_accuracy": 0.9311926605504587,
+        "magnitude_oneshot_accuracy": 0.9105504587155964,
+        "recovery_losses": [
+          0.1054761695005265,
+          0.06665598682488476
+        ],
+        "recovery_seconds": 293.3,
+        "magnitude_recovery_accuracy": 0.9208715596330275,
+        "drophead_minus_magnitude_pp": -0.803,
+        "budgets": {
+          "drophead_train_epochs": 3,
+          "drophead_recover_epochs": 2,
+          "magnitude_train_epochs": 3,
+          "magnitude_recover_epochs": 2,
+          "matched": true,
+          "why": "drophead_minus_magnitude_pp compares an arm with no recovery against one with recovery, so it is not budget-matched; the _matched_pp field below is, and exists only when --recover-drophead ran"
+        },
+        "drophead_minus_magnitude_matched_pp": 1.032,
+        "oneshot_drophead_minus_magnitude_pp": 0.229,
+        "drophead_vs_control_pp": -1.491
+      },
+      "p50": {
+        "heads_removed": 72,
+        "drophead_losses": [
+          0.3069426270392049,
+          0.15121297069654896,
+          0.11079454413369616
+        ],
+        "drophead_seconds": 804.4,
+        "drophead_dense_accuracy": 0.9162844036697247,
+        "drophead_accuracy": 0.9048165137614679,
+        "drophead_recovery_losses": [
+          0.1165793580124752,
+          0.07535357175532047
+        ],
+        "drophead_recovery_seconds": 277.8,
+        "drophead_recovery_accuracy": 0.9162844036697247,
+        "magnitude_oneshot_accuracy": 0.8681192660550459,
+        "recovery_losses": [
+          0.11685671431505765,
+          0.07111443057346585
+        ],
+        "recovery_seconds": 278.4,
+        "magnitude_recovery_accuracy": 0.9185779816513762,
+        "drophead_minus_magnitude_pp": -1.376,
+        "budgets": {
+          "drophead_train_epochs": 3,
+          "drophead_recover_epochs": 2,
+          "magnitude_train_epochs": 3,
+          "magnitude_recover_epochs": 2,
+          "matched": true,
+          "why": "drophead_minus_magnitude_pp compares an arm with no recovery against one with recovery, so it is not budget-matched; the _matched_pp field below is, and exists only when --recover-drophead ran"
+        },
+        "drophead_minus_magnitude_matched_pp": -0.229,
+        "oneshot_drophead_minus_magnitude_pp": 3.67,
+        "drophead_vs_control_pp": -2.294
+      }
+    },
+    "mrpc": {
+      "n_train": 3668,
+      "n_val": 408,
+      "num_labels": 2,
+      "reference_accuracy": 0.84,
+      "dense_losses": [
+        0.61170457912528,
+        0.42273069957028264,
+        0.2968967238198156
+      ],
+      "dense_seconds": 27.2,
+      "dense_f1": 0.8770764119601329,
+      "reference_f1": 0.88,
+      "dense_f1_vs_reference_pp": -0.292,
+      "dense_accuracy": 0.8186274509803921,
+      "dense_vs_reference_pp": -2.137,
+      "control_gate": {
+        "passed": true
+      },
+      "p33": {
+        "heads_removed": 48,
+        "drophead_losses": [
+          0.6409140410630599,
+          0.5538096552309782,
+          0.5103276460067085
+        ],
+        "drophead_seconds": 38.8,
+        "drophead_dense_accuracy": 0.7573529411764706,
+        "drophead_accuracy": 0.7205882352941176,
+        "drophead_recovery_losses": [
+          0.46652217377787053,
+          0.33305893929108327
+        ],
+        "drophead_recovery_seconds": 16.1,
+        "drophead_recovery_accuracy": 0.7990196078431373,
+        "magnitude_oneshot_accuracy": 0.7475490196078431,
+        "recovery_losses": [
+          0.3985379426375679,
+          0.22776559578335803
+        ],
+        "recovery_seconds": 16.0,
+        "magnitude_recovery_accuracy": 0.7941176470588235,
+        "drophead_minus_magnitude_pp": -7.353,
+        "budgets": {
+          "drophead_train_epochs": 3,
+          "drophead_recover_epochs": 2,
+          "magnitude_train_epochs": 3,
+          "magnitude_recover_epochs": 2,
+          "matched": true,
+          "why": "drophead_minus_magnitude_pp compares an arm with no recovery against one with recovery, so it is not budget-matched; the _matched_pp field below is, and exists only when --recover-drophead ran"
+        },
+        "drophead_minus_magnitude_matched_pp": 0.49,
+        "oneshot_drophead_minus_magnitude_pp": -2.696,
+        "drophead_vs_control_pp": -9.804
+      },
+      "p50": {
+        "heads_removed": 72,
+        "drophead_losses": [
+          0.6552178688671277,
+          0.5889751133711442,
+          0.5559554525043653
+        ],
+        "drophead_seconds": 44.2,
+        "drophead_dense_accuracy": 0.7083333333333334,
+        "drophead_accuracy": 0.7132352941176471,
+        "drophead_recovery_losses": [
+          0.5510750081228173,
+          0.43770950643912604
+        ],
+        "drophead_recovery_seconds": 15.3,
+        "drophead_recovery_accuracy": 0.7524509803921569,
+        "magnitude_oneshot_accuracy": 0.6911764705882353,
+        "recovery_losses": [
+          0.5235013148059016,
+          0.34682455969893417
+        ],
+        "recovery_seconds": 15.3,
+        "magnitude_recovery_accuracy": 0.7524509803921569,
+        "drophead_minus_magnitude_pp": -3.922,
+        "budgets": {
+          "drophead_train_epochs": 3,
+          "drophead_recover_epochs": 2,
+          "magnitude_train_epochs": 3,
+          "magnitude_recover_epochs": 2,
+          "matched": true,
+          "why": "drophead_minus_magnitude_pp compares an arm with no recovery against one with recovery, so it is not budget-matched; the _matched_pp field below is, and exists only when --recover-drophead ran"
+        },
+        "drophead_minus_magnitude_matched_pp": 0.0,
+        "oneshot_drophead_minus_magnitude_pp": 2.206,
+        "drophead_vs_control_pp": -10.539
+      }
+    },
+    "qnli": {
+      "n_train": 104743,
+      "n_val": 5463,
+      "num_labels": 2,
+      "reference_accuracy": 0.91,
+      "dense_losses": [
+        0.36816275626348155,
+        0.20259756540279966,
+        0.11852505855904022
+      ],
+      "dense_seconds": 781.3,
+      "dense_accuracy": 0.9123192385136372,
+      "dense_vs_reference_pp": 0.232,
+      "control_gate": {
+        "passed": true
+      },
+      "p33": {
+        "heads_removed": 48,
+        "drophead_losses": [
+          0.4251788606504223,
+          0.2888970859143963,
+          0.2318592060837501
+        ],
+        "drophead_seconds": 1102.9,
+        "drophead_dense_accuracy": 0.9064616511074501,
+        "drophead_accuracy": 0.891085484166209,
+        "drophead_recovery_losses": [
+          0.23028457886269163,
+          0.13582288458953037
+        ],
+        "drophead_recovery_seconds": 457.2,
+        "drophead_recovery_accuracy": 0.9068277503203368,
+        "magnitude_oneshot_accuracy": 0.8222588321435109,
+        "recovery_losses": [
+          0.21852178993380572,
+          0.11722368203499227
+        ],
+        "recovery_seconds": 458.1,
+        "magnitude_recovery_accuracy": 0.9114039904814205,
+        "drophead_minus_magnitude_pp": -2.032,
+        "budgets": {
+          "drophead_train_epochs": 3,
+          "drophead_recover_epochs": 2,
+          "magnitude_train_epochs": 3,
+          "magnitude_recover_epochs": 2,
+          "matched": true,
+          "why": "drophead_minus_magnitude_pp compares an arm with no recovery against one with recovery, so it is not budget-matched; the _matched_pp field below is, and exists only when --recover-drophead ran"
+        },
+        "drophead_minus_magnitude_matched_pp": -0.458,
+        "oneshot_drophead_minus_magnitude_pp": 6.883,
+        "drophead_vs_control_pp": -2.123
+      },
+      "p50": {
+        "heads_removed": 72,
+        "drophead_losses": [
+          0.4685756253191226,
+          0.3411918235720842,
+          0.2917342282098899
+        ],
+        "drophead_seconds": 1277.6,
+        "drophead_dense_accuracy": 0.8989566172432729,
+        "drophead_accuracy": 0.8422112392458356,
+        "drophead_recovery_losses": [
+          0.3064048227125286,
+          0.1895486118229847
+        ],
+        "drophead_recovery_seconds": 448.9,
+        "drophead_recovery_accuracy": 0.891085484166209,
+        "magnitude_oneshot_accuracy": 0.7160900604063701,
+        "recovery_losses": [
+          0.3253557517869704,
+          0.17265377450699104
+        ],
+        "recovery_seconds": 436.1,
+        "magnitude_recovery_accuracy": 0.8974922203917262,
+        "drophead_minus_magnitude_pp": -5.528,
+        "budgets": {
+          "drophead_train_epochs": 3,
+          "drophead_recover_epochs": 2,
+          "magnitude_train_epochs": 3,
+          "magnitude_recover_epochs": 2,
+          "matched": true,
+          "why": "drophead_minus_magnitude_pp compares an arm with no recovery against one with recovery, so it is not budget-matched; the _matched_pp field below is, and exists only when --recover-drophead ran"
+        },
+        "drophead_minus_magnitude_matched_pp": -0.641,
+        "oneshot_drophead_minus_magnitude_pp": 12.612,
+        "drophead_vs_control_pp": -7.011
+      }
+    },
+    "mnli": {
+      "n_train": 392702,
+      "n_val": 9815,
+      "num_labels": 3,
+      "reference_accuracy": 0.84,
+      "dense_losses": [
+        0.565324743910944,
+        0.35519507168421843,
+        0.24022002973638698
+      ],
+      "dense_seconds": 2941.6,
+      "dense_accuracy": 0.844319918492104,
+      "dense_vs_reference_pp": 0.432,
+      "control_gate": {
+        "passed": true
+      },
+      "p33": {
+        "heads_removed": 48,
+        "drophead_losses": [
+          0.6401242494214001,
+          0.45166606217564476,
+          0.37440384785259795
+        ],
+        "drophead_seconds": 4217.6,
+        "drophead_dense_accuracy": 0.8325012735608762,
+        "drophead_accuracy": 0.8197656647987773,
+        "drophead_recovery_losses": [
+          0.371737591684292,
+          0.25056728650603294
+        ],
+        "drophead_recovery_seconds": 1724.3,
+        "drophead_recovery_accuracy": 0.8402445236882323,
+        "magnitude_oneshot_accuracy": 0.7953132959755477,
+        "recovery_losses": [
+          0.3502419247441334,
+          0.22300497539623154
+        ],
+        "recovery_seconds": 1767.8,
+        "magnitude_recovery_accuracy": 0.8405501782985226,
+        "drophead_minus_magnitude_pp": -2.078,
+        "budgets": {
+          "drophead_train_epochs": 3,
+          "drophead_recover_epochs": 2,
+          "magnitude_train_epochs": 3,
+          "magnitude_recover_epochs": 2,
+          "matched": true,
+          "why": "drophead_minus_magnitude_pp compares an arm with no recovery against one with recovery, so it is not budget-matched; the _matched_pp field below is, and exists only when --recover-drophead ran"
+        },
+        "drophead_minus_magnitude_matched_pp": -0.031,
+        "oneshot_drophead_minus_magnitude_pp": 2.445,
+        "drophead_vs_control_pp": -2.455
+      },
+      "p50": {
+        "heads_removed": 72,
+        "drophead_losses": [
+          0.692504382195653,
+          0.5079402132093362,
+          0.4412448181827811
+        ],
+        "drophead_seconds": 4810.0,
+        "drophead_dense_accuracy": 0.8117167600611309,
+        "drophead_accuracy": 0.7908303616912888,
+        "drophead_recovery_losses": [
+          0.4360326915114846,
+          0.3052450866527088
+        ],
+        "drophead_recovery_seconds": 1631.3,
+        "drophead_recovery_accuracy": 0.8294447274579725,
+        "magnitude_oneshot_accuracy": 0.6794701986754967,
+        "recovery_losses": [
+          0.43820959217652117,
+          0.278140858070733
+        ],
+        "recovery_seconds": 1627.1,
+        "magnitude_recovery_accuracy": 0.8325012735608762,
+        "drophead_minus_magnitude_pp": -4.167,
+        "budgets": {
+          "drophead_train_epochs": 3,
+          "drophead_recover_epochs": 2,
+          "magnitude_train_epochs": 3,
+          "magnitude_recover_epochs": 2,
+          "matched": true,
+          "why": "drophead_minus_magnitude_pp compares an arm with no recovery against one with recovery, so it is not budget-matched; the _matched_pp field below is, and exists only when --recover-drophead ran"
+        },
+        "drophead_minus_magnitude_matched_pp": -0.306,
+        "oneshot_drophead_minus_magnitude_pp": 11.136,
+        "drophead_vs_control_pp": -5.349
+      }
+    }
+  }
+}

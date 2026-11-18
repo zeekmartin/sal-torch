@@ -62,9 +62,15 @@ DEFAULT_MODEL = "google/vit-base-patch16-224"
 # are checked against PUBLISHED on load; discovery below can find more, but
 # finding is not the same as having been checked.
 CONTROL_SOURCES: dict[int, list[str]] = {
+    1: [f"results/w3_ctrl1_s{s}/exp31_dense_control.json"
+        for s in (42, 123, 456)],
     2: [f"results/lumi_v060/exp32_ctrl_s{s}/exp31_dense_control.json"
         for s in (42, 123, 456)],
+    3: [f"results/w3_ctrl3_s{s}/exp31_dense_control.json"
+        for s in (42, 123, 456)],
     5: ["results/lumi_v060/exp31_s42/exp31_dense_control.json"],
+    10: [f"results/w4_ctrl10_s{s}/exp31_dense_control.json"
+         for s in (42, 123, 456)],
 }
 
 #: Where a dense control may live. Globbed, then each candidate is read and
@@ -123,14 +129,38 @@ def discover_controls(root: Path | None = None, model: str | None = None,
 # silently redefining every cost downstream of it. Tolerance is the measured
 # seed spread, not a guess: the three 2-epoch controls span 0.214pp.
 PUBLISHED = {
+    # The 1-epoch and 3-epoch rungs were measured in wave 3 and sat
+    # uncopied on scratch until 2026-11-17; the 10-epoch one landed in wave
+    # 4. Registering them is what makes the ladder verifiable at every
+    # length rather than only at the two the first write-ups quoted, and it
+    # is the rung at ONE epoch, not two, where the dense control peaks.
+    1: {"mean": 0.81727, "int4_mean": 0.80567, "seeds": 3,
+        "tolerance_pp": 0.25,
+        "source": "sal-torch/CLAUDE.md control ladder (81.738 / 81.744 / "
+                  "81.700)"},
     2: {"mean": 0.81554, "int4_mean": 0.80273, "seeds": 3,
         "tolerance_pp": 0.25,
         "source": "results/lumi_v060/EXP32_RATIO_AT_2EP.md"},
+    3: {"mean": 0.81158, "int4_mean": 0.79821, "seeds": 3,
+        "tolerance_pp": 0.25,
+        "source": "sal-torch/CLAUDE.md control ladder (81.074 / 81.202 / "
+                  "81.198)"},
     5: {"mean": 0.80556, "int4_mean": 0.78956, "seeds": 1,
         "tolerance_pp": 0.25,
         "source": "results/lumi_v060/EXP31 (single seed); the published tables "
                   "use exp25 arm 1a's three-seed 80.44% instead"},
+    10: {"mean": 0.79971, "int4_mean": 0.78400, "seeds": 3,
+         "tolerance_pp": 0.25,
+         "source": "commit 486eddd (80.058 / 79.846 / 80.008)"},
 }
+
+#: Every rung the registry carries, in order. DERIVED from CONTROL_SOURCES
+#: rather than written out, so a rung added there is in the ladder, in the
+#: default load and in the tests at once -- and PUBLISHED cannot come to
+#: list a budget the default ladder does not load, which is how adding the
+#: 1-, 3- and 10-epoch rungs first broke
+#: test_published_registry_matches_the_loaded_corpus.
+LADDER_EPOCHS = tuple(sorted(CONTROL_SOURCES))
 
 
 # On LUMI the jobs write to ``results/<exp>/`` and the repository stores the
@@ -264,7 +294,7 @@ class ControlLadder:
 
     # ------------------------------------------------------------- loading
     @classmethod
-    def load(cls, epochs: Iterable[int] = (2, 5), verify: bool = True,
+    def load(cls, epochs: Iterable[int] | None = None, verify: bool = True,
              root: Path | None = None, model: str | None = None,
              discover: bool = True) -> "ControlLadder":
         """The control ladder for one model.
@@ -282,6 +312,9 @@ class ControlLadder:
         """
         root = root or REPO_ROOT
         model = model or DEFAULT_MODEL
+        # Every registered rung by default. A fixed (2, 5) meant that
+        # registering a rung left the default ladder behind it.
+        epochs = LADDER_EPOCHS if epochs is None else epochs
         controls: dict[int, Control] = {}
         per_seed: dict[tuple[int, int], Control] = {}
         found = discover_controls(root, model=model) if discover else []
