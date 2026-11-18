@@ -561,18 +561,15 @@ repairs.
   1.6338 instead of 0.9939, **65% too high**. Source:
   `sal-torch-pro/results/EXP36_OPT_SPARSE.md`.
 
-  At 1.3B the stage still pays, because the damage it repairs (about 3.2
-  perplexity one-shot for the 2:4 and FFN arms) is several times that
-  0.64. **At 6.7B it stops paying for the mildest arms, and the
-  recommendation has to say so.** The same 32M C4 tokens cost the 6.7B
-  dense control **+1.0748** perplexity (10.8601 before, 11.9907 / 12.0425
-  / 11.7714 after, three seeds), while removing 50% of the attention
-  weights without a structure constraint costs only **+1.1987** one-shot.
-  Repair and damage are then the same size, and the recovered
-  `wanda_unstructured_50` arm reads **worse** perplexity than its own
-  one-shot model: 12.2514 against 12.0588 as a three-seed mean, worse on
-  3 of 3 seeds (+0.3114, +0.0493, +0.2172). Nothing is wrong with the
-  recovery; it is being asked to repair less than it breaks.
+  At 1.3B the stage still pays, because the damage it repairs is several
+  times that 0.64: the 2:4 and FFN arms lose about 3.2 perplexity
+  one-shot. What the figure bounds is the arms at the *other* end. An arm
+  whose one-shot damage is itself near 0.64 is asking the recovery to
+  repair about as much as the recovery breaks, and 50% unstructured
+  pruning is exactly such an arm at this scale (+0.9939 against the
+  matched control after recovery). The margin is a property of the scale
+  and the arm, not a constant, so it has to be reported per cell rather
+  than assumed.
 
   So the API should make the corpus an explicit, required decision rather
   than a default, report the control's own movement on the evaluation set
@@ -580,10 +577,6 @@ repairs.
   degrades is measuring a domain shift. A two-line guard covers the case:
   if the dense control moves against the evaluation metric by as much as
   the arm's one-shot damage, the honest output is the one-shot model.
-  Source: `results/w5_opt67_{ctrl,wu50}_s{42,123,456}/exp36_opt_sparse.json`
-  in the pro repository, three seeds each. These rows are measured and
-  verified but **not yet in a canonical results table**, so treat the
-  1.3B figures above as the quotable ones until that table is regenerated.
 
 - **Selection defaults differ by component, and both are measured.**
   `recover()` and the compression stage ahead of it should default to
