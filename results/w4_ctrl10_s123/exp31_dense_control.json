@@ -1,0 +1,91 @@
+{
+  "experiment": "exp31_dense_control",
+  "model": "google/vit-base-patch16-224",
+  "dataset": "evanarlian/imagenet_1k_resized_256",
+  "dataset_label": "ImageNet-1k (resized 256px, evanarlian/imagenet_1k_resized_256)",
+  "seed": 123,
+  "gate": false,
+  "num_classes": 1000,
+  "n_train": 1281167,
+  "n_val": 50000,
+  "batch_size": 64,
+  "epochs": 10,
+  "heads_removed": 0,
+  "pretrained": {
+    "accuracy": 0.78442,
+    "int4_accuracy": 0.7723
+  },
+  "exp25_baseline_reference": {
+    "accuracy": 0.8044,
+    "int4_accuracy": 0.7901,
+    "per_seed": {
+      "42": 0.8048,
+      "123": 0.8045,
+      "456": 0.8038
+    },
+    "sd_pp": 0.05,
+    "source": "results/lumi_v060/EXP25_ALIGNED.md"
+  },
+  "notes": {
+    "arm": "no slicing, no masking \u2014 recover() on the pretrained weights, identical optimiser and schedule to exp29's recovery arms",
+    "why": "a recovered arm has had five epochs of ImageNet-1k and the pretrained checkpoint has had none; 78.44 answers 'better than what I downloaded', not 'does pruning cost accuracy'",
+    "int4": "quantize_weights(model, 4) \u2014 a simulated per-channel quantize/dequantize round-trip in fp32, not a 4-bit kernel; says nothing about speed or memory"
+  },
+  "gpu": "AMD Instinct MI250X",
+  "torch_version": "2.5.1+rocm6.2",
+  "control": {
+    "accuracy": 0.79846,
+    "int4_accuracy": 0.7829,
+    "epochs": 10,
+    "epoch_losses": [
+      0.5765350645999701,
+      0.4924820166694721,
+      0.3708572686252608,
+      0.2798104554682622,
+      0.20064919369764272,
+      0.13091258918363147,
+      0.07740957905211726,
+      0.043618661871655674,
+      0.025612969323070722,
+      0.016035296518136146
+    ],
+    "train_seconds": 34384.86759209633,
+    "fine_tuning_gain_pp": 1.4039999999999941,
+    "vs_pretrained_pp": 1.4039999999999941,
+    "fine_tuning_gain_int4_pp": 1.0600000000000054,
+    "vs_exp25_baseline_pp": -0.5940000000000056
+  },
+  "exp29_restated": {
+    "control_accuracy": 0.79846,
+    "control_epochs": 10,
+    "arm_epochs": 5,
+    "epochs_matched": false,
+    "ratios": {
+      "0.25": {
+        "exp29_mean": 0.79407,
+        "arm_epochs": 5,
+        "control_epochs": 10,
+        "epochs_matched": false,
+        "fine_tuning_gain_pp": 1.4039999999999941,
+        "vs_pretrained_pp": 0.9650000000000047
+      },
+      "0.33": {
+        "exp29_mean": 0.78845,
+        "arm_epochs": 5,
+        "control_epochs": 10,
+        "epochs_matched": false,
+        "fine_tuning_gain_pp": 1.4039999999999941,
+        "vs_pretrained_pp": 0.4029999999999978
+      },
+      "0.50": {
+        "exp29_mean": 0.77265,
+        "arm_epochs": 5,
+        "control_epochs": 10,
+        "epochs_matched": false,
+        "fine_tuning_gain_pp": 1.4039999999999941,
+        "vs_pretrained_pp": -1.1770000000000058
+      }
+    },
+    "note": "exp29 ratio means are three-seed at 5 epochs of recovery. A pruning cost is reported only against a control trained for the SAME number of epochs; this control ran 10. Where they match, the column is still indicative to ~0.05pp, exp25's measured seed spread."
+  }
+}
