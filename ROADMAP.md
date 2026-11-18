@@ -548,6 +548,59 @@ repairs.
   mask-preserving by default, and matched-control reporting that separates
   `fine_tuning_gain_pp` from `pruning_cost_pp` and emits the second only when
   the epoch counts match. Specified in `SPEC_V070_RECOVERY.md`.
+
+  **`recover()` must take its data from the target domain, and must check
+  that the repair is larger than the domain shift it introduces.** This is
+  not a refinement, it is a condition under which the stage is worth
+  running at all. On OPT-1.3B, 32M tokens of C4 make the *unpruned* model
+  worse on raw-WikiText-2 by **0.6398 perplexity** (pretrained 14.6240,
+  dense control 15.3260 / 15.3536 / 15.1120 over three seeds). The
+  recovery is a domain shift that costs, not a gain that offsets, which is
+  why a cost taken against the pretrained checkpoint instead of the
+  matched control is inflated on every arm: for unstructured-50 it reads
+  1.6338 instead of 0.9939, **65% too high**. Source:
+  `sal-torch-pro/results/EXP36_OPT_SPARSE.md`.
+
+  At 1.3B the stage still pays, because the damage it repairs (about 3.2
+  perplexity one-shot for the 2:4 and FFN arms) is several times that
+  0.64. **At 6.7B it stops paying for the mildest arms, and the
+  recommendation has to say so.** The same 32M C4 tokens cost the 6.7B
+  dense control **+1.0748** perplexity (10.8601 before, 11.9907 / 12.0425
+  / 11.7714 after, three seeds), while removing 50% of the attention
+  weights without a structure constraint costs only **+1.1987** one-shot.
+  Repair and damage are then the same size, and the recovered
+  `wanda_unstructured_50` arm reads **worse** perplexity than its own
+  one-shot model: 12.2514 against 12.0588 as a three-seed mean, worse on
+  3 of 3 seeds (+0.3114, +0.0493, +0.2172). Nothing is wrong with the
+  recovery; it is being asked to repair less than it breaks.
+
+  So the API should make the corpus an explicit, required decision rather
+  than a default, report the control's own movement on the evaluation set
+  beside the arm's, and say plainly that a recovery whose matched control
+  degrades is measuring a domain shift. A two-line guard covers the case:
+  if the dense control moves against the evaluation metric by as much as
+  the arm's one-shot damage, the honest output is the one-shot model.
+  Source: `results/w5_opt67_{ctrl,wu50}_s{42,123,456}/exp36_opt_sparse.json`
+  in the pro repository, three seeds each. These rows are measured and
+  verified but **not yet in a canonical results table**, so treat the
+  1.3B figures above as the quotable ones until that table is regenerated.
+
+- **Selection defaults differ by component, and both are measured.**
+  `recover()` and the compression stage ahead of it should default to
+  **random selection for attention heads** and **magnitude for FFN
+  neurons**. These are not the same answer and the project has stopped
+  assuming they would be. On heads, random beats magnitude by **1.17pp**
+  at 50% with no overlap between the two seed ranges. On FFN neurons at
+  25%, magnitude costs **-0.869pp** against the matched 2-epoch control
+  (range -0.988 to -0.664 over **7 seeds**) where random costs
+  **-1.397pp** (range -1.668 to -1.212 over 7 seeds): the ranges are
+  disjoint, so the 0.528pp is a result and not seed noise. Note the
+  inversion that makes this worth stating: random is **1.91pp better
+  one-shot** and 0.528pp worse after recovery, so a one-shot benchmark
+  picks the wrong FFN default. Magnitude's one-shot figure is identical
+  across seeds because the selection is deterministic; only the recovery
+  differs. Sources: `sal-torch-pro/results/CANONICAL_TABLES.md` and
+  `sal-torch-pro/results/EXP35_FFN_AT_2EP.md`.
 - **`mask_mode="drophead"` on `HeadMasker` — item 2.** DropHead is recommended
   throughout this document and is **not callable from the package**:
   `HeadMasker` accumulates and holds, which is SAL, and the per-step resampled
