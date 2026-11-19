@@ -1,0 +1,224 @@
+{
+ "generated_by": "docs/preprint/figures.py",
+ "figure1": {
+  "vit": [
+   {
+    "label": "unstructured 50%\nSparseGPT",
+    "n": 3,
+    "mean": -0.21733333333333604,
+    "lo": -0.26599999999999957,
+    "hi": -0.15800000000000258
+   },
+   {
+    "label": "unstructured 50%\nWanda",
+    "n": 3,
+    "mean": -0.15733333333333155,
+    "lo": -0.32600000000000406,
+    "hi": 0.024000000000001798
+   },
+   {
+    "label": "2:4\nSparseGPT",
+    "n": 3,
+    "mean": -0.4573333333333318,
+    "lo": -0.6000000000000005,
+    "hi": -0.32400000000000206
+   },
+   {
+    "label": "2:4\nWanda",
+    "n": 3,
+    "mean": -0.55466666666667,
+    "lo": -0.6840000000000068,
+    "hi": -0.48200000000000465
+   },
+   {
+    "label": "heads 50%\nmagnitude",
+    "n": 3,
+    "mean": -3.912000000000001,
+    "lo": -4.081999999999997,
+    "hi": -3.7860000000000005
+   },
+   {
+    "label": "FFN neurons 25%\nmagnitude",
+    "n": 3,
+    "mean": -0.8246666666666661,
+    "lo": -0.9360000000000035,
+    "hi": -0.7360000000000033
+   }
+  ],
+  "opt13b": [
+   {
+    "label": "unstructured 50%\nSparseGPT",
+    "n": 3,
+    "mean": 0.9939378812290626,
+    "lo": 0.6918217574727201,
+    "hi": 1.334231785988809
+   },
+   {
+    "label": "unstructured 50%\nWanda",
+    "n": 3,
+    "mean": 0.9802693981314944,
+    "lo": 0.7088816501006647,
+    "hi": 1.3049185500048068
+   },
+   {
+    "label": "2:4\nSparseGPT",
+    "n": 3,
+    "mean": 3.217179309138132,
+    "lo": 2.790992188066731,
+    "hi": 3.5024130234492468
+   },
+   {
+    "label": "2:4\nWanda",
+    "n": 3,
+    "mean": 3.3631977735795164,
+    "lo": 3.0250868700415303,
+    "hi": 3.553571689470676
+   },
+   {
+    "label": "heads 50%\nrandom",
+    "n": 3,
+    "mean": 6.749491975709508,
+    "lo": 6.429170416782677,
+    "hi": 7.262011207770872
+   },
+   {
+    "label": "FFN neurons 25%\nrandom",
+    "n": 3,
+    "mean": 3.1840320161884077,
+    "lo": 2.4921706566293746,
+    "hi": 4.244114794736813
+   }
+  ],
+  "opt67b": [
+   {
+    "label": "unstructured 50%\nSparseGPT",
+    "n": 3,
+    "mean": 0.2582342033617735,
+    "lo": 0.11464881662530324,
+    "hi": 0.5170915565542238
+   },
+   {
+    "label": "unstructured 50%\nWanda",
+    "n": 3,
+    "mean": 0.3165971431219461,
+    "lo": 0.15875371849357833,
+    "hi": 0.5114308260426448
+   },
+   {
+    "label": "2:4\nSparseGPT",
+    "n": 3,
+    "mean": 1.231482056796758,
+    "lo": 1.0452680980701725,
+    "hi": 1.4823348873921507
+   },
+   {
+    "label": "2:4\nWanda",
+    "n": 3,
+    "mean": 1.612292603490383,
+    "lo": 1.2412322742123898,
+    "hi": 1.8714646297901467
+   },
+   {
+    "label": "heads 50%\nrandom",
+    "n": 3,
+    "mean": 4.271656472403277,
+    "lo": 4.012256555420635,
+    "hi": 4.487658304240865
+   },
+   {
+    "label": "FFN neurons 25%\nrandom",
+    "n": 3,
+    "mean": 1.5176754971215427,
+    "lo": 0.757020376224558,
+    "hi": 2.2566233194879466
+   }
+  ]
+ },
+ "figure2": [
+  {
+   "arm": "dense",
+   "accuracy": 81.554,
+   "acc_lo": 81.462,
+   "acc_hi": 81.676,
+   "gpu32": 1.0,
+   "cpu32": 1.0,
+   "cpu_unstable": false,
+   "cpu_pass_spread_pct": 8.32,
+   "params": 86567656,
+   "param_reduction": 0.0
+  },
+  {
+   "arm": "head25",
+   "accuracy": 80.258,
+   "acc_lo": 80.16799999999999,
+   "acc_hi": 80.4,
+   "gpu32": 1.0936,
+   "cpu32": 1.0857,
+   "cpu_unstable": false,
+   "cpu_pass_spread_pct": 0.19,
+   "params": 79482856,
+   "param_reduction": 0.0818411902015691
+  },
+  {
+   "arm": "head33",
+   "accuracy": 79.62599999999999,
+   "acc_lo": 79.55799999999999,
+   "acc_hi": 79.696,
+   "gpu32": 1.1287,
+   "cpu32": 1.1205,
+   "cpu_unstable": false,
+   "cpu_pass_spread_pct": 3.5,
+   "params": 77121256,
+   "param_reduction": 0.1091215869354254
+  },
+  {
+   "arm": "head50",
+   "accuracy": 77.642,
+   "acc_lo": 77.442,
+   "acc_hi": 77.80799999999999,
+   "gpu32": 1.2034,
+   "cpu32": 1.1858,
+   "cpu_unstable": false,
+   "cpu_pass_spread_pct": 2.57,
+   "params": 72398056,
+   "param_reduction": 0.1636823804031381
+  },
+  {
+   "arm": "mlp25",
+   "accuracy": 80.72933333333333,
+   "acc_lo": 80.72200000000001,
+   "acc_hi": 80.74,
+   "gpu32": 1.1474,
+   "cpu32": 1.1971,
+   "cpu_unstable": false,
+   "cpu_pass_spread_pct": 0.16,
+   "params": 72402664,
+   "param_reduction": 0.16362915036073056
+  },
+  {
+   "arm": "mlp50",
+   "accuracy": 77.97333333333334,
+   "acc_lo": 77.912,
+   "acc_hi": 78.018,
+   "gpu32": 1.3447,
+   "cpu32": 1.479,
+   "cpu_unstable": false,
+   "cpu_pass_spread_pct": 3.24,
+   "params": 58237672,
+   "param_reduction": 0.3272583007214611
+  },
+  {
+   "arm": "head50_mlp50",
+   "accuracy": 71.82933333333334,
+   "acc_lo": 71.762,
+   "acc_hi": 71.896,
+   "gpu32": 1.7378,
+   "cpu32": 2.0443,
+   "cpu_unstable": false,
+   "cpu_pass_spread_pct": 0.04,
+   "params": 44068072,
+   "param_reduction": 0.4909406811245992
+  }
+ ],
+ "note": "error bars are ranges over seeds and not intervals: the campaign refuses an interval below ten draws"
+}
