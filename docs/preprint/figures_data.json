@@ -3,136 +3,176 @@
  "figure1": {
   "vit": [
    {
-    "label": "unstructured 50%\nSparseGPT",
+    "label": "unstructured 50%, SparseGPT",
     "n": 3,
     "mean": -0.21733333333333604,
     "lo": -0.26599999999999957,
     "hi": -0.15800000000000258
    },
    {
-    "label": "unstructured 50%\nWanda",
+    "label": "unstructured 50%, Wanda",
     "n": 3,
     "mean": -0.15733333333333155,
     "lo": -0.32600000000000406,
     "hi": 0.024000000000001798
    },
    {
-    "label": "2:4\nSparseGPT",
+    "label": "2:4, SparseGPT",
     "n": 3,
     "mean": -0.4573333333333318,
     "lo": -0.6000000000000005,
     "hi": -0.32400000000000206
    },
    {
-    "label": "2:4\nWanda",
+    "label": "2:4, Wanda",
     "n": 3,
     "mean": -0.55466666666667,
     "lo": -0.6840000000000068,
     "hi": -0.48200000000000465
    },
    {
-    "label": "heads 50%\nmagnitude",
+    "label": "heads 50%, magnitude",
     "n": 3,
     "mean": -3.912000000000001,
     "lo": -4.081999999999997,
     "hi": -3.7860000000000005
    },
    {
-    "label": "FFN neurons 25%\nmagnitude",
+    "label": "FFN neurons 25%, random",
     "n": 3,
-    "mean": -0.8246666666666661,
-    "lo": -0.9360000000000035,
-    "hi": -0.7360000000000033
+    "mean": -1.2513333333333339,
+    "lo": -1.2700000000000045,
+    "hi": -1.2260000000000049,
+    "selection": "random",
+    "source": "exp44_random_s*/exp35_mlp_matched.json"
    }
   ],
   "opt13b": [
    {
-    "label": "unstructured 50%\nSparseGPT",
+    "label": "unstructured 50%, SparseGPT",
     "n": 3,
     "mean": 0.9939378812290626,
     "lo": 0.6918217574727201,
-    "hi": 1.334231785988809
+    "hi": 1.334231785988809,
+    "source": "exp36_cost_table.json"
    },
    {
-    "label": "unstructured 50%\nWanda",
+    "label": "unstructured 50%, Wanda",
     "n": 3,
     "mean": 0.9802693981314944,
     "lo": 0.7088816501006647,
-    "hi": 1.3049185500048068
+    "hi": 1.3049185500048068,
+    "source": "exp36_cost_table.json"
    },
    {
-    "label": "2:4\nSparseGPT",
+    "label": "2:4, SparseGPT",
     "n": 3,
     "mean": 3.217179309138132,
     "lo": 2.790992188066731,
-    "hi": 3.5024130234492468
+    "hi": 3.5024130234492468,
+    "source": "exp36_cost_table.json"
    },
    {
-    "label": "2:4\nWanda",
+    "label": "2:4, Wanda",
     "n": 3,
     "mean": 3.3631977735795164,
     "lo": 3.0250868700415303,
-    "hi": 3.553571689470676
+    "hi": 3.553571689470676,
+    "source": "exp36_cost_table.json"
    },
    {
-    "label": "heads 50%\nrandom",
+    "label": "heads 50%, random",
     "n": 3,
     "mean": 6.749491975709508,
     "lo": 6.429170416782677,
-    "hi": 7.262011207770872
+    "hi": 7.262011207770872,
+    "source": "exp36_cost_table.json"
    },
    {
-    "label": "FFN neurons 25%\nrandom",
+    "label": "FFN neurons 25%, random",
     "n": 3,
     "mean": 3.1840320161884077,
     "lo": 2.4921706566293746,
-    "hi": 4.244114794736813
+    "hi": 4.244114794736813,
+    "source": "exp36_cost_table.json"
    }
   ],
   "opt67b": [
    {
-    "label": "unstructured 50%\nSparseGPT",
+    "label": "unstructured 50%, SparseGPT",
     "n": 3,
     "mean": 0.2582342033617735,
     "lo": 0.11464881662530324,
-    "hi": 0.5170915565542238
+    "hi": 0.5170915565542238,
+    "source": "exp36_opt67_cost_table.json"
    },
    {
-    "label": "unstructured 50%\nWanda",
+    "label": "unstructured 50%, Wanda",
     "n": 3,
     "mean": 0.3165971431219461,
     "lo": 0.15875371849357833,
-    "hi": 0.5114308260426448
+    "hi": 0.5114308260426448,
+    "source": "exp36_opt67_cost_table.json"
    },
    {
-    "label": "2:4\nSparseGPT",
+    "label": "2:4, SparseGPT",
     "n": 3,
     "mean": 1.231482056796758,
     "lo": 1.0452680980701725,
-    "hi": 1.4823348873921507
+    "hi": 1.4823348873921507,
+    "source": "exp36_opt67_cost_table.json"
    },
    {
-    "label": "2:4\nWanda",
+    "label": "2:4, Wanda",
     "n": 3,
     "mean": 1.612292603490383,
     "lo": 1.2412322742123898,
-    "hi": 1.8714646297901467
+    "hi": 1.8714646297901467,
+    "source": "exp36_opt67_cost_table.json"
    },
    {
-    "label": "heads 50%\nrandom",
+    "label": "heads 50%, random",
     "n": 3,
     "mean": 4.271656472403277,
     "lo": 4.012256555420635,
-    "hi": 4.487658304240865
+    "hi": 4.487658304240865,
+    "source": "exp36_opt67_cost_table.json"
    },
    {
-    "label": "FFN neurons 25%\nrandom",
+    "label": "FFN neurons 25%, random",
     "n": 3,
     "mean": 1.5176754971215427,
     "lo": 0.757020376224558,
-    "hi": 2.2566233194879466
+    "hi": 2.2566233194879466,
+    "source": "exp36_opt67_cost_table.json"
    }
   ]
+ },
+ "figure1_ffn_selection": {
+  "plotted_in_every_panel": "random",
+  "why": "all three panels of figure 1 are read for the ORDERING of the structures, so the selection rule is held fixed and only the structure varies. The ViT panel used to plot the magnitude-selected FFN arm while both OPT panels plotted the randomly selected one.",
+  "vit_plotted": {
+   "label": "FFN neurons 25%, random",
+   "n": 3,
+   "mean": -1.2513333333333339,
+   "lo": -1.2700000000000045,
+   "hi": -1.2260000000000049,
+   "selection": "random",
+   "source": "exp44_random_s*/exp35_mlp_matched.json"
+  },
+  "vit_not_plotted": {
+   "label": "FFN neurons 25%, magnitude",
+   "n": 3,
+   "mean": -0.8246666666666661,
+   "lo": -0.9360000000000035,
+   "hi": -0.7360000000000033,
+   "selection": "magnitude",
+   "source": "exp35/seed*/exp35_mlp_matched.json",
+   "why_not_plotted": "figure 1's ViT panel plots the randomly selected FFN arm, so that all three panels vary the structure removed and not the rule that selected it"
+  }
+ },
+ "figure1_excluded_arms": {
+  "ffn_random_50": "all three 6.7B seeds blow the recovery loss up early; per-seed costs span +9.33 to +201.62 and no cell measures the structure's cost cleanly, so the arm has no central value to draw"
  },
  "figure2": [
   {
@@ -220,5 +260,52 @@
    "param_reduction": 0.4909406811245992
   }
  ],
+ "figure2_ffn_selection": {
+  "plotted": "magnitude",
+  "why": "magnitude is the recommended FFN recipe (ROADMAP, v0.7.0 selection defaults) and is the selection the exp39/exp46 latency grid timed. Figure 1's ViT panel plots the random arm for a different reason: its three panels are read for ordering and must vary only the structure. The two arms differ by 0.43pp at 25%, which is larger than either one's seed range, so this is a stated difference and not an inconsistency to be reconciled.",
+  "figure1_vit_panel_plots": "random"
+ },
+ "figure2_label_offsets": {
+  "dense": {
+   "dx": 1.0,
+   "dy": 0.0,
+   "ha": "left"
+  },
+  "head25": {
+   "dx": -1.0,
+   "dy": -0.7,
+   "ha": "right"
+  },
+  "head33": {
+   "dx": 1.0,
+   "dy": -0.2,
+   "ha": "left"
+  },
+  "head50": {
+   "dx": 1.0,
+   "dy": -0.6,
+   "ha": "left"
+  },
+  "mlp25": {
+   "dx": 1.0,
+   "dy": 0.7,
+   "ha": "left"
+  },
+  "mlp50": {
+   "dx": 1.0,
+   "dy": 0.0,
+   "ha": "left"
+  },
+  "head50_mlp50": {
+   "dx": -1.0,
+   "dy": -0.6,
+   "ha": "right"
+  }
+ },
+ "captions_for_latex": {
+  "fig_cost_by_structure": "Cost of removing about the same parameter budget, by the structure removed. Bars are the mean over seeds and whiskers the range over seeds, not an interval: below ten draws the campaign reports a range. Every cost is the arm minus the dense control trained for the same budget on the same seed. A ViT cost is points of top-1 lost and is negative; an OPT cost is perplexity gained and is positive. The ViT axis is inverted so that a longer bar is a worse arm in every panel. The units differ, so the panels are read for ordering and never for magnitude. The FFN arm is randomly selected in all three panels.",
+  "fig_quality_vs_latency": "Quality against measured latency for the physically sliced ViT arms. Marker area is the parameter count; whiskers are the range over seeds. CPU speedups are the three-pass re-measurement: two cells of the single-pass grid did not survive being measured again, and a cell whose three passes disagree by more than 5 percent is marked unstable. The dense reference is 1.0 by construction and is not marked, although its own three passes span 8.3 percent. Unstructured and 2:4 arms are absent because they are masked, not sliced, and give no speedup without a sparse kernel. The FFN arms here (mlp25, mlp50, head50_mlp50) are MAGNITUDE-selected, which is the recommended FFN recipe and the selection the latency grid timed; figure 1's ViT panel plots the randomly selected FFN arm instead, so that its three panels vary the structure and not the selection. Magnitude costs -0.82pp at 25% and random -1.25pp, both against the same matched 2-epoch control, so the two figures differ by 0.43pp on this arm by design and not by accident."
+ },
+ "in_figure_text": "none. Neither figure carries a suptitle or a footer: the footer was clipped on its left edge, and a caption that can wrap belongs in LaTeX. The text is generated above, under captions_for_latex.",
  "note": "error bars are ranges over seeds and not intervals: the campaign refuses an interval below ten draws"
 }

@@ -581,6 +581,39 @@ repairs.
   if the dense control moves against the evaluation metric by as much as
   the arm's one-shot damage, the honest output is the one-shot model.
 
+  **`recover()` must clip the gradient norm, and must not ramp the
+  learning rate on a heavily damaged one-shot model.** The shipped stage
+  is not free to inherit the research harness's optimizer settings here:
+  that harness runs an unclipped AdamW under a one-cycle schedule whose
+  learning rate climbs through the first tenth of the run, and **a
+  recovery under it diverged on the most damaged arm, on every seed**.
+  Two seeds came back inside the token budget and one did not, which is
+  the worst shape a failure can have — the stage returns a model, the
+  loss curve ends lower than it started, and nothing in the output says
+  the run went through a blow-up it never fully left. So:
+
+  - **clip the gradient norm** (a configurable `max_grad_norm`, on by
+    default), because the damaged model's first steps are where the
+    large gradients are;
+  - **warm up rather than ramp**: the learning rate must not still be
+    climbing while the model is at its most damaged;
+  - **log the gradient norm per step and keep it with the result**, with
+    the loss curve and not merely its endpoints. The diagnosis above had
+    to be reconstructed from job logs because the result files carried
+    `loss_first` and `loss_last`, and the first and last of a curve that
+    rises in the middle and comes most of the way back look unremarkable.
+    A stage that cannot show its own instability is not reporting.
+
+  `recover()` has no published comparison to preserve, so it is free to
+  do all three; the research harness is not, since changing the optimizer
+  there would silently make already-measured arms incomparable, and it
+  has therefore gained the logging only. The measured evidence is in the
+  per-cell result files and the recovery-stability table generated from
+  them, both of which go into the public data archive deposited with the
+  preprint; this page will cite them by that archive's DOI once it is
+  minted, and quotes no figures from them here for the same reason the
+  rest of this item does not.
+
 - **Selection defaults differ by component, and both are measured.**
   `recover()` and the compression stage ahead of it should default to
   **random selection for attention heads** and **magnitude for FFN
