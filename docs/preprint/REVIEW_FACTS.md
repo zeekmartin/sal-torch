@@ -255,11 +255,11 @@ This is the SparseGPT/Wanda protocol, which is what makes the dense gate meaning
 
 | quantity | what it counts | the campaign total |
 |---|---|---|
-| elapsed h | wall-clock time of the jobs, whatever they held | 2022.2 |
-| **GCD-h** | allocated GCDs x elapsed, from sacct's `AllocTRES` | **2717.7** |
-| billed GPU-h | the allocation's unit: one GPU is one MI250X module of two GCDs, so GCD-h / 2 | **1358.9** |
+| elapsed h | wall-clock time of the jobs, whatever they held | 2046.0 |
+| **GCD-h** | allocated GCDs x elapsed, from sacct's `AllocTRES` | **2782.2** |
+| billed GPU-h | the allocation's unit: one GPU is one MI250X module of two GCDs, so GCD-h / 2 | **1391.1** |
 
-The first two rows differ because `standard-g` is **exclusive**: wave 5's OPT-6.7B jobs were allocated -- and billed -- all 8 GCDs of a node for their whole wall time, using 4 of them for FSDP. A sum of elapsed hours therefore under-reports the campaign by 695.5 GCD-h. Earlier revisions of this file made exactly that substitution.
+The first two rows differ because `standard-g` is **exclusive**: wave 5's OPT-6.7B jobs were allocated -- and billed -- all 8 GCDs of a node for their whole wall time, using 4 of them for FSDP. A sum of elapsed hours therefore under-reports the campaign by 736.2 GCD-h. Earlier revisions of this file made exactly that substitution.
 
 All three figures are this campaign's own, summed over the jobs whose logs are in its log directory and joined to `sacct` by job id. The allocation's own counter is the SHARED account's and reads higher, because the account also hosts work that is not this campaign; it is therefore not the number to quote here and it is not quoted. `results/CAMPAIGN_SHARE.json` records the split and reconciles it with the counter. **The preprint's compute figure is in GCD-hours**; writing it as GPU-hours overstates the charge by two.
 
