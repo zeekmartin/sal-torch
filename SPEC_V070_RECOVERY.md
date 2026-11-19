@@ -35,7 +35,7 @@ repair pass that the product does not perform:
 | MLP 25% | — | 79.81% (5 ep) | no recovery |
 
 Sources: `results/lumi_v060/EXP32_RATIO_AT_2EP.md`,
-`EXP33_SPARSE_VS_STRUCTURED.md`, `sal-torch-pro/results/EXP26_MLP.md`. The
+`EXP33_SPARSE_VS_STRUCTURED.md`, `EXP26_MLP.md` (in the public data archive deposited with the preprint, cited by its DOI once minted). The
 one-shot magnitude figure is `exp32_ratios_s{42,123,456}/exp29_recovery.json`,
 `ratios/0.50/accuracy_before_recovery`.
 

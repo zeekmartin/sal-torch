@@ -296,7 +296,8 @@ the 80.3% on its card, the difference being resize + centre crop). **Three seeds
 the most rigorous evidence the project has and it overrides ImageNet-100 for
 every shared cell. Docs: `PHASE3_IMAGENET1K.md`, `EXP24_SAL_RECOVERY.md`,
 `EXP25_ALIGNED.md`, `EXP27_DROPHEAD.md`, `EXP28_JEPA_1B.md`, and
-`sal-torch-pro/results/EXP26_MLP.md`.
+`EXP26_MLP.md` (in the public data archive deposited with the
+preprint, cited by its DOI once minted).
 
 - **SAL's headline replicates — and loses to its own control.** SAL over its
   own baseline at P50+INT4 is **+14.57pp** (30.63 vs 16.06), 3/3 seeds, which

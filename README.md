@@ -402,7 +402,7 @@ the matched 2-epoch control (**81.554%**, 3 seeds, nothing pruned):
 | 50% heads + 50% FFN (magnitude) | −49.1% | 71.83% | **−9.73pp** | −11.27pp |
 
 3 seeds per cell, full 50 000-image validation split
-(`sal-torch-pro/results/EXP35_FFN_AT_2EP.md`, 22.9 GPU-hours).
+(`EXP35_FFN_AT_2EP.md`, 22.9 GPU-hours; in the public data archive deposited with the preprint, cited by its DOI once minted).
 
 **For FFN neurons, no selection criterion dominates.** Magnitude is better at
 25% of neurons (+0.43pp, separated on 3/3 seeds by 0.32pp) and random is
@@ -459,8 +459,8 @@ torch/oneMKL on this CPU, not of the model.
 So quote it as: *2.04x on torch/oneMKL, 1.95x on ONNX Runtime, both at batch 32
 on an EPYC 7A53 at 7 threads, at a cost of −9.73pp.* Two backends, one honest
 range, and no configuration measured clears 2x on both. Trail:
-`sal-torch-pro/results/EXP41_WIDTH.md` (three-pass CPU and GPU grids) and
-`EXP43_ORT_CPU.md` (ORT).
+`EXP41_WIDTH.md` (three-pass CPU and GPU grids) and
+`EXP43_ORT_CPU.md` (ORT), both in the public data archive deposited with the preprint, cited by its DOI once minted.
 
 **On GPU, every arm is 1.00x at batch 1** (8.09–8.37 ms against 8.16 ms dense),
 because a ViT-B/16 there is kernel-launch bound. **Any latency claim must state

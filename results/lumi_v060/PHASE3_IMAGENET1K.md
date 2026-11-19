@@ -153,7 +153,7 @@ pruning at one ratio and generalises has not checked this.
     gap at 15x from clean accuracy alone; measured across head sets it is
     larger.
 - **exp26 / workstream 1c is complete** — see
-  `sal-torch-pro/results/EXP26_MLP.md`. 22 jobs, 97.2 GPU-hours, all
+  `EXP26_MLP.md`, in the public data archive deposited with the preprint, cited by its DOI once minted. 22 jobs, 97.2 GPU-hours, all
   `COMPLETED 0:0`. Post-hoc magnitude MLP pruning plus five epochs of recovery,
   three seeds, full validation split. Two things in it bear on this document:
   - **The speedup ceiling is 1.74x**, at batch 32, with half the parameters

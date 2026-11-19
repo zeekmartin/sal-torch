@@ -245,7 +245,7 @@ with a test pinning those four numbers.
 - **One checkpoint, one seed, three probes, no accuracy.** This asks what the
   diagnostic sees, not what the compression costs. Costs are in
   `EXP32_RATIO_AT_2EP.md`, `EXP33_SPARSITY.md` and
-  `sal-torch-pro/results/EXP35_FFN_AT_2EP.md`.
+  `EXP35_FFN_AT_2EP.md`, in the public data archive deposited with the preprint, cited by its DOI once minted.
 - **Detection is not usefulness.** Wanda attention-50% is detected. Nothing
   here shows that the detection predicts anything about that model's accuracy,
   and exp17 measured FI failing as a router across six architectures.
