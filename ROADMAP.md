@@ -558,8 +558,11 @@ repairs.
   recovery is a domain shift that costs, not a gain that offsets, which is
   why a cost taken against the pretrained checkpoint instead of the
   matched control is inflated on every arm: for unstructured-50 it reads
-  1.6338 instead of 0.9939, **65% too high**. Source:
-  `sal-torch-pro/results/EXP36_OPT_SPARSE.md`.
+  1.6338 instead of 0.9939, **65% too high**. Source: the OPT-1.3B
+  per-cell result files, which go into the public data archive deposited
+  with the preprint; this page will cite them by that archive's DOI once
+  it is minted. The OPT-6.7B figures are measured and are deliberately
+  not quoted here yet: they go in with the same DOI.
 
   At 1.3B the stage still pays, because the damage it repairs is several
   times that 0.64: the 2:4 and FFN arms lose about 3.2 perplexity
@@ -592,8 +595,10 @@ repairs.
   one-shot** and 0.528pp worse after recovery, so a one-shot benchmark
   picks the wrong FFN default. Magnitude's one-shot figure is identical
   across seeds because the selection is deterministic; only the recovery
-  differs. Sources: `sal-torch-pro/results/CANONICAL_TABLES.md` and
-  `sal-torch-pro/results/EXP35_FFN_AT_2EP.md`.
+  differs. Sources: the per-seed FFN result files and the canonical
+  tables generated from them, both of which go into the public data
+  archive deposited with the preprint; this page will cite them by that
+  archive's DOI once it is minted.
 - **`mask_mode="drophead"` on `HeadMasker` — item 2.** DropHead is recommended
   throughout this document and is **not callable from the package**:
   `HeadMasker` accumulates and holds, which is SAL, and the per-step resampled
