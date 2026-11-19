@@ -167,7 +167,20 @@ def strip_tex(line: str) -> str:
     s = re.sub(r"\\cite[tp]?\{[^}]*\}", " ", s)
     s = re.sub(r"\\(?:label|ref|eqref|autoref)\{[^}]*\}", " ", s)
     s = re.sub(r"\\url\{[^}]*\}", " ", s)
+    # Typesetting, not measurement: page geometry, lengths, font sizes and
+    # package options. Recognised by the command, not by position, so a
+    # \setlength in the body is caught as well as the preamble.
+    if PREAMBLE_CMD.search(s):
+        return ""
     return s
+
+
+#: Commands whose numbers are page layout rather than results.
+PREAMBLE_CMD = re.compile(
+    r"\\(?:usepackage|documentclass|geometry|setlength|addtolength|"
+    r"fontsize|hypersetup|definecolor|pagestyle|captionsetup|"
+    r"renewcommand|newcommand|includegraphics|vspace|hspace|"
+    r"arraystretch|tabcolsep|bibliographystyle)\b")
 
 
 def extract_main(path: Path) -> list:
@@ -218,16 +231,102 @@ def extract_sources(paths: list) -> list:
     for p in paths:
         if not p.is_file():
             continue
+        heading, header = "", ""
         for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(),
                                  1):
+            st = line.strip()
+            if st.startswith("#"):
+                heading, header = st, ""
+            elif st.startswith("|"):
+                # A header row names its columns; a separator row follows
+                # it; a data row is mostly numbers. Only the first of the
+                # three can label anything, so it is the one kept.
+                cells = [c.strip() for c in st.strip("|").split("|")]
+                if cells and all(set(c) <= set("-: ") for c in cells):
+                    pass                     # the |---|---| separator
+                elif not NUM.search(st):
+                    header = st
+            else:
+                header = ""
             for m in NUM.finditer(line):
                 v = to_float(m.group(1))
                 if v is None:
                     continue
                 rows.append({"doc": p.name, "line": i, "value": v,
                              "text": m.group(1),
-                             "row": line.strip()[:300]})
+                             "row": st[:300],
+                             # A canonical table row is numbers; what says
+                             # WHICH quantity they are is the header above
+                             # it and the section it sits in. Without
+                             # these, a numeric row can corroborate
+                             # nothing and every match against one looks
+                             # like a coincidence.
+                             # Kept apart on purpose. A table header
+                             # labels its own columns; a section heading
+                             # labels dozens of unrelated rows, so a
+                             # token from it is not evidence that THIS
+                             # row is the right one. main.tex:167's
+                             # $-0.21$ was accepted because the heading
+                             # "SparseGPT against Wanda at 2:4" lent the
+                             # word "sparsegpt" to a row about a 2:4 arm
+                             # over 7 seeds, whose 0.208 is one end of a
+                             # seed range. Heading tokens are reported,
+                             # never relied on.
+                             "header": header[:300],
+                             "heading": heading[:200],
+                             "label": (heading + " | " + header)[:400]})
     return rows
+
+
+#: English function words only. The first version of this list also held
+#: "control", "epochs", "seeds", "spread" and "cost" -- on the theory
+#: that a word in most rows corroborates nothing. That removed exactly
+#: the vocabulary that names these quantities, so the ladder's own spread
+#: could not be matched to the ladder, and 71 sound numbers were reported
+#: as doubtful. A check that cries wolf buries the one row it was built
+#: to find.
+_STOP = frozenset("""
+about above after against alone also among and are because been before
+being below both but does each every from have here into its itself
+less made make many more most much must never none not only other over
+own same says sees shows side still than that the their them then there
+these they this those through thus took under until using very was what
+when where which while with within without would
+""".split())
+
+
+def _tokens(text: str) -> set:
+    """Informative words of a line: what could tie it to a quantity.
+
+    Identifiers with underscores are kept whole AND split, so
+    ``wanda_attn_p50`` can corroborate a sentence that says "Wanda" and
+    one that says "attention" alike.
+    """
+    out = set()
+    for w in re.findall(r"[A-Za-z][A-Za-z0-9_]{2,}", text.lower()):
+        if "_" in w:
+            out.add(w)
+            out.update(x for x in w.split("_") if len(x) >= 3)
+        elif len(w) >= 4 and w not in _STOP:
+            out.add(w)
+    return out - _STOP
+
+
+def _decimals(text: str) -> int:
+    t = text.replace(",", "")
+    return len(t.split(".")[1]) if "." in t else 0
+
+
+def _corroborated(n, s) -> bool:
+    """Does the matched row share a word with the sentence citing it?
+
+    The sentence is the 120 characters around the number plus its whole
+    TeX line, because a table cell's own row carries the arm name while
+    the surrounding prose carries the metric.
+    """
+    want = _tokens(n["near"]) | _tokens(n["context"])
+    have = _tokens(s["row"]) | _tokens(s.get("header", ""))
+    return bool(want & have)
 
 
 def _assertion_precision(near: str) -> float | None:
@@ -262,7 +361,8 @@ def verify(main_path: Path, source_paths: list, strict_setup: bool) -> dict:
             "holds CANONICAL_TABLES.md.")
 
     findings = {"ok": [], "no_source": [], "mismatch": [], "rounding": [],
-                "skipped": [], "setup": [], "unclassified": []}
+                "skipped": [], "setup": [], "unclassified": [], "weak": [],
+                "integer": []}
     for n in nums:
         if n["skipped"]:
             findings["skipped"].append(n)
@@ -288,10 +388,36 @@ def verify(main_path: Path, source_paths: list, strict_setup: bool) -> dict:
                     if abs(abs(s["value"]) - abs(n["value"])) <= tol]
             signed = bool(hits)
         if hits:
-            best = min(hits, key=lambda s: abs(abs(s["value"])
+            # A hit in a row that shares no word with the sentence is a
+            # coincidence of value, and for a two-decimal number in a few
+            # hundred rows coincidences are the norm. Corroborated hits
+            # win; a number printed to 3+ decimals needs no corroboration
+            # because at that precision the match IS the identification.
+            good = [h for h in hits if _corroborated(n, h)]
+            # How many rows COULD have produced this match is the signal.
+            # Exactly one is identification: nothing else in either
+            # document carries that value, so the match is the row
+            # whether or not it shares a word. Three or more decimals is
+            # identification for the same reason. Hundreds of candidates
+            # -- which is what an integer at +-0.5 gets -- means the
+            # method cannot speak, and saying so is not the same as
+            # passing it.
+            uniq = len(hits) == 1
+            if not good and not uniq and _decimals(n["text"]) == 0:
+                n["n_hits"] = len(hits)
+                findings["integer"].append(n)
+                continue
+            weak = not good and not uniq and _decimals(n["text"]) < 3
+            pool = good or hits
+            best = min(pool, key=lambda s: abs(abs(s["value"])
                                                - abs(n["value"])))
             n["source"] = best
             n["abs_match_only"] = signed
+            n["n_hits"] = len(hits)
+            if weak:
+                n["weak"] = True
+                findings["weak"].append(n)
+                continue
             d = _assertion_precision(n["near"])
             if d is not None and d < 2 * tol:
                 n["assertion_delta"] = d
@@ -319,13 +445,19 @@ def verify(main_path: Path, source_paths: list, strict_setup: bool) -> dict:
 def render(f: dict, main_path: Path) -> str:
     L = ["=== verify_main_tex: %s ===" % main_path.name, ""]
     n_checked = len(f["ok"]) + len(f["mismatch"]) + len(f["rounding"]) \
-        + len(f["no_source"])
+        + len(f["no_source"]) + len(f["weak"]) + len(f["integer"])
     L.append("  %d number(s) checked against the generated documents"
              % n_checked)
-    L.append("  %d matched, %d with no source, %d mismatched, "
-             "%d rounding question(s)"
-             % (len(f["ok"]), len(f["no_source"]), len(f["mismatch"]),
-                len(f["rounding"])))
+    L.append("  %d matched, %d matched by value only, %d with no source, "
+             "%d mismatched, %d rounding question(s)"
+             % (len(f["ok"]), len(f["weak"]), len(f["no_source"]),
+                len(f["mismatch"]), len(f["rounding"])))
+    if f["integer"]:
+        L.append("  %d whole number(s) not corroborated: with a tolerance of "
+                 "+-0.5 each matches hundreds of rows, so existence in the "
+                 "documents says nothing about them. Mostly seed and epoch "
+                 "counts. Listed below, not excused."
+                 % len(f["integer"]))
     L.append("  %d skipped as TeX, %d as protocol constants, "
              "%d unclassified (no unit and not a numeric table column)"
              % (len(f["skipped"]), len(f["setup"]),
@@ -344,6 +476,38 @@ def render(f: dict, main_path: Path) -> str:
             L.append("      row: %s" % n["nearest"]["row"])
             L.append("      near: ...%s..." % n["near"])
             L.append("")
+
+    if f["weak"]:
+        L += ["", "--- MATCHED BY VALUE ONLY: a row carries this number but "
+                  "shares no word with the sentence citing it, so the "
+                  "verifier cannot say it is the right row. Printed to two "
+                  "decimals or fewer, which is where coincidence is cheap.",
+              ""]
+        for n in sorted(f["weak"], key=lambda x: x["line"]):
+            L.append("  main.tex:%d  %s  (%d row(s) in the documents carry "
+                     "this value within +-%g)"
+                     % (n["line"], n["text"], n["n_hits"], n["tol"]))
+            L.append("      closest: %s in %s:%d"
+                     % (n["source"]["text"], n["source"]["doc"],
+                        n["source"]["line"]))
+            L.append("      that row: %s" % n["source"]["row"][:200])
+            L.append("      near: ...%s..." % n["near"])
+            L.append("")
+
+    if f["integer"]:
+        L += ["", "--- WHOLE NUMBERS, uncorroborated. Each is a count, and "
+                  "a count cannot be told apart from the hundreds of other "
+                  "counts in the documents by value. They need reading "
+                  "against the table they are in.", ""]
+        seen = {}
+        for n in f["integer"]:
+            seen.setdefault(n["text"], []).append(n["line"])
+        for t in sorted(seen, key=lambda x: -len(seen[x])):
+            L.append("  %-8s x%-3d  lines %s"
+                     % (t, len(seen[t]),
+                        ",".join(str(x) for x in sorted(seen[t])[:10])
+                        + (" ..." if len(seen[t]) > 10 else "")))
+        L.append("")
 
     if f["no_source"]:
         L += ["", "--- NO SOURCE: no row of either generated document "
