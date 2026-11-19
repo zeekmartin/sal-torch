@@ -128,6 +128,32 @@ see wave 1 below.
     them" (in the LUMI notes below) one level finer: writing before the
     thing that presents the measurement is not enough when the next stage
     can take the process with it.
+11. **A test must EXECUTE the path it covers. Asserting that a piece of
+    source text is present is not a test of it.** A change added a call
+    to a helper defined in a neighbouring module and did not import it,
+    so every call raised `NameError`; the test for that change read the
+    file and asserted the call was there, which it was. Text being
+    present is not a name resolving, a signature matching, or a branch
+    being reachable, and only running the code tells those apart. The
+    trap is that this passes most loudly when it is least useful: the
+    cheap path gets a real test, the expensive path gets a text match,
+    and the text match is written to look like coverage of both. Where a
+    branch genuinely cannot run in the unit suite — it needs the
+    accelerator, or a model too large for it — a source assertion is
+    allowed as a **supplement**, never as the only coverage, and it must
+    say in the test why execution was impossible. Pair it with the
+    weakest executable check available: at minimum, that every name the
+    asserted snippet uses actually resolves in its module. This is
+    cardinal rule 8 one level in — rule 8 says the micro-test must reach
+    the stage that changed; this says reaching it means running it.
+12. **Never report an exit code that was read through a pipe, and read
+    the output before reporting the result.** `cmd | tail` reports
+    `tail`'s status, so a failing test suite is announced as exit 0.
+    Capture the command's own status — `set -o pipefail`, or `$?`
+    immediately after the command and before any pipe — and redirect to
+    a file rather than piping when the status matters. A status is a
+    claim about what happened; passing one on without having looked at
+    the output is reporting a result nobody measured.
 
 ## The validated mechanism (source of truth: reference research code)
 
