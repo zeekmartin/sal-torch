@@ -458,8 +458,13 @@ deriving anything, and **emits `pruning_cost_pp` only when the epoch counts
 match**. `tests/test_matched_control.py` pins that behaviour.
 
 - **exp29 — two epochs of recovery, not five.** The *pruned* curve peaks at 2
-  and declines: 5 is below 2 on 3/3 seeds in FP and INT4, and 10 is below 1.
-  Two epochs is 39% of the cost. **The peak is a property of this recipe on
+  and declines: 5 is below 2 on 3/3 seeds in FP and INT4. Two epochs is 39%
+  of the cost. **Corrected 2026-11-19**: this also said "10 is below 1".
+  The two rungs read 76.548% and 76.579%, a 0.031pp difference, which is
+  **inside** the campaign's own same-seed rerun floor of 0.040-0.170pp
+  (measured on four dense-control pairs, canonical tables section 11). The
+  arm is flat at 2-3 and below that at 1 and 10; the two ends are not
+  separated from each other and must not be ordered. **The peak is a property of this recipe on
   this dataset, not of recovery** — the dense control with nothing pruned
   declines too, and faster. **Corrected 2026-11-17**: this said the control
   "also peaks at 2, and by a larger margin". The control peaks at **1** (see

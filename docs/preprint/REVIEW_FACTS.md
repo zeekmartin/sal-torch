@@ -251,16 +251,19 @@ This is the SparseGPT/Wanda protocol, which is what makes the dense gate meaning
 
 ### A4.5 Compute units
 
-Two units appear in this project and they differ by exactly a factor of two, so every compute figure states which it is.
+**Three** quantities appear in this project, not two, and only the middle one is the campaign's size. Every compute figure states which it is.
 
-| unit | what it counts | the campaign total |
+| quantity | what it counts | the campaign total |
 |---|---|---|
-| GCD-h | sacct elapsed time, one GCD per job, which is what every job in this campaign requested | **1744.1** |
-| billed GPU-h | the allocation's unit: one GPU is one MI250X module of two GCDs | **872.1** |
+| elapsed h | wall-clock time of the jobs, whatever they held | 2022.2 |
+| **GCD-h** | allocated GCDs x elapsed, from sacct's `AllocTRES` | **2717.7** |
+| billed GPU-h | the allocation's unit: one GPU is one MI250X module of two GCDs, so GCD-h / 2 | **1358.9** |
 
-Both figures are this campaign's own, summed over the jobs whose logs are in its log directory and joined to `sacct` by job id. The allocation's own counter reads **higher** than the right-hand column, because the allocation is shared with work that is not this campaign; it is therefore not the number to quote for this campaign and it is not quoted. **The preprint's compute figure is in GCD-hours**; writing it as GPU-hours overstates the charge by two.
+The first two rows differ because `standard-g` is **exclusive**: wave 5's OPT-6.7B jobs were allocated -- and billed -- all 8 GCDs of a node for their whole wall time, using 4 of them for FSDP. A sum of elapsed hours therefore under-reports the campaign by 695.5 GCD-h. Earlier revisions of this file made exactly that substitution.
 
-### A4.5 What the archive will contain
+All three figures are this campaign's own, summed over the jobs whose logs are in its log directory and joined to `sacct` by job id. The allocation's own counter is the SHARED account's and reads higher, because the account also hosts work that is not this campaign; it is therefore not the number to quote here and it is not quoted. `results/CAMPAIGN_SHARE.json` records the split and reconciles it with the counter. **The preprint's compute figure is in GCD-hours**; writing it as GPU-hours overstates the charge by two.
+
+### A4.6 What the archive will contain
 
 Planned Zenodo deposit, alongside the preprint: every result JSON from both experiment repositories, the canonical tables with their generator and verifier, this file with its generator, the SLURM job index, the job scripts and logs, `REPRO_FACTS.json` (hashes and freezes), and the equivalence record against upstream SparseGPT and Wanda. Checkpoints are referenced by hash, not deposited.
 
