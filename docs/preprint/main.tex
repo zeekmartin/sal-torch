@@ -8,10 +8,12 @@
 \usepackage{siunitx}
 \usepackage{xcolor}
 \usepackage{cite}
+\usepackage{xurl}
 \usepackage[hidelinks]{hyperref}
 \usepackage{caption}
 \captionsetup{font=small,labelfont=bf}
 \sisetup{detect-all}
+\emergencystretch=3em
 \newcommand{\pp}{\,pp}
 \newcommand{\bysame}{D.~Martin~Venti}
 
@@ -19,13 +21,13 @@
 \author{David Martin Venti\\
 Cognitive Engineering, Switzerland\\
 ORCID: 0009-0000-6675-7821}
-\date{November 15, 2026}
+\date{November 19, 2026}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-Training-time head masking has been proposed as a way to make transformers resilient to structured pruning, and earlier small-scale experiments, including our own, reported large gains. We test this at ImageNet-1k and language-model scale on AMD MI250X GPUs, with every compression cost measured against a dense control fine-tuned for the same number of epochs, three seeds per configuration, and baselines validated against published values. Four observations follow. First, the control matters: fine-tuning alone moves ViT-B/16 accuracy by $+3.1$ points and OPT-1.3B WikiText-2 perplexity by $+0.64$, effects that a comparison with the pre-trained checkpoint would attribute to pruning. Second, once a short recovery fine-tune is possible, training-time masking buys nothing: all masked arms land within 0.51 points of the same pruning applied to pre-trained weights, and on BERT/GLUE training-time masking wins 8 of 8 cells when neither arm is fine-tuned after pruning, while magnitude pruning with two further epochs of recovery wins 8 of 8 when it is. Third, the cost of compression is paid for structure, not for parameters: after recovery, 50\% unstructured attention sparsity is indistinguishable from the dense control, 2:4 sparsity costs about 0.5 points and removing 50\% of the heads costs 3.9 points on ViT-B/16, with the same ordering on OPT-1.3B in perplexity and on seven zero-shot tasks. Fourth, among compressions that shrink the model, removing feed-forward neurons costs less quality per parameter removed than removing attention heads (3.1$\times$ on ViT-B/16 and 2.1$\times$ on OPT-1.3B, same random neuron selection); on ViT-B/16 heads remove more FLOPs and give more speed at equal parameters, but FFN pruning remains cheaper per FLOP and per unit of latency saved. Measured speedups depend on batch size, device and runtime. We also report negative results for a graph-based structural diagnostic.
+Training-time head masking has been proposed as a way to make transformers resilient to structured pruning, and earlier small-scale experiments, including our own, reported large gains. We test this at ImageNet-1k and language-model scale on AMD MI250X GPUs (ViT-B/16, BERT-base, OPT-1.3B and OPT-6.7B), with every compression cost measured against a dense control fine-tuned for the same budget on the same seed, three to ten seeds per configuration, and baselines validated against published values. Four observations follow. First, the control matters: fine-tuning alone moves ViT-B/16 accuracy by $+3.1$ points and raises OPT WikiText-2 perplexity by $0.64$ (1.3B) and $1.07$ (6.7B), effects that a comparison with the pre-trained checkpoint would attribute to pruning. Second, once a short recovery fine-tune is possible, training-time masking buys nothing: masked arms land within 0.51 points of the same pruning applied to pre-trained weights, and on BERT/GLUE at an equal budget magnitude pruning with recovery is ahead on 6 of 8 cells over ten seeds (five intervals exclude zero in its favour, one in DropHead's), while DropHead wins every cell when neither arm is recovered. Third, the cost of compression is paid for structure, not for parameters: after recovery, 50\% unstructured attention sparsity costs about 0.2 points on ViT-B/16, the size of the dense control's own seed spread, 2:4 sparsity about 0.5 points and removing 50\% of the heads 3.9 points, with the same ordering on both OPT models; every matched cost is lower at 6.7B than at 1.3B. Fourth, among compressions that shrink the model, removing feed-forward neurons costs less than removing attention heads at equal parameters on every model, and one-shot rankings do not predict post-recovery rankings: for FFN neuron selection the ordering reverses on 7 of 7 seeds. Measured speedups depend on batch size, device and runtime. We also report negative results for a graph-based structural diagnostic.
 \end{abstract}
 
 \section{Introduction}
@@ -35,15 +37,15 @@ Pruning removes parameters from a trained network to reduce its memory and infer
 \paragraph{Approach and relation to previous work.}
 This paper reports what happened when we tested that hypothesis at larger scale, under a stricter protocol, during a EuroHPC allocation on LUMI-G. The hypothesis did not survive in its original form. What replaced it is a set of measurements that we believe are more broadly useful, because they concern the cost of compression itself rather than a particular training method. Two evaluation practices turned out to dominate the conclusions: comparing every compressed model with a dense control that received the same fine-tuning, and allowing every arm the same short recovery fine-tune after pruning. Both are known to matter in principle \cite{blalock2020state,dodge2020finetuning,bouthillier2021variance}; here they reversed several of our own earlier results. Our contributions are the following.
 
-(1) A matched-control protocol for compression experiments, with gates against published values, and a quantification of how much an unmatched control distorts a pruning cost (Section~\ref{sec:protocol}).
+(1) A matched-control protocol for compression experiments, with gates against published values, a quantification of how much an unmatched control distorts a pruning cost, and the measurement harness's own noise floors (Section~\ref{sec:protocol}).
 
-(2) Evidence that training-time head masking does not help once a short recovery fine-tune is possible, on ViT-B/16, BERT-base and a 631M I-JEPA model (Section~\ref{sec:masking}).
+(2) Evidence that training-time head masking does not help once a short recovery fine-tune is possible, on ViT-B/16, on BERT-base at an equal budget over ten seeds, and on a 631M I-JEPA model (Section~\ref{sec:masking}).
 
-(3) A matched-parameter comparison of unstructured, 2:4 semi-structured and whole-head pruning on ViT-B/16 and OPT-1.3B, showing that the cost is driven by the structure removed (Section~\ref{sec:structure}).
+(3) A matched-parameter comparison of unstructured, 2:4 semi-structured and whole-head pruning on ViT-B/16, OPT-1.3B and OPT-6.7B, showing that the cost is driven by the structure removed and falls with model size (Section~\ref{sec:structure}).
 
-(4) A comparison of feed-forward neurons against attention heads, of selection criteria, and of recovery length (Section~\ref{sec:which}).
+(4) A comparison of feed-forward neurons against attention heads, of selection criteria and of recovery length, with evidence that one-shot rankings do not predict post-recovery rankings (Section~\ref{sec:which}).
 
-(5) Latency measurements on MI250X GPUs and EPYC CPUs with PyTorch and ONNX Runtime, stated with their conditions (Section~\ref{sec:latency}).
+(5) Latency measurements on MI250X GPUs and EPYC CPUs with PyTorch and ONNX Runtime, stated with their conditions and backed by kernel-level profiling (Section~\ref{sec:latency}).
 
 (6) Negative results for a graph-based structural diagnostic, the Fragility Index, as a router, a selector and a drift alarm (Section~\ref{sec:fi}).
 
@@ -63,32 +65,43 @@ This paper reports what happened when we tested that hypothesis at larger scale,
 \section{Experimental protocol}
 \label{sec:protocol}
 
-\paragraph{Models and data.} ViT-B/16 \cite{dosovitskiy2021vit} (\texttt{google/vit-base-patch16-224}) on ImageNet-1k \cite{russakovsky2015imagenet}, using an openly available 256-pixel resized copy (Hugging Face \texttt{evanarlian/imagenet\_1k\_resized\_256}, revision \texttt{8de107e}; the SHA-256 of the evaluated validation tensor is archived) with the model's own normalisation $(x/255-0.5)/0.5$; on this copy the pre-trained checkpoint reads 78.44\% top-1 on the 50{,}000 validation images, below the value reported under the original preprocessing. An I-JEPA ViT-H/14 encoder (631M parameters) \cite{assran2023ijepa} with continued self-supervised pre-training on the same data, scored by linear probe. BERT-base \cite{devlin2019bert} on four GLUE tasks \cite{wang2019glue} (SST-2, MRPC, QNLI, MNLI). OPT-1.3B \cite{zhang2022opt}, calibrated and recovered on the first shard of C4 \cite{raffel2020t5}, evaluated by perplexity on raw WikiText-2 \cite{merity2017wikitext} (non-overlapping 2048-token windows, float32) and on seven zero-shot tasks with lm-evaluation-harness 0.4.9 \cite{gao2024lmeval}: BoolQ \cite{clark2019boolq}, RTE \cite{wang2019glue}, HellaSwag \cite{zellers2019hellaswag}, WinoGrande \cite{sakaguchi2020winogrande}, ARC-Easy and ARC-Challenge \cite{clark2018arc} and OpenBookQA \cite{mihaylov2018openbookqa}. A one-shot probe also covers DeiT-small \cite{touvron2021deit}, DINOv2-large \cite{oquab2023dinov2} and Phi-2.
+\paragraph{Models and data.} ViT-B/16 \cite{dosovitskiy2021vit} (\url{google/vit-base-patch16-224}) on ImageNet-1k \cite{russakovsky2015imagenet}, using an openly available 256-pixel resized copy (Hugging Face \url{evanarlian/imagenet_1k_resized_256}, revision \texttt{8de107e}; the SHA-256 of the evaluated validation tensor is archived) with the model's own normalisation $(x/255-0.5)/0.5$; on this copy the pre-trained checkpoint reads 78.44\% top-1 on the 50{,}000 validation images, below the value reported under the original preprocessing. An I-JEPA ViT-H/14 encoder (631M parameters) \cite{assran2023ijepa} with continued self-supervised pre-training on the same data, scored by linear probe. BERT-base \cite{devlin2019bert} on four GLUE tasks \cite{wang2019glue} (SST-2, MRPC, QNLI, MNLI). OPT-1.3B \cite{zhang2022opt}, calibrated and recovered on the first shard of C4 \cite{raffel2020t5}, evaluated by perplexity on raw WikiText-2 \cite{merity2017wikitext} (non-overlapping 2048-token windows, float32) and on seven zero-shot tasks with lm-evaluation-harness 0.4.9 \cite{gao2024lmeval}: BoolQ \cite{clark2019boolq}, RTE \cite{wang2019glue}, HellaSwag \cite{zellers2019hellaswag}, WinoGrande \cite{sakaguchi2020winogrande}, ARC-Easy and ARC-Challenge \cite{clark2018arc} and OpenBookQA \cite{mihaylov2018openbookqa}. OPT-6.7B is calibrated, recovered and evaluated by perplexity in the same way. A one-shot probe also covers DeiT-small \cite{touvron2021deit}, DINOv2-large \cite{oquab2023dinov2} and Phi-2.
 
-\paragraph{Compute.} All runs used one Graphics Compute Die of an AMD Instinct MI250X on LUMI-G, PyTorch 2.5.1 on ROCm 6.2 \cite{paszke2019pytorch} and Hugging Face transformers \cite{wolf2020transformers}. Training and recovery run under bfloat16 autocast and ViT scoring under float16 autocast. INT4 is a simulated symmetric per-channel weight round trip, since no native 4-bit library was available on ROCm. The campaign used 1{,}174.9 GPU-hours over 444 jobs.
+\paragraph{Compute.} Jobs ran on LUMI-G with PyTorch 2.5.1 on ROCm 6.2 \cite{paszke2019pytorch} and Hugging Face transformers \cite{wolf2020transformers}. All experiments except the OPT-6.7B recoveries used one Graphics Compute Die (GCD) of an AMD Instinct MI250X; the OPT-6.7B recoveries ran sharded over four GCDs with FSDP (\texttt{SHARD\_\allowbreak GRAD\_\allowbreak OP}) and activation checkpointing, on nodes allocated exclusively with eight GCDs. Training and recovery run under bfloat16 autocast and ViT scoring under float16 autocast. INT4 is a simulated symmetric per-channel weight round trip, since no native 4-bit library was available on ROCm. The campaign used 2{,}717.7 GCD-hours over 789 jobs (1{,}358.9 GPU-hours as billed, one GPU being one MI250X module of two GCDs): 71.5\% produced the reported results, 0.8\% went to gates and validation, and 27.7\% to jobs that failed, were cancelled, or were withdrawn or superseded.
 
 \paragraph{Pruning and recovery.} Head pruning physically removes heads; FFN pruning removes intermediate neurons. Unstructured and 2:4 sparsity use our implementations of SparseGPT and Wanda, checked layer by layer against the reference implementations (SparseGPT commit \texttt{147d2159}, Wanda commit \texttt{8e8fc87b}; identical zero patterns for both pruners at 50\% and 2:4; weights within $10^{-6}$ for Wanda and $10^{-5}$ for SparseGPT; 13 of 13 tests, CPU, one calibration set). This establishes that the pruning arithmetic matches the reference code; end-to-end agreement is checked separately by the perplexity gates below. During recovery, sparse masks are enforced with a gradient hook and a final re-application; measured sparsity drift was exactly zero on every run. Within each model family, recovery uses the same optimizer, schedule and data order for every arm and for the dense control. ViT-B/16: AdamW, learning rate $5\times10^{-5}$ for the backbone and $10^{-3}$ for the classification head, weight decay 0.05, linear warm-up over 5\% of the steps then cosine decay, batch 64 for training and 128 for evaluation. OPT-1.3B: AdamW without weight decay, one-cycle schedule with maximum learning rate $10^{-5}$ and 10\% warm-up, batches of $4\times2048$ tokens for 32M tokens. BERT-base: learning rate $2\times10^{-5}$, batch 32, maximum length 128, 3 epochs of training and 2 of recovery. I-JEPA: frozen target encoder, learning rate $5\times10^{-6}$, 10\% warm-up then cosine decay.
 
-\paragraph{Matched controls.} Every cost is \emph{arm minus the dense control fine-tuned for the same number of epochs (or tokens) on the same data}, averaged over three seeds. A difference against the pre-trained checkpoint mixes the effect of fine-tuning with the effect of pruning. Table~\ref{tab:controls} shows how large that mixture is: fine-tuning alone adds $3.11$ points on ViT-B/16 and \emph{removes} quality on OPT-1.3B, where 32M tokens of C4 raise WikiText-2 perplexity by $0.64$. Against the pre-trained checkpoint, the recovered SparseGPT 50\% OPT model would appear to cost $1.63$ perplexity; against its matched control it costs $0.99$, so 39\% of the apparent cost would be the corpus. Where no control exists at a given epoch count, we report the arm and refuse the subtraction.
+\paragraph{Matched controls.} For a model, a seed and a recovery budget $b$ (epochs or tokens), the cost of a compression is
+\begin{equation*}
+\Delta Q = Q(\text{compressed, recovered for } b) - Q(\text{dense, fine-tuned for } b),
+\end{equation*}
+where $Q$ is accuracy or perplexity and both terms share the pre-trained checkpoint, the data and its order, the optimizer and schedule, the budget $b$, the seed and the evaluation; they differ only in the compression. Costs are averaged over three seeds for the ViT and OPT cost cells, seven for the FFN-selection cells and ten for the BERT equal-budget cells. A difference against the pre-trained checkpoint mixes the effect of fine-tuning with the effect of pruning, and Table~\ref{tab:controls} shows how large that mixture is. Fine-tuning alone adds $3.11$ points on ViT-B/16 at two epochs ($3.29$ at one epoch, where the control peaks) and \emph{removes} quality on OPT, where 32M tokens of C4 raise WikiText-2 perplexity by $0.64$ at 1.3B and $1.07$ at 6.7B. Against the pre-trained checkpoint, the recovered SparseGPT 50\% OPT-1.3B model would appear to cost $1.63$ perplexity; against its matched control it costs $0.99$, so 39\% of the apparent cost would be the corpus. Where no control exists at a given budget, we report the arm and refuse the subtraction.
 
 \begin{table}[t]
 \centering
-\caption{Dense controls. Fine-tuning moves the dense model by amounts comparable to the pruning costs studied here, in opposite directions on the two models.}
+\caption{Dense controls. Fine-tuning moves the dense model by amounts comparable to the pruning costs studied here, in opposite directions on vision and language. Spread is max minus min over seeds.}
 \label{tab:controls}
 \begin{tabular}{llrrr}
 \toprule
 Model & Control & Value & Seeds & Spread \\
 \midrule
 ViT-B/16, top-1 & pre-trained & 78.44\% & -- & -- \\
+ & 1 epoch & 81.727\% & 3 & 0.04 \\
  & 2 epochs & 81.554\% & 3 & 0.21 \\
+ & 3 epochs & 81.158\% & 3 & 0.13 \\
  & 5 epochs & 80.44\% & 3 & 0.10 \\
+ & 10 epochs & 79.971\% & 3 & 0.21 \\
 OPT-1.3B, WikiText-2 ppl & pre-trained & 14.624 & -- & -- \\
  & 32M tokens of C4 & 15.264 & 3 & 0.24 \\
+OPT-6.7B, WikiText-2 ppl & pre-trained & 10.860 & -- & -- \\
+ & 32M tokens of C4 & 11.935 & 3 & 0.27 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\paragraph{Gates and reporting.} Each experiment first ran a short gate job that had to reproduce a known value: the dense ImageNet-1k accuracy, or for OPT-1.3B the published dense perplexity (14.62; we measure 14.624) and SparseGPT 50\% (17.46 published; 17.72 at our gate, within a band fixed before the run) \cite{frantar2023sparsegpt}. Our Wanda 50\% one-shot perplexity, 18.36 over three calibration seeds, is within 0.06 of reported reproductions. A seed spread (max minus min) is reported for every three-seed figure; we do not report intervals over fewer than ten draws. One self-supervised run was withdrawn because its training target was computed from the live weights and its control arm collapsed; it is excluded from all results.
+\paragraph{Gates and reporting.} Each experiment first ran a short gate job that had to reproduce a known value: the dense ImageNet-1k accuracy, or the published OPT perplexities \cite{frantar2023sparsegpt}. At 1.3B the dense model reads 14.624 (published 14.62) and SparseGPT 50\% 17.72 (published 17.46, within a band fixed before the run); our Wanda 50\% one-shot perplexity, 18.36 over three calibration seeds, is within 0.06 of reported reproductions. At 6.7B the dense model reads 10.860 (published 10.86), SparseGPT 50\% 11.68 (11.55), SparseGPT 2:4 14.01 (14.20) and magnitude 50\% 969.0 (969), all within bands fixed before the run. Our calibration statistics are accumulated from the dense model rather than sequentially through the already-pruned layers as in the reference implementations; the two calibration-sensitive 6.7B cells land one above and one below the published values, within 0.2 perplexity, so we see no systematic effect of that choice but cannot exclude one. Before the 6.7B campaign, a gate on OPT-1.3B compared sharded and single-GCD recovery. Its first version compared absolute perplexity and failed: the dense control landed 0.27 below the single-GCD value, outside a band of 0.24, and one arm produced no result. Its second version compared matched costs and passed on 4 of 4 cells, the widest at 41\% of that arm's seed spread; since every reported figure is a cost, a shift common to an arm and its control cancels.
+
+The harness has its own noise floors, which bound every claim below. Repeating the same recipe at the same seed moves the ViT dense control by 0.04 to 0.17 points (four pairs), and the same checkpoint scored on seven image orderings varies by 3 images out of 50{,}000 (0.006 points) under float16 autocast; we therefore compare within a seed. A seed spread (max minus min) is reported for figures with fewer than ten seeds, and intervals only for the ten-seed cells. Six earlier measurements were withdrawn, each with the measurement that forced it, and are listed in the archive; among them one self-supervised run whose training target was computed from the live weights and whose control arm collapsed. None enters the results.
 
 \section{Training-time masking versus recovery}
 \label{sec:masking}
@@ -113,24 +126,24 @@ SAL's own set, 50\% & 20.33\% & 75.03\% & 76.51\% \\
 
 The decisive comparison allows a recovery fine-tune after pruning. When each masked model and the pre-trained model are pruned at the same head set and recovered for 5 epochs, every masked arm lands within $-0.47$ to $+0.51$ points of the pre-trained arm (three arms, two ratios, three seeds). Recovery from pre-trained weights takes the 50\% model from 9.56\% to 77.64\% in two epochs. In other words, recovery restores about 68 points, and the training-time method changes the result by at most 0.51 points.
 
-\paragraph{BERT-base.} On GLUE the two arms do not receive the same budget, and the result has two halves. Without any fine-tuning after pruning, DropHead wins every cell: at 50\% of heads it retains 90.83\%, 71.49\%, 85.12\% and 79.58\% on SST-2, MRPC, QNLI and MNLI, against 88.53\%, 68.38\%, 69.94\% and 69.42\% for magnitude pruning of the dense model. With two epochs of recovery granted to the magnitude arm only (five passes over the data against DropHead's three), magnitude pruning wins every cell, by 0.42 to 7.03 points (Table~\ref{tab:bert}); DropHead's dense accuracy is also below the task's control ($-0.99$ to $-12.58$ points). The comparison at equal budget, DropHead followed by the same two epochs of recovery, is reported in the appendix. DropHead's masking hooks also reduced training throughput, by 24 to 30\% with 33\% of heads masked and by 33 to 39\% with 50\%.
+\paragraph{BERT-base.} On GLUE, an earlier three-seed comparison granted two epochs of recovery to the magnitude arm only, five passes over the data against DropHead's three, and found magnitude ahead on every cell by 0.42 to 7.03 points. Most of that margin was the extra budget. Table~\ref{tab:bert} gives both arms the same two epochs of recovery, over ten seeds: magnitude is ahead on 6 of 8 cells, 6 of the 8 t intervals exclude zero (five in magnitude's favour and one, SST-2 at 50\%, in DropHead's), and the mean over all 80 cell-seeds is $-0.79$ points for DropHead. Without recovery the ordering reverses on every row (mean $+5.34$ points for DropHead): its resilience is real and replicates on text, but it does not decide the comparison once both arms are recovered. DropHead's dense accuracy is also below each task's control ($-0.99$ to $-12.58$ points), and its masking hooks increase training time by 34 to 42\% with 33\% of heads masked and by 51 to 62\% with 50\%, a throughput loss of 25 to 30\% and 34 to 38\%.
 
 \begin{table}[t]
 \centering
-\caption{BERT-base on GLUE (accuracy, 3 seeds): DropHead against magnitude pruning plus 2 epochs of recovery.}
+\caption{BERT-base on GLUE at an equal budget: DropHead and magnitude pruning, each followed by 2 epochs of recovery; accuracy, ten seeds. Difference is DropHead minus magnitude with a t interval over the ten draws; positive favours DropHead. Last column: the same difference without recovery.}
 \label{tab:bert}
-\begin{tabular}{llrrr}
+\begin{tabular}{llrrrr}
 \toprule
-Task & Heads removed & DropHead & Magnitude + 2 ep & Difference \\
+Task & Heads & DropHead + 2 ep & Magnitude + 2 ep & Difference & One-shot \\
 \midrule
-SST-2 & 33\% & 91.86\% & 92.28\% & $-0.42$ \\
- & 50\% & 90.83\% & 91.44\% & $-0.61$ \\
-MRPC & 33\% & 75.82\% & 82.84\% & $-7.03$ \\
- & 50\% & 71.49\% & 77.70\% & $-6.21$ \\
-QNLI & 33\% & 89.23\% & 90.80\% & $-1.57$ \\
- & 50\% & 85.12\% & 89.65\% & $-4.53$ \\
-MNLI & 33\% & 82.31\% & 83.92\% & $-1.61$ \\
- & 50\% & 79.58\% & 83.35\% & $-3.77$ \\
+SST-2 & 33\% & 92.29\% & 92.11\% & $+0.18 \pm 0.60$ & $+0.13$ \\
+ & 50\% & 91.85\% & 91.50\% & $+0.34 \pm 0.28$ & $+2.19$ \\
+MRPC & 33\% & 80.29\% & 82.48\% & $-2.18 \pm 1.60$ & $+0.37$ \\
+ & 50\% & 75.17\% & 78.11\% & $-2.94 \pm 1.17$ & $+1.72$ \\
+QNLI & 33\% & 90.20\% & 90.72\% & $-0.51 \pm 0.23$ & $+7.02$ \\
+ & 50\% & 88.85\% & 89.42\% & $-0.58 \pm 0.33$ & $+15.84$ \\
+MNLI & 33\% & 83.99\% & 84.09\% & $-0.10 \pm 0.14$ & $+3.15$ \\
+ & 50\% & 82.94\% & 83.48\% & $-0.54 \pm 0.27$ & $+12.33$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -140,7 +153,7 @@ MNLI & 33\% & 82.31\% & 83.92\% & $-1.61$ \\
 \section{The price of structure}
 \label{sec:structure}
 
-Table~\ref{tab:structure} removes the same attention parameters of ViT-B/16 in three ways. Without recovery, removing 50\% of attention weights one by one costs $1.23$ points (Wanda, 77.21\% against 78.44\% for the pre-trained model), whereas removing 50\% of whole heads costs $68.9$ points. After two epochs of recovery, every unstructured cell (both pruners, attention-only or whole-model scope) lands between 81.34\% and 81.60\%, inside the control's own seed spread; 2:4 sparsity costs about half a point; whole heads cost $3.91$ points.
+Table~\ref{tab:structure} removes the same attention parameters of ViT-B/16 in three ways. Without recovery, removing 50\% of attention weights one by one costs $1.23$ points (Wanda, 77.21\% against 78.44\% for the pre-trained model), whereas removing 50\% of whole heads costs $68.9$ points. After two epochs of recovery, every unstructured cell (both pruners, attention-only or whole-model scope) lands between 81.34\% and 81.60\%, a cost of at most 0.22 points, about the size of the control's own seed spread (0.21); 2:4 sparsity costs about half a point; whole heads cost $3.91$ points (an independent run of the same cell reads 77.57\%, a $3.98$-point cost).
 
 \begin{table}[t]
 \centering
@@ -182,19 +195,63 @@ FFN neurons 50\% & 30.6\% & 523.28 & 25.69 & $+10.42$ (1.37) & 0.3860 \\
 
 Two differences that perplexity resolves are not resolved by the zero-shot suite. SparseGPT leads Wanda by 2.59 perplexity at 2:4 in one shot with disjoint seed ranges, but the gap falls inside the seed spread after recovery, and the zero-shot means of the two do not differ beyond their spread. Whole-head pruning costs 2.05 times the 2:4 cost in perplexity but only 1.04 times in mean-5. At 1.3B parameters several tasks sit close to chance: we measured, for each task, the control's margin above the majority-class baseline divided by the seed spread, and obtained 236 for HellaSwag, 27 for WinoGrande, 16 for ARC-Easy, 6.1 for OpenBookQA, 1.8 for ARC-Challenge, 0.9 for RTE, while BoolQ scores below its majority rate. We therefore report all seven tasks with the majority baseline in the repository and use mean-5 (excluding BoolQ and RTE) only as a secondary reading; whether perplexity overstates the cost of structured pruning, or the suite lacks resolution at this size, is not established.
 
+\paragraph{OPT-6.7B.} Table~\ref{tab:opt67} repeats six arms at 6.7B, each against the dense control of the same seed at the same 32M-token budget. The ordering is the same as at 1.3B, and the matched cost is lower at 6.7B on 6 of 6 arms, with disjoint seed ranges; it remains lower relative to each model's own control (for SparseGPT unstructured, 6.5\% of the control perplexity at 1.3B against 2.2\% at 6.7B). Two sizes, with removed fractions that differ slightly (45.9\% against 48.4\% for the masked arms) and three seeds, do not make a scaling law.
+
+\begin{table}[t]
+\centering
+\caption{OPT-6.7B: WikiText-2 perplexity, recovery on 32M tokens of C4 sharded over four GCDs, cost against the dense control of the same seed (mean 11.935); three seeds, range over seeds in parentheses. Last column: the same arm's cost at 1.3B. $^*$masked, not removed.}
+\label{tab:opt67}
+\small\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrr}
+\toprule
+Arm & Params & One-shot & Recovered & Cost (range) & Cost, 1.3B \\
+\midrule
+SparseGPT unstructured 50\% & 48.4\%$^*$ & 11.79 & 12.19 & $+0.26$ (0.11 to 0.52) & $+0.99$ \\
+Wanda unstructured 50\% & 48.4\%$^*$ & 12.06 & 12.25 & $+0.32$ (0.16 to 0.51) & $+0.98$ \\
+SparseGPT 2:4 & 48.4\%$^*$ & 14.23 & 13.17 & $+1.23$ (1.05 to 1.48) & $+3.22$ \\
+FFN neurons 25\% & 16.1\% & 16.93 & 13.45 & $+1.52$ (0.76 to 2.26) & $+3.18$ \\
+Wanda 2:4 & 48.4\%$^*$ & 16.03 & 13.55 & $+1.61$ (1.24 to 1.87) & $+3.36$ \\
+heads 50\% & 16.1\% & 45.33 & 16.21 & $+4.27$ (4.01 to 4.49) & $+6.75$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+At this scale the recovery stage itself can hurt. For both unstructured arms the recovered model reads a worse perplexity than the one-shot model on 6 of 6 cells (and on 0 of the 12 cells of the other arms). The cause is the control's, not the arm's: 32M tokens of C4 move the unpruned model $1.07$ perplexity away from WikiText-2, so an arm whose one-shot damage is of that order asks the recovery to repair about as much as it breaks. These arms remain the cheapest against the matched control; what the result says is that recovery data should come from the target domain. The recoveries run at the edge of the device: peak tensor memory inside the recovery is 40 to 60 GiB of a 64 GiB GCD, and the allocator's high-water mark 62.0 to 62.5 GiB on every cell. The 50\% FFN arm and the zero-shot suite were not run at 6.7B.
+
 \section{Which structure, which selection}
 \label{sec:which}
 
-\paragraph{FFN neurons against heads.} Removing 25\% of FFN neurons and 50\% of heads removes almost the same number of parameters on both models (16.4\% on ViT-B/16; 201.4M parameters on OPT-1.3B). With the same random neuron selection, the FFN arm costs $1.25$ points against $3.91$ on ViT-B/16 (3.1$\times$ cheaper) and $3.18$ against $6.75$ perplexity on OPT-1.3B (2.1$\times$). With magnitude neuron selection the ViT factor is 4.7$\times$ ($-0.82$ points). These factors are per parameter removed. On ViT-B/16 the two arms differ in compute: at equal parameters, removing half of the heads removes 17.9\% of the FLOPs and gives 1.20$\times$ at batch 32, against 15.9\% and 1.15$\times$ for a quarter of the FFN neurons. Normalised by FLOPs removed or by latency saved, FFN pruning is still cheaper, by about 2.8$\times$ and 2.4$\times$ respectively. The direction is consistent; the factor is not established, since the OPT FFN arm has the largest seed spread of its budget class (three seeds span roughly 1.5$\times$ to 2.9$\times$). The cost of FFN pruning grows faster than linearly: on OPT-1.3B, 1.58 perplexity per 100M parameters at 25\% against 2.59 at 50\%.
+\paragraph{FFN neurons against heads.} Removing 25\% of FFN neurons and 50\% of heads removes almost the same number of parameters (16.4\% on ViT-B/16; 201.4M parameters on OPT-1.3B; 1{,}073.9M on OPT-6.7B). With random neuron selection the FFN arm costs less on every model: $1.25$ against $3.91$ points on ViT-B/16 at three seeds (3.1$\times$), $3.18$ against $6.75$ perplexity on OPT-1.3B (2.1$\times$) and $1.52$ against $4.27$ on OPT-6.7B (2.8$\times$). These factors are per parameter removed. On ViT-B/16 the two arms differ in compute: at equal parameters, removing half of the heads removes 17.9\% of the FLOPs and gives 1.20$\times$ at batch 32, against 15.9\% and 1.15$\times$ for a quarter of the FFN neurons; normalised by FLOPs removed or by latency saved, FFN pruning is still cheaper, by 2.8$\times$ and 2.4$\times$. Over seven seeds, each against its own seed's control, the ViT factor is 2.8$\times$ with random and 4.5$\times$ with magnitude selection. The direction holds on every model and denominator; the factor depends on the model, the selection, the denominator and the seed count, and the OPT-1.3B FFN arm has the widest seed spread of its budget class. The cost of FFN pruning grows faster than linearly: on OPT-1.3B, 1.58 perplexity per 100M parameters at 25\% against 2.59 at 50\%.
 
 \paragraph{Selection criterion.} After recovery, which heads are removed matters little. Random head selection matches the default selection at 25\% and 33\% of heads ($+0.10$ and $+0.23$ points, inside the seed spread) and is better at 50\% ($78.82\%$ against $77.64\%$, $+1.17$ points, with non-overlapping seed ranges). On OPT-1.3B, the one-shot perplexity of randomly selected heads varies widely between seeds (spread 23.8), but after recovery the spread falls to 0.83; for 50\% of FFN neurons it falls from 185 to 1.37.
 
-\paragraph{Recovery length.} On ViT-B/16 at 50\% of heads, one epoch of recovery reads 76.58\%, two 77.57\%, three 77.58\% and five 77.26\%. Five epochs is below two on all three seeds and one epoch is below both by about a point, but two and three cannot be separated. The dense control itself is better after two epochs (81.55\%) than after five (80.44\%), so moving from five to two epochs gives a better pruned model and, at the same time, a larger matched pruning cost.
+For FFN neurons the answer is the opposite, and it is the clearest case of a one-shot ranking that does not survive recovery. Over seven seeds, magnitude selection of 25\% of the neurons is ahead of random selection after recovery on 7 of 7 seeds ($-0.87$ against $-1.40$ points, disjoint ranges), while before recovery random selection is ahead on 7 of 7 seeds (64.85\% against 62.94\%). The one-shot lead (1.91 points) is larger than the post-recovery one (0.53), so ranking on the one-shot column picks the wrong selection by the wider margin. Pruners behave the same way: SparseGPT leads Wanda by 2.44 points one-shot at 2:4 on ViT-B/16 and by 0.008 after recovery (seven seeds). At the image level, the two FFN selections disagree on 8.12 to 8.32\% of the 50{,}000 validation images while predicting the same label on 87.3 to 87.7\% of them, and recovery repairs 52.7 to 56.8\% of the one-shot errors; a 0.5-point difference in accuracy is not a small difference in behaviour.
+
+\paragraph{Recovery length.} Table~\ref{tab:ladder} gives ViT-B/16 at 50\% of heads after 1 to 10 epochs of recovery, each against the dense control trained for the same number of epochs on the same seed. The dense control peaks at one epoch, and that peak is resolved: every one-epoch seed is above every seed at every other length. The pruned arm is flat at two and three epochs, which cannot be separated, and lower at one and ten. The matched cost shrinks from $-5.15$ points at one epoch to $-3.17$ at five, but mostly because the yardstick falls: between one and ten epochs the control gives up 1.76 points and the arm 1.03. Two epochs is our default for cost rather than accuracy: it takes 38\% less training time than three, with no separable difference in the result.
+
+\begin{table}[t]
+\centering
+\caption{ViT-B/16, 50\% of heads removed, recovered for 1 to 10 epochs; each cost against the dense control at the same length and seed, three seeds, range in parentheses.}
+\label{tab:ladder}
+\begin{tabular}{rrrr}
+\toprule
+Epochs & Dense control & Pruned arm & Matched cost (range) \\
+\midrule
+1 & 81.727\% & 76.579\% & $-5.15$ ($-5.20$ to $-5.11$) \\
+2 & 81.554\% & 77.571\% & $-3.98$ ($-4.05$ to $-3.86$) \\
+3 & 81.158\% & 77.579\% & $-3.58$ ($-3.63$ to $-3.53$) \\
+5 & 80.429\% & 77.264\% & $-3.17$ ($-3.27$ to $-3.08$) \\
+10 & 79.971\% & 76.548\% & $-3.42$ ($-3.55$ to $-3.35$) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+On OPT-1.3B the recovery budget behaves similarly. The dense control's own degradation grows with every token: $+0.26$, $+0.38$, $+0.64$ and $+0.85$ perplexity at 8M, 16M, 32M and 64M tokens. The matched cost of removing half of the heads falls from $8.69$ to $7.58$, $6.75$ and $6.19$; the two ends are separated but neighbouring budgets are not, and 64M is a floor rather than an optimum. For SparseGPT unstructured the cost moves from $1.35$ to $0.97$, and nothing on that curve is resolved at three seeds.
 
 \section{Latency on AMD hardware}
 \label{sec:latency}
 
-Table~\ref{tab:latency} reports speedups of physically sliced ViT-B/16 models; unstructured and 2:4 models give no speedup without sparse kernels, and MI250X has no hardware path for 2:4 sparsity. On GPU, every configuration stays near $1.00\times$ at batch 1, where the model is kernel-launch bound; at batch 32 speedups range from $1.09\times$ (25\% of heads) to $1.74\times$ (50\% of heads and 50\% of FFN neurons, which costs 9.72 points after recovery). On CPU the picture differs: speedups appear already at batch 1, and the most compressed model reaches $2.04\times$ at batch 32 with PyTorch and oneMKL, against $1.95\times$ with ONNX Runtime, which is faster in absolute terms but accelerates the dense model more than the pruned one. CPU figures are medians of three independent passes; a single-pass measurement had produced an outlier ($0.71\times$) that did not reproduce.
+Table~\ref{tab:latency} reports speedups of physically sliced ViT-B/16 models; unstructured and 2:4 models give no speedup without sparse kernels, and MI250X has no hardware path for 2:4 sparsity. On GPU, every configuration stays near $1.00\times$ at batch 1. Kernel-level profiling (rocprofv3, two-point subtraction) shows why: at batch 1, 65.3\% of the wall-clock time of a dense forward is spent outside any kernel, against 15.7\% at batch 32, and removing parameters cannot shorten time that is not spent in kernels; at batch 32 speedups range from $1.09\times$ (25\% of heads) to $1.74\times$ (50\% of heads and 50\% of FFN neurons, which costs 9.72 points after recovery). On CPU the picture differs: speedups appear already at batch 1, and the most compressed model reaches $2.04\times$ at batch 32 with PyTorch and oneMKL, against $1.95\times$ with ONNX Runtime, which is faster in absolute terms but accelerates the dense model more than the pruned one. CPU figures are medians of three independent passes. An earlier single-pass measurement of the same arms survives in 19 of 21 cells; the two that do not are the 25\% FFN arm at batch 1 ($0.71\times$, now $1.19\times$) and at batch 8.
 
 \begin{table}[t]
 \centering
@@ -220,29 +277,29 @@ Our earlier work used a Fragility Index (FI), the fraction of edges of an attent
 
 \paragraph{FI does not order pruning sensitivity.} Across four architectures, measured outside the ImageNet-1k protocol of the rest of this paper (DeiT-small and DINOv2-large on ImageNet-100, BERT-base and Phi-2 on SST-2), ranking by FI and ranking by the one-shot accuracy drop at 50\% of heads disagree on 4 of 6 pairs (DINOv2-large: FI 0.0062, drop $-94.0$ points; DeiT-small: 0.156, $-76.3$; BERT-base: 0.094, $-5.2$; Phi-2: 0.0008, $-4.4$, single seed). In earlier work, topology-guided head selection did not outperform random selection either \cite{martinventi2026salpreprint}.
 
-\paragraph{FI depends on the probe.} On an unchanged ViT-B/16 checkpoint, FI varies by 19 edges out of 1{,}030 over fifteen independently drawn probe sets of 500 images (five runs of three draws), and by a factor of about two between a 64-image and a 500-image probe. The five three-draw estimates of this spread read 9, 11, 15, 16 and 16 edges: each underestimates the pooled value, and adding the fifth run changed the number of draws but not the pooled spread. Compressions that keep the graph size (unstructured, 2:4, INT4) did not move FI beyond this floor consistently across probes, and a certificate whose FI tolerance was 2 edges rejected an unchanged model whenever the probe was redrawn.
+\paragraph{FI depends on the probe.} On an unchanged ViT-B/16 checkpoint, FI varies by 19 edges out of 1{,}030 over fifteen independently drawn probe sets of 500 images (five runs of three draws), and by a factor of 1.96 between a 64-image and a 500-image probe. The five three-draw estimates of this spread read 9, 11, 15, 16 and 16 edges: each underestimates the pooled value, and adding the fifth run changed the number of draws but not the pooled spread. Compressions that keep the graph size (unstructured, 2:4, INT4) did not move FI beyond this floor consistently across probes, and a certificate whose FI tolerance was 2 edges rejected an unchanged model whenever the probe was redrawn.
 
 \paragraph{FI depends on graph size.} FI is a fraction of edges, so one edge is worth $1/256$ on a 72-head graph and $1/52{,}378$ on Phi-2's. FI values of graphs of different sizes, including a model before and after head pruning, are not directly comparable.
 
-What remains usable is a descriptive layer classification: at the shipped threshold of 0.25 the set of layers labelled critical on ViT-B/16 is stable across six probe draws except for one layer of twelve. We present it as a description, not as pruning advice.
+What remains usable is a descriptive layer classification: at the shipped threshold of 0.25 the set of layers labelled critical on ViT-B/16 is stable across six probe draws except for one layer of twelve, although even the number of such layers moves with the probe (5, 5, 5 in one run of three draws; 4, 5, 4 in another). We present it as a description, not as pruning advice.
 
 \section{Discussion}
 \label{sec:discussion}
 
-\paragraph{Interpretation.} The common thread is that recovery, not preparation, does the work. A short fine-tune after pruning restores tens of points that no training-time method recovers in advance, erases most differences between pruners and between selection criteria, and leaves a residual cost set by the kind of structure removed. Structure is also what buys speed, so the practical choice is between accuracy and latency on the target hardware rather than between methods. For practitioners who can fine-tune after pruning, our measurements suggest: prune FFN neurons before heads, prefer moderate ratios, recover for about two epochs, report costs against a matched control, and quote latency only with batch size, device and runtime.
+\paragraph{Interpretation.} The common thread is that recovery, not preparation, does the work. A short fine-tune after pruning restores tens of points that no training-time method recovers in advance, erases most differences between pruners and between selection criteria, and leaves a residual cost set by the kind of structure removed. Structure is also what buys speed, so the practical choice is between accuracy and latency on the target hardware rather than between methods. Larger models absorb the same compression at a lower cost, and the recovery corpus matters as much as its length: recovering on text unlike the target domain can leave a model worse than not recovering at all. For practitioners who can fine-tune after pruning, our measurements suggest: prune FFN neurons before heads, select heads at random and FFN neurons by magnitude, prefer moderate ratios, recover for about two epochs on data from the target domain, report costs against a matched control, and quote latency only with batch size, device and runtime.
 
 \paragraph{Relation to earlier results.} Earlier results for SAL at smaller scale are reported in \cite{martinventi2026salpreprint}. Under the protocol of Section~\ref{sec:protocol}, SAL's adaptation is real but specific to the head set it was trained to lose, unstable across seeds (dense accuracy spread of 9.9 points) and erased by recovery. Training-time masking remains useful in one setting: deployments that cannot fine-tune after pruning.
 
-\paragraph{Limitations.} Three seeds per configuration show spreads but do not support intervals; some factors (FFN against heads) are established in direction only. The largest language model is 1.3B parameters, and the zero-shot suite has limited resolution at that size. ImageNet-1k results use a resized copy whose dense accuracy differs from the original preprocessing. INT4 is simulated. Speedups for unstructured and 2:4 sparsity could not be measured on MI250X, and CPU results depend strongly on thread count and BLAS backend. Recovery uses one recipe per model family; other optimizers or schedules could change the absolute costs. The OPT recovery corpus (C4) differs from the evaluation corpus (WikiText-2), which is why the matched control degrades.
+\paragraph{Limitations.} Most cells have three seeds, which show spreads but do not support intervals; only the BERT equal-budget cells have ten and the FFN-selection cells seven, and some factors (FFN against heads) are established in direction only. The largest language model is 6.7B parameters, with three seeds per cell, without the 50\% FFN arm and without a zero-shot evaluation; the zero-shot suite has limited resolution at 1.3B. Two model sizes do not make a scaling law. ImageNet-1k results use a resized copy whose dense accuracy differs from the original preprocessing. INT4 is simulated. Speedups for unstructured and 2:4 sparsity could not be measured on MI250X, and CPU results depend strongly on thread count and BLAS backend. Recovery uses one recipe per model family; other optimizers or schedules could change the absolute costs. The OPT recovery corpus (C4) differs from the evaluation corpus (WikiText-2), which is why the matched control degrades and, at 6.7B, why recovery worsens the unstructured arms. Our calibration statistics come from the dense model rather than from a sequential pass.
 
-\paragraph{Future work.} Validation at 7B scale, hardware measurements of 2:4 sparsity on GPUs that support it, and a recovery stage in our open-source tooling so that the shipped pipeline reproduces the figures reported here.
+\paragraph{Future work.} Hardware measurements of 2:4 sparsity on GPUs that support it, a zero-shot evaluation at 6.7B, where the suite should resolve differences that it cannot at 1.3B, recovery on domain-matched data, larger models, and a recovery stage in our open-source tooling so that the shipped pipeline reproduces the figures reported here.
 
 \section*{Data availability}
-All per-cell result files, the canonical tables from which every figure in this paper is generated, and the scripts that generate and verify them are archived with this preprint. Every figure carries its seeds, its spread, its matched control, the hardware, the batch size, the source file and the job that produced it, and a verifier regenerates the tables from the result files and fails on any difference.
+All per-cell result files, the canonical tables from which every figure in this paper is generated, and the scripts that generate and verify them are archived with this preprint on Zenodo (DOI to be assigned at deposit). Every figure carries its seeds, its spread, its matched control, the hardware, the batch size, the source file and the job that produced it, and a verifier regenerates the tables from the result files and fails on any difference.
 
 \emph{Open-source code and ViT write-ups.} The package \texttt{sal-torch} and the experiment write-ups of Sections~\ref{sec:protocol} to \ref{sec:structure} for ViT-B/16 and BERT-base are at \url{https://github.com/zeekmartin/sal-torch}, under \texttt{results/lumi\_v060/}, together with the control convention (\texttt{CONTROL\_CONVENTION.md}) and the corrections applied on load (\texttt{CORRECTIONS.json}).
 
-\emph{Archived with the paper.} The result files of the FFN, OPT-1.3B and latency experiments (Sections~\ref{sec:which} and \ref{sec:latency}), the canonical tables and their generator and verifier.
+\emph{Archived with the paper.} The result files of the FFN, OPT-1.3B, OPT-6.7B and latency experiments, the per-seed values of every central figure, the canonical tables with their generator and verifier, the job index and logs, dependency versions and dataset hashes, and the equivalence record against the reference pruning code. Checkpoints are referenced by hash.
 
 Computations used PyTorch, Hugging Face transformers and datasets, lm-evaluation-harness and ONNX Runtime.
 
