@@ -267,6 +267,29 @@ All three figures are this campaign's own, summed over the jobs whose logs are i
 
 Planned Zenodo deposit, alongside the preprint: every result JSON from both experiment repositories, the canonical tables with their generator and verifier, this file with its generator, the SLURM job index, the job scripts and logs, `REPRO_FACTS.json` (hashes and freezes), and the equivalence record against upstream SparseGPT and Wanda. Checkpoints are referenced by hash, not deposited.
 
+### A4.7 The logged learning rate is one step ahead
+
+Every training loop in the campaign steps the scheduler immediately after the optimizer, and the two decoder recovery loops then log the rate, so **each learning rate they log is the one the next step will use** and a run's last log line carries a rate no update ever consumed. The vision loops log no learning rate at all. The order in each shipped loop, read from its source:
+
+| loop | order |
+|---|---|
+| `run_sal_qat_prototype.py:train_variant` | `scheduler.step()` (this loop logs no learning rate) |
+| `run_sal_qat_prototype.py:make_step` | `optimizer.step()` (this loop logs no learning rate) |
+| `exp23_baselines.py:recover` | `scheduler.step()` (this loop logs no learning rate) |
+| `exp36_opt_sparse.py:recover` | `opt.step()` then `sched.step()` then `get_last_lr()` |
+| `exp36_fsdp.py:recover_fsdp` | `opt.step()` then `sched.step()` then `get_last_lr()` |
+
+Both schedulers are therefore stepped as many times as there are optimizer steps, so `last_epoch` reaches `total_steps`. What sits there, computed by stepping the schedules:
+
+| recipe | rate the final update used | rate after the final scheduler step |
+|---|---|---|
+| vision: LambdaLR, linear warmup 5% then cosine, 40038 steps | 8.527e-14 | **0** |
+| decoder: OneCycleLR, max_lr 1e-05, pct_start 0.10, 3906 steps | 4e-11 | **4.2e-11** |
+
+The vision value is exactly zero because that schedule clamps its cosine argument at one; the decoder value sits a little above its own floor because `OneCycleLR` does not clamp the within-phase percentage, and one step past the end the cosine turns back upward.
+
+**No published figure is affected.** No optimizer step consumes either value, and no result JSON records a learning rate read from a scheduler: the only reader is the per-step log line. The off-by-one rates therefore exist in the job logs, which are in the archive, and nowhere else. The product's own recovery stage does not take that final step at all.
+
 ## A5. Per-seed values for every central figure
 
 Three seeds everywhere unless stated. The campaign reports max-minus-min and refuses intervals below ten draws, so the raw values are given here for anyone who wants a different statistic.
