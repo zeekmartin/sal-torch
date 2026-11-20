@@ -37,8 +37,10 @@ Guardrails, in order of how much trouble they save:
 * **It refuses LoRA/QLoRA models.** SAL works by letting the model reorganize
   around silenced heads; adapters freeze the weights that would do the
   reorganizing. Measured on GPT-2 Medium, SAL under LoRA lost four of six
-  compression variants *and* gave up 3.1 points of clean accuracy. That is a
-  configuration worth refusing loudly rather than serving quietly.
+  compression variants *and* gave up 3.1 points of clean accuracy: one model,
+  one task, five seeds, and no recovery pass, which is the scope of that
+  figure. It is still a configuration worth refusing loudly rather than
+  serving quietly, because the mechanism it disables is the whole method.
 * **It warns below ~100M parameters**, where the benefit is marginal.
 * **It measures accuracy and size at every stage**, and can stop on an accuracy
   floor instead of handing back a small, broken model.
@@ -59,12 +61,74 @@ logger = logging.getLogger(__name__)
 
 SMALL_MODEL_PARAMS = 100_000_000
 
+#: The public data archive every figure in this module is cited to.
+ARCHIVE_DOI = "10.5281/zenodo.24391200"
+
+#: Every measured figure in this module's user-facing strings, and the file in
+#: the public data archive it comes from. Keyed by the figure exactly as the
+#: text prints it, without its sign, so the contract test in
+#: ``tests/test_routing_text.py`` is a set membership and not a guess: a figure
+#: that reaches a user-facing string without an entry here fails the suite.
+#:
+#: It is a contract, not a check of the numbers. It cannot tell a right figure
+#: from a wrong one. What it stops is a figure arriving with nothing behind it,
+#: which is how the two claims this release withdrew got in.
+VIT = "data/oss/results/lumi_v060/"
+PRO = "data/pro/results/"
+SOURCES = {
+    # the recovery cells, ViT-B/16 / ImageNet-1k, 3 seeds, 2-epoch control
+    "9.56%": VIT + "EXP32_RATIO_AT_2EP.md",
+    "78.816%": VIT + "EXP40B_RANDOM.md",
+    "2.738pp": VIT + "EXP40B_RANDOM.md",
+    "77.642%": VIT + "EXP32_RATIO_AT_2EP.md",
+    "3.91pp": VIT + "EXP32_RATIO_AT_2EP.md",
+    "81.554%": VIT + "CONTROL_CONVENTION.md",
+    # head training as a pre-conditioner, exp24
+    "0.05pp": VIT + "EXP24_SAL_RECOVERY.md",
+    "0.07pp": VIT + "EXP24_SAL_RECOVERY.md",
+    # SAL's set-specificity, exp25 and exp27
+    "56.18pp": VIT + "EXP25_ALIGNED.md",
+    "8pp": VIT + "EXP27_DROPHEAD.md",
+    "3.93pp": VIT + "EXP25_ALIGNED.md",
+    # the own-set cell at 631M, exp28b
+    "0.67pp": VIT + "EXP28B_JEPA_CORRECTED.md",
+    # BERT-base, four GLUE tasks, exp34
+    "7.03pp": VIT + "EXP34_BERT_GLUE.md",
+    "12.58pp": VIT + "EXP34_BERT_GLUE.md",
+    "5.15pp": VIT + "EXP34_BERT_GLUE.md",
+    "21.68pp": VIT + "EXP34_BERT_GLUE.md",
+    # the routing band itself, exp17
+    "0.08pp": VIT + "PHASE2H.md",
+    "0.11pp": VIT + "PHASE2H.md",
+    # FFN neurons at 2 epochs, 7 seeds
+    "0.869pp": PRO + "w3_ffn25_magnitude_s*/exp35_mlp_matched.json",
+    "1.397pp": PRO + "w3_ffn25_random_s*/exp35_mlp_matched.json",
+    "0.528pp": PRO + "EXP35_FFN_AT_2EP.md",
+    "1.91pp": PRO + "EXP35_FFN_AT_2EP.md",
+    # compile, measured per batch size
+    "1.12x": PRO + "EXP16_COMPILE.md",
+    "1.50x": PRO + "EXP16_COMPILE.md",
+    "2.2x": PRO + "EXP16_COMPILE.md",
+    # the sizes the two structures remove, and DropHead's throughput cost
+    "16.4%": PRO + "EXP35_FFN_AT_2EP.md",
+    "16.5%": VIT + "EXP25_ALIGNED.md",
+    "30%": VIT + "EXP34_BERT_GLUE.md",
+    "39%": VIT + "EXP34_BERT_GLUE.md",
+}
+
+#: Not measurements: the two routing thresholds, and the pruning ratios the
+#: caller asked for rather than anything measured at them.
+NOT_MEASUREMENTS = ("30pp", "10pp", "25%", "33%", "50%")
+
 # Routing thresholds for probe(), in points of accuracy lost when half the heads
-# are removed from the untrained model. Drawn from a six-architecture sweep
-# (DeiT-small, ViT-B/16, BERT-base, DINOv2-large, I-JEPA ViT-H/14, phi-2) in
-# which SAL's lead over DropHead on an identical head set tracked the probe
-# almost monotonically: +31.0pp at a 94pp drop down to +0.1pp at 4pp. The bands
-# are a usable heuristic on six points, not a calibrated boundary.
+# are removed from the untrained model. Drawn from exp17's routing sweep, whose
+# table shows six rows of which only four were measured under its own protocol:
+# the ViT-B/16 and I-JEPA rows are imported ImageNet-100 cells, and that page
+# says in its own words not to build a claim on a comparison between an exp17
+# row and an imported one. So the bands are a heuristic on four comparable
+# points, not a calibrated boundary, and the band a model lands in is a reason
+# to measure rather than a prediction. What the probe is for is the question
+# "how much does this model lose one-shot", which it answers directly.
 FRAGILE_DROP_PP = 30.0
 ROBUST_DROP_PP = 10.0
 
@@ -197,43 +261,51 @@ class ProbeSummary:
         ]
         if self.route == "sal_aligned":
             lines += [
-                f"FRAGILE (drop > {FRAGILE_DROP_PP:.0f}pp). Head training pays "
-                "for itself here. Which method depends on one question:",
+                f"FRAGILE (drop > {FRAGILE_DROP_PP:.0f}pp). One question "
+                "decides the method, and it is not the band:",
                 "  can you fine-tune AFTER pruning?",
-                "    yes -> prune by magnitude, then recover. Strongest option "
-                "measured: 77.6% at 50% of heads on ViT-B/16 / ImageNet-1k "
-                "after 2 epochs, 3 seeds, against SAL's 76.5% and DropHead's "
-                "72.5%. Call recover() between compress() and "
-                "validate(); two epochs is the measured default.",
-                "    no  -> train with head masking first:",
-                "      sal_train(train_dataset, prune_fraction=0.5)  # SAL: ties "
-                "you to ONE head set, fixed before training",
-                "      compress(pruning=0.5, slice_heads=True)       # pass "
-                "pruned_heads()",
-                "      DropHead is the general alternative and is NOT callable "
-                "from this package yet (v0.7.0 item 2); see "
-                "scripts/run_sal_qat_prototype.py --mask-mode drophead.",
-                "measured (ViT-B/16 / ImageNet-1k, 3 seeds, full 50k val split, "
-                "against a dense control trained for the same epochs): SAL is "
-                "+1.48pp over DropHead on the one set it trained without, and "
-                "-42.66pp on any other set.",
+                "    yes -> prune at random, then recover. This is the "
+                "shipped path:",
+                "      compress(pruning=0.5, strategy='random', "
+                "slice_heads=True)",
+                "      recover(train_dataset, epochs=2, domain=...)",
+                "    no  -> train with head masking first, with "
+                "mask_mode='drophead':",
+                "      SALConfig.auto(model, prune_fraction=0.5, "
+                "mask_mode='drophead')",
+                "      compress(pruning=0.5, slice_heads=True)",
+                "measured on ViT-B/16 / ImageNet-1k, 3 seeds, full 50k val "
+                "split, against a dense control trained for the same 2 epochs "
+                "(81.554%): at 50% of heads the one-shot model reads 9.56% "
+                "and two epochs of recovery reach 78.816% with random "
+                "selection (-2.738pp) or 77.642% with magnitude (-3.91pp). "
+                "Head training is worth +0.05pp (SAL) or +0.07pp (DropHead) "
+                "as a starting point for that recovery, i.e. nothing.",
+                "if you cannot recover: DropHead, with no exception. SAL's "
+                "adaptation is worth +56.18pp on the one head set it trained "
+                "for and 0 to 8pp on any other, and on that same own-set cell "
+                "DropHead is +0.67pp above SAL on 3/3 seeds of a 631M "
+                "encoder, so the \"SAL when the deployed set is fixed\" "
+                "carve-out is withdrawn. SAL's own-set operating point is "
+                "-3.93pp against the matched baseline at a 16.5% smaller "
+                "model, which is the figure to compare, not its dense row.",
             ]
         elif self.route == "drophead":
             lines += [
                 f"INTERMEDIATE ({ROBUST_DROP_PP:.0f}-{FRAGILE_DROP_PP:.0f}pp). "
-                "If you can fine-tune after pruning, do that and skip the "
-                "special training method -- on BERT-base across four GLUE "
-                "tasks, magnitude + 2 epochs of recovery beat DropHead on 8 of "
-                "8 cells (3 seeds). Otherwise the choice is about control of "
-                "the head set:",
-                "  you choose the deployed set  -> SAL, and prune exactly "
-                "pruned_heads()",
-                "  the set is out of your hands -> DropHead, robust on any set "
-                "of that size (not callable from this package yet; v0.7.0 "
-                "item 2)",
-                "measured on the one vision model in this band (I-JEPA "
-                "ViT-H/14, -18.9pp probe, ImageNet-100): SAL led by +2.6pp on "
-                "the identical set.",
+                "The answer is the same as in the fragile band, because it "
+                "does not depend on the band:",
+                "  can you fine-tune after pruning? -> prune, then recover(), "
+                "and skip head training. On BERT-base across four GLUE tasks "
+                "magnitude + 2 epochs of recovery beat DropHead on 8 of 8 "
+                "cells, by 0.42 to 7.03pp over 3 seeds.",
+                "  if you cannot -> mask_mode='drophead'. It holds no head "
+                "set, so the deployed set stays free until deployment, and on "
+                "a 631M encoder it is +0.67pp above SAL even on SAL's own "
+                "trained-for set, 3/3 seeds.",
+                "what DropHead costs, measured on those same GLUE cells: up "
+                "to 12.58pp of dense accuracy (MRPC), and 24-30% of training "
+                "throughput at 33% of heads rising to 33-39% at 50%.",
             ]
         else:
             lines += [
@@ -244,20 +316,28 @@ class ProbeSummary:
                 "  then recover(train_dataset, epochs=2, domain=...): a "
                 "post-pruning fine-tune is worth far more than any "
                 "training-time method.",
-                "measured: SAL and DropHead were indistinguishable on models in "
-                "this band (+0.08pp on BERT-base, +0.11pp on phi-2), and "
-                "DropHead cost 1.1pp of clean accuracy on I-JEPA for no gain. "
-                "BUT the same BERT-base probed at -5.15pp loses -4.17 to "
-                "-21.68pp one-shot at 50% of heads across four GLUE tasks, "
-                "i.e. mostly OUTSIDE this band. Probe on YOUR task.",
+                "measured: SAL and DropHead were indistinguishable on the "
+                "models in this band (+0.08pp on BERT-base, +0.11pp on "
+                "phi-2), both at exp17's own protocol of 872 evaluation "
+                "examples and not the campaign's full split. BUT the same "
+                "BERT-base probed at -5.15pp loses -4.17 to -21.68pp one-shot "
+                "at 50% of heads across four GLUE tasks, i.e. mostly OUTSIDE "
+                "this band. Probe on YOUR task, at the ratio you intend.",
             ]
         lines.append(
-            "then: head pruning is the small half of the compression. Pruning "
-            "FFN neurons removes twice the parameters for less accuracy -- "
-            "measured on ViT-B/16 / ImageNet-1k with a recovery pass and a "
-            "dense control trained for the same epochs, at an identical "
-            "-16.5%, 25% of neurons cost 0.63pp against 3.17pp for 50% of "
-            "heads. Neuron masking is not part of sal-torch; see ROADMAP.md.")
+            "then: head pruning is the small half of the compression, and "
+            "FFN neurons are the cheaper structure. At the same 2 epochs of "
+            "recovery and the same matched control, 25% of FFN neurons cost "
+            "0.869pp at -16.4% of parameters (7 seeds, range -0.988 to "
+            "-0.664) against 2.738pp for 50% of heads at -16.5% (3 seeds), so "
+            "heads are about three times more expensive per unit of size "
+            "removed. Prune FFN neurons by MAGNITUDE, not at random: random "
+            "costs 1.397pp on the same cell (7 seeds, range -1.668 to "
+            "-1.212), and the two ranges do not overlap. The inversion worth "
+            "knowing is that random is 1.91pp BETTER one-shot and 0.528pp "
+            "worse after recovery, so a one-shot benchmark picks the wrong "
+            "FFN default. Neuron pruning is not part of sal-torch; see "
+            "ROADMAP.md.")
         lines.append("finally: torch.compile. Measured 1.12x on a dense ViT-B/16 at "
                      "batch 32 and 1.50x on a pruned one, and 2.2x at batch 1 where "
                      "pruning alone buys almost nothing.")
@@ -817,15 +897,20 @@ class CompressionPipeline:
         """Which heads to remove, at a matched total count across strategies.
 
         ``random`` (default)
-            A random set within each layer, seeded. Measured best of the three on
-            GPT-2 Medium — 99.3% accuracy retention against magnitude's 96.3%
-            (standard model) and 93.7% (SAL-trained) — and better for *both*
-            arms, so this is not a SAL-specific default. It is also the removal
-            distribution SAL trains against.
+            A random set within each layer, seeded. **The default because it is
+            measured to be better after recovery, not because it is cheap**: at
+            50% of heads on ViT-B/16 / ImageNet-1k, random costs 2.738pp
+            against the matched 2-epoch control where magnitude costs 3.91pp,
+            and the two seed ranges do not overlap on 3/3 seeds. At 25% and 33%
+            the ranges DO overlap (0.101pp and 0.226pp apart), so there the
+            difference is not a result and either will do. It is also the
+            removal distribution head-masking methods train against.
         ``magnitude``
             Lowest output-projection slice norm within each layer. The obvious
-            heuristic, and measurably the worse one: a small weight norm turns
-            out to be a poor proxy for a head the model can spare.
+            heuristic, and the worse one on heads by 1.174pp at 50%. Note that
+            the answer is the opposite for FFN neurons, where magnitude wins by
+            0.528pp over 7 seeds with disjoint ranges: one criterion does not
+            cover both structures, and this package stopped assuming it would.
         ``fi_guided``
             Spend the budget on IMMUNE layers first, then BUFFER, never CRITICAL,
             ranking by magnitude within a layer. Deliberately **not** uniform —
