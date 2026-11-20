@@ -1112,6 +1112,7 @@ class CompressionPipeline:
                 max_lr: Optional[float] = None, pct_start: float = 0.10,
                 preserve_sparsity: bool = True, masks: Optional[dict] = None,
                 control=None, optimizer=None, amp_dtype=None,
+                shuffle: bool = True,
                 enforce_masks: bool = True) -> "CompressionPipeline":
         """Repair the compressed model, and measure the repair.
 
@@ -1174,8 +1175,8 @@ class CompressionPipeline:
             max_grad_norm=max_grad_norm, schedule=schedule,
             warmup_ratio=warmup_ratio, max_lr=max_lr, pct_start=pct_start,
             preserve_sparsity=preserve_sparsity, masks=masks,
-            enforce_masks=enforce_masks, amp_dtype=amp_dtype, seed=self.seed,
-            optimizer=optimizer)
+            enforce_masks=enforce_masks, amp_dtype=amp_dtype,
+            shuffle=shuffle, seed=self.seed, optimizer=optimizer)
         rec["one_shot_accuracy"] = self._one_shot_accuracy
         self._control = control
         self._recovery = rec

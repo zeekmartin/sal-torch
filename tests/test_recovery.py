@@ -673,3 +673,94 @@ def test_the_step_count_is_right_for_a_dataset_without_a_length(tiny_model):
     rec = recover_model(tiny_model, split, domain="same as eval", epochs=2,
                         batch_size=2)
     assert rec["total_steps_planned"] == 10 and rec["steps"] == 10
+
+
+# -------------------------------------------------------------- the shuffle
+class IndexedBatches:
+    """An indexable dataset of batches, which is what a permutation needs."""
+
+    def __init__(self, n=6, bs=2, sl=8):
+        torch.manual_seed(3)
+        self.items = [{"input_ids": torch.full((bs, sl), i),
+                       "labels": torch.randint(0, 100, (bs, sl))}
+                      for i in range(n)]
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, i):
+        return self.items[i]
+
+    def __iter__(self):
+        return iter(self.items)
+
+
+def _order_seen(dataset, model, epochs=2, shuffle=True, seed=0):
+    """Which batch ids the loop visited, in order, by tagging input_ids."""
+    seen = []
+
+    class Watch(torch.nn.Module):
+        def __init__(self, inner):
+            super().__init__()
+            self.inner = inner
+
+        def forward(self, input_ids=None, labels=None, **kw):
+            seen.append(int(input_ids[0, 0]))
+            return self.inner(input_ids=input_ids, labels=labels, **kw)
+
+    recover_model(Watch(model), dataset, domain="same as eval", epochs=epochs,
+                  batch_size=2, shuffle=shuffle, seed=seed)
+    return seen
+
+
+def test_shuffle_is_on_by_default_and_reshuffles_each_epoch(tiny_model):
+    data = IndexedBatches(n=6)
+    seen = _order_seen(data, tiny_model, epochs=2)
+    first, second = seen[:6], seen[6:]
+    assert sorted(first) == sorted(second) == list(range(6)), (
+        "every epoch must see every batch exactly once")
+    assert first != list(range(6)) or second != list(range(6)), (
+        "with six batches, two identity passes mean nothing was shuffled")
+    assert first != second, (
+        "one permutation reused for two epochs is one epoch's order twice")
+
+
+def test_the_shuffle_is_reproducible_from_the_seed(tiny_model):
+    import copy
+
+    a = _order_seen(IndexedBatches(), copy.deepcopy(tiny_model), seed=7)
+    b = _order_seen(IndexedBatches(), copy.deepcopy(tiny_model), seed=7)
+    c = _order_seen(IndexedBatches(), copy.deepcopy(tiny_model), seed=8)
+    assert a == b
+    assert a != c, "a different seed must give a different order"
+
+
+def test_shuffle_false_walks_the_data_in_order(tiny_model):
+    seen = _order_seen(IndexedBatches(n=5), tiny_model, epochs=2,
+                       shuffle=False)
+    assert seen == [0, 1, 2, 3, 4, 0, 1, 2, 3, 4], (
+        "a published sequential run has to be reproducible exactly")
+
+
+def test_the_record_says_which_order_it_used(tiny_model):
+    rec = recover_model(tiny_model, IndexedBatches(), domain="same as eval",
+                        epochs=1, batch_size=2)
+    assert rec["shuffle"] is True
+    assert rec["order"] == "seeded permutation of the batches"
+
+    off = recover_model(tiny_model, IndexedBatches(), domain="same as eval",
+                        epochs=1, batch_size=2, shuffle=False)
+    assert off["shuffle"] is False and off["order"] == "off"
+
+
+def test_an_iterable_only_dataset_keeps_its_own_order_and_says_so(tiny_model):
+    """Shuffling it here would mean holding a pass in memory."""
+    split = LazySplit(n_batches=4)
+    rec = recover_model(tiny_model, split, domain="same as eval", epochs=2,
+                        batch_size=2, shuffle=True)
+    assert rec["order"] == "dataset's own"
+    assert rec["steps"] == 8
+    import gc
+    gc.collect()
+    assert not [r for r in split.made if r() is not None], (
+        "shuffling must not have reintroduced materialisation")

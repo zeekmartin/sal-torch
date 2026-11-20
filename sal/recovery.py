@@ -374,6 +374,51 @@ def autocast_for(device_type: str, amp_dtype):
     return torch.autocast(device_type, dtype=amp_dtype)
 
 
+def _is_indexable(dataset) -> bool:
+    """Can a pass be taken in an arbitrary order without materialising it?"""
+    if isinstance(dataset, torch.Tensor):
+        return False
+    try:
+        return (hasattr(dataset, "__getitem__") and len(dataset) > 0
+                and hasattr(dataset, "__iter__"))
+    except TypeError:
+        return False
+
+
+def passes(dataset, batch_size: int, shuffle, seed: int) -> tuple:
+    """``(pass factory, label)``: how each epoch walks the data, and in what order.
+
+    The factory takes the epoch number, so every epoch gets its own
+    permutation from the same base seed: a single permutation reused for two
+    epochs is one epoch's order twice, which is not what shuffling means.
+    """
+    from sal.fi import _iter_data
+
+    if not shuffle:
+        return (lambda epoch=0: _iter_data(dataset, batch_size)), "off"
+
+    if _is_indexable(dataset):
+        def factory(epoch=0):
+            g = torch.Generator().manual_seed(int(seed) + int(epoch))
+            order = torch.randperm(len(dataset), generator=g).tolist()
+            return (dataset[i] for i in order)
+        return factory, "seeded permutation of the batches"
+
+    if not hasattr(dataset, "__iter__"):
+        def factory(epoch=0):
+            from torch.utils.data import DataLoader
+            g = torch.Generator().manual_seed(int(seed) + int(epoch))
+            return iter(DataLoader(dataset, batch_size=batch_size,
+                                   shuffle=True, generator=g))
+        return factory, "seeded DataLoader shuffle of the samples"
+
+    # Only iterable: shuffling it here would mean holding a pass in memory,
+    # which is the thing that OOM-killed the first real recovery. The order
+    # is the dataset's own, and the record says so instead of implying that
+    # this stage shuffled it.
+    return (lambda epoch=0: _iter_data(dataset, batch_size)), "dataset's own"
+
+
 def _steps_per_epoch(dataset, batch_size, fresh) -> tuple:
     """``(batches per epoch, the first batch)``, without keeping the rest.
 
@@ -441,6 +486,7 @@ def recover_model(model, train_dataset, *,
                   masks: Optional[dict] = None,
                   enforce_masks: bool = True,
                   amp_dtype=None,
+                  shuffle: bool = True,
                   seed: int = 0,
                   device=None,
                   optimizer=None) -> dict:
@@ -455,6 +501,17 @@ def recover_model(model, train_dataset, *,
     ``epochs`` and ``tokens`` are mutually exclusive: a decoder's budget is a
     token count, and epochs over a corpus shard is not a unit that transfers
     between scales.
+
+    ``shuffle`` is **on by default** and reshuffles every epoch from
+    ``seed + epoch``, because a recovery that walks its data in one fixed
+    order is a different run from one that does not, and the measured vision
+    recipe shuffles. Nothing is materialised to do it: an indexable dataset is
+    visited through a seeded permutation, a torch ``Dataset`` gets a
+    ``DataLoader`` with its own generator, and a dataset that is only iterable
+    keeps its own order, which the result records as ``order`` rather than
+    leaving the caller to assume. Pass ``shuffle=False`` to reproduce a
+    published run that went through its data in order, as the decoder cells
+    did.
 
     ``amp_dtype`` is ``None`` for no autocast, ``"auto"`` to take the best
     precision the device has, or an explicit dtype, which is a pin. Every
@@ -496,10 +553,7 @@ def recover_model(model, train_dataset, *,
 
     device = device or next(model.parameters()).device
     torch.manual_seed(seed)
-    def fresh():
-        """A new pass over the data, holding nothing from the last one."""
-        return _iter_data(train_dataset, batch_size)
-
+    fresh, order_label = passes(train_dataset, batch_size, shuffle, seed)
     steps_per_epoch, first = _steps_per_epoch(train_dataset, batch_size, fresh)
     if not steps_per_epoch:
         raise ValueError("recover() got an empty training dataset")
@@ -556,7 +610,7 @@ def recover_model(model, train_dataset, *,
         done = False
         while not done:
             running, n = 0.0, 0
-            for batch in fresh():
+            for batch in fresh(len(epoch_losses)):
                 if step >= total_steps:
                     done = True
                     break
@@ -626,6 +680,7 @@ def recover_model(model, train_dataset, *,
         "epochs": epochs, "tokens": tokens, "tokens_seen": tokens_seen,
         "steps": step, "total_steps_planned": total_steps,
         "batch_size": batch_size, "lr": lr,
+        "shuffle": bool(shuffle), "order": order_label,
         "head_lr_multiplier": head_lr_multiplier,
         "max_grad_norm": max_grad_norm,
         "amp_dtype": (None if amp_dtype is None else str(amp_dtype)),

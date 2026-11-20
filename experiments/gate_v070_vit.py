@@ -91,12 +91,37 @@ class NormalizedSplit:
         # full shuffle of the 193 GB file measured 3.6x slower than the
         # cached read), and an unshuffled recovery is a different run.
         self.shuffle, self.seed, self.block = shuffle, seed, block
+        self._loader = None
+        self._peeked = False
+
+    def _build(self):
+        import run_sal_qat_prototype as P
+        return P.batches(self.split, self.batch_size, shuffle=self.shuffle,
+                         seed=self.seed, workers=self.workers,
+                         block=self.block)
 
     def __iter__(self):
-        import run_sal_qat_prototype as P
-        for x, y in P.batches(self.split, self.batch_size,
-                              shuffle=self.shuffle, seed=self.seed,
-                              workers=self.workers, block=self.block):
+        # ONE loader, iterated once per epoch, because `_BlockShuffle` creates
+        # its generator once and advances it across epochs: that is how exp23
+        # gets a different order in its second epoch, and rebuilding the
+        # loader each epoch would repeat the first epoch's order instead.
+        #
+        # The first call is the schedule's one-batch peek, not an epoch, and
+        # exp23 has no such peek. Serving it from a throwaway loader keeps the
+        # training sampler's generator at the state exp23 starts from; without
+        # this the peek advances it two draws and every epoch after it is a
+        # different order from the published run.
+        if self.shuffle and not self._peeked:
+            self._peeked = True
+            source = self._build()
+        else:
+            if self.shuffle:
+                if self._loader is None:
+                    self._loader = self._build()
+                source = self._loader
+            else:
+                source = self._build()
+        for x, y in source:
             batch = {"pixel_values": self.normalize(x)}
             if self.with_labels:
                 batch["labels"] = y
