@@ -259,6 +259,120 @@ RUN_SETS = {
     "D": ("G3-default",),
 }
 
+#: The key a result file carries (the ViT strategy, or the decoder mode) to
+#: the bands that key is scored against. One place, so the runner and the
+#: off-cluster scorer cannot disagree about which band a cell belongs to.
+BANDS_BY_CELL = {
+    "random": ("G1-paper", "G1-default"),
+    "magnitude": ("G2-paper", "G2-default"),
+    "paper": ("G3-paper",),
+    "default": ("G3-default",),
+}
+
+
+# ----------------------------------------------------------------- provenance
+#: The sidecar that says which code a staged package was built from. It sits
+#: BESIDE the package, never inside it, so recording it does not change the
+#: hash of the thing it describes.
+PROVENANCE_NAME = "PROVENANCE.json"
+
+
+def package_manifest(package_dir) -> dict:
+    """SHA-256 per file and one aggregate over ``*.py``, in name order."""
+    import hashlib
+    from pathlib import Path
+
+    d = Path(package_dir)
+    files = sorted(d.glob("*.py"))
+    agg = hashlib.sha256()
+    per_file = {}
+    for f in files:
+        digest = hashlib.sha256(f.read_bytes())
+        per_file[f.name] = digest.hexdigest()
+        agg.update(f.name.encode() + b"\0" + digest.digest())
+    return {"n_files": len(files), "aggregate_sha256": agg.hexdigest(),
+            "files": per_file}
+
+
+def package_provenance(module=None) -> dict:
+    """What the running job can say about the code it actually imported.
+
+    Derived from the imported module's own location, not from a path handed
+    in: the question a gate result has to answer is "which code did THIS run
+    use", and the only authority on that is the module object. The recorded
+    sidecar is compared against a manifest computed here and now, so a result
+    says both what was claimed and what was there.
+    """
+    from pathlib import Path
+
+    if module is None:
+        import sal as module
+    pkg = Path(module.__file__).resolve().parent
+    root = pkg.parent
+    out = {"package_dir": str(pkg), "version": getattr(module, "__version__",
+                                                       None)}
+    live = package_manifest(pkg)
+    out["computed"] = {k: live[k] for k in ("n_files", "aggregate_sha256")}
+    side = root / PROVENANCE_NAME
+    if not side.exists():
+        out["recorded"] = None
+        out["matches"] = False
+        out["why"] = ("no %s beside the package, so this result cannot say "
+                      "which commit it tested" % PROVENANCE_NAME)
+        return out
+    rec = json.loads(side.read_text(encoding="utf-8"))
+    out["recorded"] = {k: rec.get(k) for k in
+                       ("commit", "aggregate_sha256", "n_files", "dirty",
+                        "recorded_at", "contains_precision_change")}
+    out["matches"] = (rec.get("aggregate_sha256")
+                      == live["aggregate_sha256"]
+                      and rec.get("n_files") == live["n_files"])
+    out["why"] = ("the package on disk is the one the sidecar records"
+                  if out["matches"] else
+                  "the package on disk is NOT what the sidecar records: "
+                  "recorded %s, computed %s"
+                  % (rec.get("aggregate_sha256"), live["aggregate_sha256"]))
+    return out
+
+
+def verify_provenance(prov: Optional[dict], target: str = "HEAD",
+                      repo=None) -> dict:
+    """Is the code that produced a result an ancestor of what we would push?
+
+    A band may not be called passed on a result produced by code that is not
+    in the history being published. That is not bureaucracy: the whole purpose
+    of the gate is to say that the SHIPPED pipeline reproduces the archived
+    cells, and a result from a commit that never ships says nothing about what
+    ships.
+    """
+    import subprocess
+    from pathlib import Path
+
+    if not prov:
+        return {"ok": False, "why": "the result carries no provenance at all"}
+    if not prov.get("matches"):
+        return {"ok": False, "why": prov.get("why", "provenance does not match")}
+    commit = (prov.get("recorded") or {}).get("commit")
+    if not commit:
+        return {"ok": False, "why": "the provenance records no commit"}
+    if (prov.get("recorded") or {}).get("dirty"):
+        return {"ok": False,
+                "why": "the package was staged from a dirty working tree, so "
+                       "no commit describes what ran"}
+    cwd = str(repo or Path(__file__).resolve().parents[1])
+    try:
+        r = subprocess.run(["git", "merge-base", "--is-ancestor", commit,
+                            target], cwd=cwd, capture_output=True, text=True)
+    except OSError as e:                                    # no git here
+        return {"ok": False, "why": "cannot check ancestry: %s" % e}
+    if r.returncode != 0:
+        return {"ok": False, "commit": commit,
+                "why": "commit %s is not an ancestor of %s, so this result "
+                       "was produced by code that is not in what would be "
+                       "pushed" % (commit[:12], target)}
+    return {"ok": True, "commit": commit,
+            "why": "commit %s is an ancestor of %s" % (commit[:12], target)}
+
 
 def check(name: str, per_seed, cost=None) -> dict:
     if name not in BANDS:
@@ -266,12 +380,26 @@ def check(name: str, per_seed, cost=None) -> dict:
     return BANDS[name].check(per_seed, cost)
 
 
-def check_all(results: dict) -> dict:
-    """``{band name: {"per_seed": [...], "cost": x}}`` to one verdict."""
+def check_all(results: dict, provenance: Optional[dict] = None,
+              target: str = "HEAD", repo=None) -> dict:
+    """``{band name: {"per_seed": [...], "cost": x}}`` to one verdict.
+
+    With ``provenance``, a band that meets its numbers is still **not**
+    passed unless the code that produced it is an ancestor of ``target``. The
+    numbers and the code are two separate claims and both have to hold.
+    """
     verdicts = {n: check(n, r.get("per_seed", []), r.get("cost"))
                 for n, r in results.items()}
+    prov = verify_provenance(provenance, target=target, repo=repo) \
+        if provenance is not None else None
+    if prov is not None and not prov["ok"]:
+        for v in verdicts.values():
+            v["passed"] = False
+            v["why"] = list(v["why"]) + ["provenance: " + prov["why"]]
     return {"bands": verdicts,
-            "passed": all(v["passed"] for v in verdicts.values()),
+            "passed": (all(v["passed"] for v in verdicts.values())
+                       and (prov is None or prov["ok"])),
+            "provenance": prov,
             "n_checked": len(verdicts), "n_bands": len(BANDS),
             "complete": set(verdicts) == set(BANDS)}
 

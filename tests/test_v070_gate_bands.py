@@ -162,3 +162,182 @@ def test_check_all_is_incomplete_until_every_band_is_scored():
 def test_an_unknown_band_raises():
     with pytest.raises(KeyError, match="unknown band"):
         check("G9-paper", [1.0])
+
+
+# ----------------------------------------------------------------- provenance
+def _staged(tmp_path, commit="0" * 40, dirty=False, tamper=False):
+    """A staged package plus its sidecar, exactly as the cluster holds one."""
+    import hashlib
+    import json
+    import types
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    pkg = tmp_path / "sal"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("__version__ = '0.6.1'\n", encoding="utf-8")
+    (pkg / "recovery.py").write_text("def select_precision(): pass\n",
+                                     encoding="utf-8")
+    from v070_gate_bands import package_manifest
+    man = package_manifest(pkg)
+    (tmp_path / "PROVENANCE.json").write_text(json.dumps({
+        "commit": commit, "dirty": dirty,
+        "n_files": man["n_files"],
+        "aggregate_sha256": man["aggregate_sha256"],
+        "contains_precision_change": True,
+        "recorded_at": "2026-11-20T13:00:00+00:00"}), encoding="utf-8")
+    if tamper:
+        # The package changed after the sidecar was written, which is the
+        # thing the comparison exists to catch.
+        (pkg / "recovery.py").write_text("def select_precision(): return 1\n",
+                                         encoding="utf-8")
+    mod = types.SimpleNamespace(__file__=str(pkg / "__init__.py"),
+                                __version__="0.6.1")
+    return mod
+
+
+def test_the_manifest_is_order_independent_and_content_sensitive(tmp_path):
+    from v070_gate_bands import package_manifest
+
+    d = tmp_path / "pkg"
+    d.mkdir()
+    (d / "b.py").write_text("b\n", encoding="utf-8")
+    (d / "a.py").write_text("a\n", encoding="utf-8")
+    first = package_manifest(d)
+    assert first["n_files"] == 2 and len(first["files"]) == 2
+    assert package_manifest(d)["aggregate_sha256"] == first["aggregate_sha256"]
+    (d / "a.py").write_text("a!\n", encoding="utf-8")
+    assert package_manifest(d)["aggregate_sha256"] != first["aggregate_sha256"]
+
+
+def test_provenance_matches_an_untouched_package(tmp_path):
+    from v070_gate_bands import package_provenance
+
+    prov = package_provenance(_staged(tmp_path))
+    assert prov["matches"] is True
+    assert prov["recorded"]["contains_precision_change"] is True
+    assert prov["computed"]["n_files"] == 2
+
+
+def test_provenance_catches_a_package_edited_after_recording(tmp_path):
+    from v070_gate_bands import package_provenance
+
+    prov = package_provenance(_staged(tmp_path, tamper=True))
+    assert prov["matches"] is False
+    assert "NOT what the sidecar records" in prov["why"]
+
+
+def test_provenance_is_absent_without_a_sidecar(tmp_path):
+    import types
+
+    from v070_gate_bands import package_provenance
+
+    pkg = tmp_path / "sal"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("x = 1\n", encoding="utf-8")
+    mod = types.SimpleNamespace(__file__=str(pkg / "__init__.py"))
+    prov = package_provenance(mod)
+    assert prov["recorded"] is None and prov["matches"] is False
+    assert "cannot say which commit" in prov["why"]
+
+
+def test_verify_provenance_refuses_everything_it_should(tmp_path):
+    import subprocess
+
+    from v070_gate_bands import package_provenance, verify_provenance
+
+    repo = Path(__file__).resolve().parents[1]
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(repo),
+                          capture_output=True, text=True).stdout.strip()
+
+    assert not verify_provenance(None)["ok"]
+    assert "no provenance" in verify_provenance(None)["why"]
+
+    tampered = package_provenance(_staged(tmp_path / "t", tamper=True))
+    assert not verify_provenance(tampered, repo=repo)["ok"]
+
+    dirty = package_provenance(_staged(tmp_path / "d", commit=head, dirty=True))
+    v = verify_provenance(dirty, repo=repo)
+    assert not v["ok"] and "dirty" in v["why"]
+
+    unknown = package_provenance(_staged(tmp_path / "u", commit="1" * 40))
+    v = verify_provenance(unknown, repo=repo)
+    assert not v["ok"] and "not an ancestor" in v["why"]
+
+    good = package_provenance(_staged(tmp_path / "g", commit=head))
+    v = verify_provenance(good, repo=repo, target="HEAD")
+    assert v["ok"] and v["commit"] == head
+
+
+def test_a_band_with_perfect_numbers_fails_on_bad_provenance(tmp_path):
+    """The numbers and the code are two claims, and both have to hold."""
+    from v070_gate_bands import package_provenance
+
+    results = {n: {"per_seed": v[0], "cost": v[1]}
+               for n, v in ARCHIVED.items()}
+    repo = Path(__file__).resolve().parents[1]
+
+    bad = package_provenance(_staged(tmp_path, commit="1" * 40))
+    out = check_all(results, provenance=bad, repo=repo)
+    assert out["passed"] is False
+    assert all(not v["passed"] for v in out["bands"].values())
+    assert any("provenance" in w for w in
+               out["bands"]["G1-paper"]["why"])
+    assert out["provenance"]["ok"] is False
+
+    # Without provenance the scorer still works, and says it checked none.
+    plain = check_all(results)
+    assert plain["passed"] is True and plain["provenance"] is None
+
+
+# ------------------------------------------------------------- the scorer
+def _cell(strategy, seed, value, cost, prov, stage="validate", ppl=False):
+    c = {"strategy": strategy if not ppl else None,
+         "mode": strategy if ppl else "paper",
+         "seed": seed, "last_stage": stage, "provenance": prov}
+    if ppl:
+        c["recovered_ppl"] = value
+        c["pruning_cost"] = cost
+    else:
+        c["recovered_accuracy"] = value / 100
+        c["pruning_cost_pp"] = cost
+    return c
+
+
+def test_the_scorer_groups_cells_into_the_bands_they_belong_to(tmp_path):
+    import score_v070_gate as S
+    from v070_gate_bands import package_provenance
+
+    prov = package_provenance(_staged(tmp_path))
+    cells = [_cell("random", s, v, -2.738, prov)
+             for s, v in zip((42, 123, 456), ARCHIVED["G1-paper"][0])]
+    scored = S.group(cells)
+    assert set(scored) == {"G1-paper", "G1-default"}
+    assert scored["G1-paper"]["per_seed"] == list(ARCHIVED["G1-paper"][0])
+    assert scored["G1-paper"]["cost"] == pytest.approx(-2.738)
+
+
+def test_a_cell_that_never_reached_validate_is_not_scored(tmp_path):
+    import score_v070_gate as S
+    from v070_gate_bands import package_provenance
+
+    prov = package_provenance(_staged(tmp_path))
+    cells = [_cell("random", 42, 78.838, -2.738, prov),
+             _cell("random", 123, 78.668, -2.738, prov, stage="recover"),
+             _cell("random", 456, 78.942, -2.738, prov)]
+    scored = S.group(cells)
+    assert scored["G1-paper"]["per_seed"] == [78.838, 78.942], (
+        "a run that stopped before validate has no scoreable number, and "
+        "averaging over whatever finished turns two seeds into three")
+    assert scored["G1-paper"]["n_cells"] == 2
+
+
+def test_a_missing_cost_leaves_the_cost_absent(tmp_path):
+    import score_v070_gate as S
+    from v070_gate_bands import package_provenance
+
+    prov = package_provenance(_staged(tmp_path))
+    cells = [_cell("random", 42, 78.838, -2.738, prov),
+             _cell("random", 123, 78.668, None, prov),
+             _cell("random", 456, 78.942, -2.738, prov)]
+    assert S.group(cells)["G1-paper"]["cost"] is None, (
+        "a mean over the two seeds that reported one is not the arm's cost")

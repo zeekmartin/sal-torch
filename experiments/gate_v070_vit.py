@@ -59,13 +59,15 @@ for _p in (str(SCRIPTS), str(HERE)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from v070_gate_bands import check_all  # noqa: E402
+from v070_gate_bands import (BANDS_BY_CELL, check_all,  # noqa: E402
+                             package_provenance)
 
 DATASET = "evanarlian/imagenet_1k_resized_256"
 SEEDS = (42, 123, 456)
-#: band names per strategy, from the pre-registration
-BANDS_FOR = {"random": ("G1-paper", "G1-default"),
-             "magnitude": ("G2-paper", "G2-default")}
+#: band names per strategy, from the pre-registration itself rather than a
+#: second copy of it: the scorer reads the same map.
+BANDS_FOR = {k: v for k, v in BANDS_BY_CELL.items()
+             if k in ("random", "magnitude")}
 
 
 class NormalizedSplit:
@@ -204,8 +206,14 @@ def run_cell(model, eval_data, train_data, *, strategy, seed, pruning,
                                batch_size=128, seed=seed,
                                model_name="ViT-B/16 (gate, %s)" % label,
                                **({"eval_autocast": amp} if amp else {}))
+    # Which code this cell tested, derived from the module that was actually
+    # imported and compared against the sidecar beside it. A band is not
+    # passed on a result that cannot say this.
+    import sal
     out = {"label": label, "strategy": strategy, "seed": seed, "mode": mode,
            "pruning": pruning, "epochs": epochs,
+           "provenance": package_provenance(sal),
+           "sal_version": sal.__version__,
            "precision": pipe.precision, "stages": []}
     path = Path(outdir) / ("gate_%s.json" % label)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -274,6 +282,12 @@ def main(argv=None) -> int:
     p.add_argument("--n-val", type=int, default=50_000)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--workers", type=int, default=7)
+    # A cached full split is 180 GB and memory-mapped, so each row is a 147 KB
+    # read from Lustre. Workers let those reads overlap the compute and block
+    # shuffling keeps them sequential: a full shuffle of the file measured 3.6x
+    # slower than the same data cached. exp29 sets both the same way.
+    p.add_argument("--loader-workers", type=int, default=6)
+    p.add_argument("--loader-block", type=int, default=512)
     p.add_argument("--output", default="results/gate_v070_vit")
     p.add_argument("--gate", action="store_true",
                    help="one seed, 2000 train and 1000 val images: a small "
@@ -335,6 +349,10 @@ def main(argv=None) -> int:
     P.log("  control verified: %s" % ladder.summary()
           if hasattr(ladder, "summary") else "  control loaded and verified")
 
+    if args.data_cache:
+        P.LOADER_WORKERS, P.LOADER_BLOCK = args.loader_workers, args.loader_block
+        P.log("  cache %s, loader workers %d, block %d"
+              % (args.data_cache, args.loader_workers, args.loader_block))
     sizes = {"n_train": args.n_train, "n_val": args.n_val, "n_fi": P.N_FI}
     for seed in args.seeds:
         P.log("\n  seed %d" % seed)
@@ -365,10 +383,28 @@ def main(argv=None) -> int:
             if all(c is not None for c in costs) else None)
     scored = {name: {"per_seed": per_seed, "cost": cost}
               for name in bands_wanted}
+    # Numbers only here. The ancestry half of a band ("was this produced by
+    # code that is an ancestor of what we would push") needs the git history,
+    # and the cluster checkout is not a repository, so the authoritative
+    # scoring runs off-cluster against the recorded provenance in these cells.
     verdict = check_all(scored)
-    (outdir / "gate_verdict_%s_%s.json" % (args.strategy, args.mode)).write_text(
-        json.dumps({"verdict": verdict, "cells": results}, indent=1,
-                   default=str), encoding="utf-8")
+    prov = results[-1].get("provenance") if results else None
+    # Parenthesised, because `/` binds tighter than `%`: the first version of
+    # this line formatted the Path rather than the string and died with a
+    # TypeError AFTER every stage had run and written, which failed the gate
+    # job and left its arms on a dependency that could never be satisfied.
+    (outdir / ("gate_verdict_%s_%s.json" % (args.strategy, args.mode))).write_text(
+        json.dumps({"verdict": verdict, "cells": results,
+                    "provenance": prov,
+                    "scoring_note": "numbers only; ancestry is verified "
+                                    "off-cluster by score_v070_gate.py"},
+                   indent=1, default=str), encoding="utf-8")
+    if prov:
+        rec = prov.get("recorded") or {}
+        print("  code under test: commit %s, package hash %s, sidecar "
+              "matches: %s" % ((rec.get("commit") or "?")[:12],
+                               (prov["computed"]["aggregate_sha256"])[:12],
+                               prov["matches"]))
 
     print()
     for name, v in verdict["bands"].items():
