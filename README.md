@@ -402,7 +402,7 @@ the matched 2-epoch control (**81.554%**, 3 seeds, nothing pruned):
 | 50% heads + 50% FFN (magnitude) | −49.1% | 71.83% | **−9.73pp** | −11.27pp |
 
 3 seeds per cell, full 50 000-image validation split
-(`EXP35_FFN_AT_2EP.md`, 22.9 GPU-hours; in the public data archive deposited with the preprint, cited by its DOI once minted).
+(`EXP35_FFN_AT_2EP.md`, 22.9 GPU-hours; in the public data archive, DOI [10.5281/zenodo.24391200](https://doi.org/10.5281/zenodo.24391200), as `data/pro/results/EXP35_FFN_AT_2EP.md`).
 
 **For FFN neurons, no selection criterion dominates.** Magnitude is better at
 25% of neurons (+0.43pp, separated on 3/3 seeds by 0.32pp) and random is
@@ -460,7 +460,7 @@ So quote it as: *2.04x on torch/oneMKL, 1.95x on ONNX Runtime, both at batch 32
 on an EPYC 7A53 at 7 threads, at a cost of −9.73pp.* Two backends, one honest
 range, and no configuration measured clears 2x on both. Trail:
 `EXP41_WIDTH.md` (three-pass CPU and GPU grids) and
-`EXP43_ORT_CPU.md` (ORT), both in the public data archive deposited with the preprint, cited by its DOI once minted.
+`EXP43_ORT_CPU.md` (ORT), both in the public data archive, DOI [10.5281/zenodo.24391200](https://doi.org/10.5281/zenodo.24391200), under `data/pro/results/`.
 
 **On GPU, every arm is 1.00x at batch 1** (8.09–8.37 ms against 8.16 ms dense),
 because a ViT-B/16 there is kernel-launch bound. **Any latency claim must state
@@ -1581,6 +1581,42 @@ Everything documented elsewhere in this README — SAL head masking, aligned
 pruning with `uniform_per_layer` and `slice_heads()`, `FIScanner`,
 `PlasticityScanner`, `RobustnessTest`, `StructuralGuard`, `probe()` and
 `CompressionPipeline` — is in this package and needs nothing else.
+
+## Citation
+
+The measurements in this README are from the preprint, and every figure in it is
+generated from the result files in the data archive beside it.
+
+- **Paper**: *The Price of Structure: Matched-Control Measurements of
+  Transformer Compression on ViT, BERT and OPT*,
+  [10.5281/zenodo.24390835](https://doi.org/10.5281/zenodo.24390835)
+- **Data archive** (per-cell result files, the canonical tables, the generators
+  and the verifiers): [10.5281/zenodo.24391200](https://doi.org/10.5281/zenodo.24391200)
+
+```bibtex
+@misc{martinventi2026price,
+  title        = {The Price of Structure: Matched-Control Measurements of
+                  Transformer Compression on ViT, BERT and OPT},
+  author       = {Martin Venti, David},
+  year         = {2026},
+  publisher    = {Zenodo},
+  doi          = {10.5281/zenodo.24390835},
+  url          = {https://doi.org/10.5281/zenodo.24390835},
+  note         = {Preprint. Data archive: 10.5281/zenodo.24391200}
+}
+
+@misc{martinventi2026pricedata,
+  title        = {Data archive for "The Price of Structure"},
+  author       = {Martin Venti, David},
+  year         = {2026},
+  publisher    = {Zenodo},
+  doi          = {10.5281/zenodo.24391200},
+  url          = {https://doi.org/10.5281/zenodo.24391200}
+}
+```
+
+To cite the software itself rather than the measurements, see
+[CITATION.cff](CITATION.cff).
 
 Contact: david.martin@cognitive-engineering.dev
 

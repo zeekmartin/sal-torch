@@ -1,0 +1,50 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, cite the preprint below. The software itself is
+  cited by this file; the measurements it reports are cited by the preprint,
+  and the result files behind them by the data archive.
+title: sal-torch
+abstract: >-
+  A measured compression tool for PyTorch transformers: diagnose structural
+  fragility, route by a measured probe, prune, recover, and verify against a
+  dense control trained for the same budget.
+type: software
+authors:
+  - family-names: Martin Venti
+    given-names: David
+    email: david.martin@cognitive-engineering.dev
+    affiliation: Cognitive Engineering
+    orcid: https://orcid.org/0009-0000-6675-7821
+repository-code: https://github.com/zeekmartin/sal-torch
+license-url: https://github.com/zeekmartin/sal-torch/blob/main/LICENSE
+keywords:
+  - pytorch
+  - transformers
+  - compression
+  - pruning
+  - sparsity
+preferred-citation:
+  type: article
+  title: >-
+    The Price of Structure: Matched-Control Measurements of Transformer
+    Compression on ViT, BERT and OPT
+  authors:
+    - family-names: Martin Venti
+      given-names: David
+      affiliation: Cognitive Engineering
+      orcid: https://orcid.org/0009-0000-6675-7821
+  year: 2026
+  doi: 10.5281/zenodo.24390835
+  url: https://doi.org/10.5281/zenodo.24390835
+  notes: >-
+    Preprint on Zenodo. Data archive: 10.5281/zenodo.24391200
+references:
+  - type: data
+    title: Data archive for "The Price of Structure"
+    authors:
+      - family-names: Martin Venti
+        given-names: David
+        orcid: https://orcid.org/0009-0000-6675-7821
+    year: 2026
+    doi: 10.5281/zenodo.24391200
+    url: https://doi.org/10.5281/zenodo.24391200

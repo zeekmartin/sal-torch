@@ -542,9 +542,12 @@ repairs.
 
 **Also in v0.7.0:**
 
-- **`recover()` as a pipeline stage — item 1.** `CompressionPipeline` has no
-  recovery stage today, so every accuracy this project publishes for post-hoc
-  pruning includes a step the product does not perform. Default 2 epochs,
+- **`recover()` as a pipeline stage — item 1. IMPLEMENTED**, see the
+  `[Unreleased]` entry in `CHANGELOG.md`; what follows is the specification it
+  was built to, kept because it carries the measured reason for every default.
+  Before it, `CompressionPipeline` had no recovery stage, so every accuracy
+  this project publishes for post-hoc pruning included a step the product did
+  not perform. Default 2 epochs,
   mask-preserving by default, and matched-control reporting that separates
   `fine_tuning_gain_pp` from `pruning_cost_pp` and emits the second only when
   the epoch counts match. Specified in `SPEC_V070_RECOVERY.md`.
@@ -559,10 +562,31 @@ repairs.
   why a cost taken against the pretrained checkpoint instead of the
   matched control is inflated on every arm: for unstructured-50 it reads
   1.6338 instead of 0.9939, **65% too high**. Source: the OPT-1.3B
-  per-cell result files, which go into the public data archive deposited
-  with the preprint; this page will cite them by that archive's DOI once
-  it is minted. The OPT-6.7B figures are measured and are deliberately
-  not quoted here yet: they go in with the same DOI.
+  per-cell result files in the public data archive, DOI [10.5281/zenodo.24391200](https://doi.org/10.5281/zenodo.24391200), under
+  `data/pro/results/exp36_rec_*/exp36_opt_sparse.json`, with the
+  write-up at `data/pro/results/EXP36_OPT_SPARSE.md`.
+
+  **And at 6.7B the stage stops paying on the cheapest arm.** The
+  figures were withheld from this page until the archive had a DOI;
+  it has one, so they are here. WikiText-2 perplexity, OPT-6.7B,
+  three seeds, `wanda_unstructured_50`:
+
+  | | WikiText-2 ppl |
+  |---|---|
+  | dense, no training | 10.8601 |
+  | dense control, after 32M C4 tokens | 11.9907 / 12.0425 / 11.7714, mean 11.9349 |
+  | the corpus's own cost | **+1.0748** |
+  | one-shot | 11.8898 / 12.2210 / 12.0657, mean 12.0588 |
+  | one-shot damage against dense | **+1.1987** |
+  | recovered | 12.2012 / 12.2703 / 12.2829, mean 12.2514 |
+  | recovered minus its own one-shot | **+0.1926**, worse on 3 of 3 seeds |
+
+  The domain cost of the recovery corpus and the damage it is
+  repairing are the same size, so the recovered arm ends **worse than
+  its own one-shot model**. Nothing is wrong with the recovery; it is
+  being asked to repair less than it breaks. Sources:
+  `data/pro/results/w5_opt67_{ctrl,wu50}_s{42,123,456}/exp36_opt_sparse.json`
+  in the same archive.
 
   At 1.3B the stage still pays, because the damage it repairs is several
   times that 0.64: the 2:4 and FFN arms lose about 3.2 perplexity
@@ -607,12 +631,16 @@ repairs.
   `recover()` has no published comparison to preserve, so it is free to
   do all three; the research harness is not, since changing the optimizer
   there would silently make already-measured arms incomparable, and it
-  has therefore gained the logging only. The measured evidence is in the
-  per-cell result files and the recovery-stability table generated from
-  them, both of which go into the public data archive deposited with the
-  preprint; this page will cite them by that archive's DOI once it is
-  minted, and quotes no figures from them here for the same reason the
-  rest of this item does not.
+  has therefore gained the logging only. The measured evidence is in the public data archive, DOI [10.5281/zenodo.24391200](https://doi.org/10.5281/zenodo.24391200):
+  the per-cell result files under `data/pro/results/w5_opt67_*/` and
+  the recovery-stability table generated from them, in
+  `tables/CANONICAL_TABLES.md`. The arm is `ffn_random_50` at 6.7B,
+  whose cost against the matched control spans **+9.33 to +201.62
+  perplexity** over three seeds. That is reported as a range with
+  **no central value**, because neither a mean nor a median over a
+  diverged seed is a measurement; the stability column gives each
+  cell's largest rise above its own running minimum, and the step it
+  peaked at.
 
 - **Selection defaults differ by component, and both are measured.**
   `recover()` and the compression stage ahead of it should default to
@@ -628,10 +656,10 @@ repairs.
   one-shot** and 0.528pp worse after recovery, so a one-shot benchmark
   picks the wrong FFN default. Magnitude's one-shot figure is identical
   across seeds because the selection is deterministic; only the recovery
-  differs. Sources: the per-seed FFN result files and the canonical
-  tables generated from them, both of which go into the public data
-  archive deposited with the preprint; this page will cite them by that
-  archive's DOI once it is minted.
+  differs. Sources, in the public data archive, DOI [10.5281/zenodo.24391200](https://doi.org/10.5281/zenodo.24391200):
+  `data/pro/results/w3_ffn25_magnitude_s*/exp35_mlp_matched.json` and
+  `data/pro/results/w3_ffn25_random_s*/exp35_mlp_matched.json`, with
+  the generated table in `tables/CANONICAL_TABLES.md`.
 - **`mask_mode="drophead"` on `HeadMasker` — item 2.** DropHead is recommended
   throughout this document and is **not callable from the package**:
   `HeadMasker` accumulates and holds, which is SAL, and the per-step resampled

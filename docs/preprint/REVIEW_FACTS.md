@@ -102,7 +102,7 @@ Why the median: "a single MIOpen recompilation or a neighbouring job on the node
 | head50_mlp50 | 32 | 27.2370 | 27.2192 | 27.2544 | **0.13%** | 1174.9 | 1.738x |
 | head50_mlp50 | 64 | 52.5507 | 52.4989 | 52.6295 | **0.25%** | 1217.9 | 1.789x |
 
-Source: `results/exp39/exp39_latency.json` in the data archive deposited with the preprint, job 23698248 (latest of 2).
+Source: `results/exp39/exp39_latency.json` in the data archive deposited with the preprint, DOI 10.5281/zenodo.24391200, job 23698248 (latest of 2).
 
 ### A2.2b CPU dispersion: three independent passes
 
