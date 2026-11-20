@@ -22,7 +22,7 @@
 \author{David Martin Venti\\
 Cognitive Engineering, Switzerland\\
 ORCID: 0009-0000-6675-7821}
-\date{November 19, 2026}
+\date{November 20, 2026\\[2pt]\small Preprint, \href{https://doi.org/10.5281/zenodo.24390835}{doi:10.5281/zenodo.24390835}}
 
 \begin{document}
 \maketitle
@@ -333,7 +333,7 @@ What remains usable is a descriptive layer classification: at the shipped thresh
 \paragraph{Future work.} Hardware measurements of 2:4 sparsity on GPUs that support it, a zero-shot evaluation of the recovered 6.7B models, a recovery recipe with gradient clipping for heavily damaged models, recovery on domain-matched data, larger models, and a recovery stage in our open-source tooling so that the shipped pipeline reproduces the figures reported here.
 
 \section*{Data availability}
-All per-cell result files, the canonical tables from which every figure in this paper is generated, and the scripts that generate and verify them are archived with this preprint on Zenodo (DOI to be assigned at deposit). Every figure carries its seeds, its spread, its matched control, the hardware, the batch size, the source file and the job that produced it, and a verifier regenerates the tables from the result files and fails on any difference.
+All per-cell result files, the canonical tables from which every figure in this paper is generated, and the scripts that generate and verify them are archived with this preprint on Zenodo, \href{https://doi.org/10.5281/zenodo.24391200}{doi:10.5281/zenodo.24391200}. Every figure carries its seeds, its spread, its matched control, the hardware, the batch size, the source file and the job that produced it, and a verifier regenerates the tables from the result files and fails on any difference.
 
 \emph{Open-source code and ViT write-ups.} The package \texttt{sal-torch} and the experiment write-ups of Sections~\ref{sec:protocol} to \ref{sec:structure} for ViT-B/16 and BERT-base are at \url{https://github.com/zeekmartin/sal-torch}, under \texttt{results/lumi\_v060/}, together with the control convention (\texttt{CONTROL\_CONVENTION.md}) and the corrections applied on load (\texttt{CORRECTIONS.json}).
 
