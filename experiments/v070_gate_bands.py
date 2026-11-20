@@ -321,9 +321,10 @@ def package_provenance(module=None) -> dict:
                       "which commit it tested" % PROVENANCE_NAME)
         return out
     rec = json.loads(side.read_text(encoding="utf-8"))
-    out["recorded"] = {k: rec.get(k) for k in
-                       ("commit", "aggregate_sha256", "n_files", "dirty",
-                        "recorded_at", "contains_precision_change")}
+    # Everything the sidecar records about WHAT is in the commit is surfaced,
+    # not a fixed subset: a field that exists in the sidecar and silently
+    # reads None in the result is worse than no field at all.
+    out["recorded"] = {k: v for k, v in rec.items() if k != "files"}
     out["matches"] = (rec.get("aggregate_sha256")
                       == live["aggregate_sha256"]
                       and rec.get("n_files") == live["n_files"])
