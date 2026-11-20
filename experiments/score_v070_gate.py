@@ -76,10 +76,39 @@ def group(cells) -> dict:
         costs = [c for c in v["costs"] if c is not None]
         mean_cost = (sum(costs) / len(costs)
                      if len(costs) == len(v["values"]) and costs else None)
+        provs = [c.get("provenance") for c in v["cells"]]
         for band in BANDS_BY_CELL.get(key, ()):
             out[band] = {"per_seed": v["values"], "cost": mean_cost,
-                         "n_cells": len(v["cells"])}
+                         "n_cells": len(v["cells"]), "provenances": provs}
     return out
+
+
+def band_provenance(entry: dict, target: str, repo) -> dict:
+    """The provenance verdict for ONE band, over its own cells.
+
+    Per band rather than per batch, and the distinction is not cosmetic: the
+    three seeds of a band have to be the same code, or they are not one
+    measurement, while two different bands may legitimately have run different
+    commits as long as each is in the history being published. Enforcing one
+    hash across the whole batch would refuse a perfectly sound gate whose
+    families ran a parent and its child.
+    """
+    provs = [p for p in entry.get("provenances", []) if p]
+    if len(provs) != entry.get("n_cells"):
+        return {"ok": False,
+                "why": "%d of %d cells carry no provenance"
+                       % (entry.get("n_cells", 0) - len(provs),
+                          entry.get("n_cells", 0))}
+    hashes = {p.get("computed", {}).get("aggregate_sha256") for p in provs}
+    commits = {(p.get("recorded") or {}).get("commit") for p in provs}
+    if len(hashes) > 1 or len(commits) > 1:
+        return {"ok": False,
+                "why": "this band's %d cells ran %d different packages, so "
+                       "they are not one measurement"
+                       % (len(provs), max(len(hashes), len(commits)))}
+    v = verify_provenance(provs[0], target=target, repo=repo)
+    v["n_cells"] = len(provs)
+    return v
 
 
 def main(argv=None) -> int:
@@ -94,44 +123,32 @@ def main(argv=None) -> int:
 
     cells = load_cells(args.files)
     scored = group(cells)
-    provs = [c.get("provenance") for c in cells if c.get("provenance")]
-    prov = provs[0] if provs else None
 
-    # Every cell must agree on the code it used. A batch scored across two
-    # different packages is not one measurement.
-    hashes = {(c.get("provenance") or {}).get("computed", {})
-              .get("aggregate_sha256") for c in cells}
-    hashes.discard(None)
-    mixed = len(hashes) > 1
-
-    verdict = check_all(scored, provenance=prov, target=args.target,
-                        repo=HERE.parent)
-    if mixed:
-        verdict["passed"] = False
-        for v in verdict["bands"].values():
-            v["passed"] = False
-            v["why"] = list(v["why"]) + [
-                "provenance: the cells were produced by more than one package "
-                "(%d distinct hashes), so they are not one measurement"
-                % len(hashes)]
+    # Numbers first, then each band's own provenance. A band passes only if
+    # both hold.
+    verdict = check_all(scored)
+    per_band = {}
+    for name, entry in scored.items():
+        pv = band_provenance(entry, args.target, HERE.parent)
+        per_band[name] = pv
+        if not pv["ok"]:
+            verdict["bands"][name]["passed"] = False
+            verdict["bands"][name]["why"] = list(
+                verdict["bands"][name]["why"]) + ["provenance: " + pv["why"]]
+    verdict["passed"] = all(v["passed"] for v in verdict["bands"].values())
+    verdict["provenance"] = per_band
 
     if args.json:
-        print(json.dumps({"verdict": verdict, "scored": scored,
-                          "n_cells": len(cells), "mixed_packages": mixed},
-                         indent=1, default=str))
-        return 0 if verdict["passed"] else 1
+        print(json.dumps({"verdict": verdict,
+                          "scored": {k: {kk: vv for kk, vv in v.items()
+                                         if kk != "provenances"}
+                                     for k, v in scored.items()},
+                          "n_cells": len(cells)}, indent=1, default=str))
+        return 0 if (verdict["passed"] and verdict["complete"]) else 1
 
     print("=== v0.7.0 gate, scored against the pre-registration ===")
     print("cells read: %d | bands scored: %d of %d"
           % (len(cells), verdict["n_checked"], verdict["n_bands"]))
-    pv = verdict.get("provenance")
-    if pv:
-        print("code under test: %s" % pv["why"])
-    else:
-        print("code under test: NOTHING RECORDED, so no band can pass")
-    if mixed:
-        print("MIXED PACKAGES: %d distinct package hashes across the cells"
-              % len(hashes))
     print()
     for name in BANDS:
         v = verdict["bands"].get(name)
@@ -143,6 +160,9 @@ def main(argv=None) -> int:
               % (v["n_seeds"], v["mean"],
                  ["%.4f" % x for x in v["per_seed"]],
                  "none" if v["cost"] is None else "%.4f" % v["cost"]))
+        pv = per_band.get(name)
+        if pv:
+            print("      code: %s" % pv["why"])
         for why in v["why"]:
             print("      %s" % why)
     print()

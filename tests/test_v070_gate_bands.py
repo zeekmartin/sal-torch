@@ -341,3 +341,46 @@ def test_a_missing_cost_leaves_the_cost_absent(tmp_path):
              _cell("random", 456, 78.942, -2.738, prov)]
     assert S.group(cells)["G1-paper"]["cost"] is None, (
         "a mean over the two seeds that reported one is not the arm's cost")
+
+
+def test_provenance_is_enforced_per_band_not_per_batch(tmp_path):
+    """Three seeds of one band must be one package; two bands may differ.
+
+    The ViT and OPT families of the real gate ran a parent commit and its
+    child, because a bug found by the first ViT arms was fixed between them.
+    Demanding one package across the whole batch would refuse that, although
+    each family is internally consistent and both are in the history being
+    published.
+    """
+    import subprocess
+
+    import score_v070_gate as S
+    from v070_gate_bands import package_provenance
+
+    repo = Path(__file__).resolve().parents[1]
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(repo),
+                          capture_output=True, text=True).stdout.strip()
+    parent = subprocess.run(["git", "rev-parse", "HEAD~1"], cwd=str(repo),
+                            capture_output=True, text=True).stdout.strip()
+
+    older = package_provenance(_staged(tmp_path / "a", commit=parent))
+    newer = package_provenance(_staged(tmp_path / "b", commit=head))
+
+    # One band, one package: fine.
+    one = {"n_cells": 3, "provenances": [newer, newer, newer]}
+    v = S.band_provenance(one, "HEAD", repo)
+    assert v["ok"], v["why"]
+
+    # Another band on the parent commit: also fine, it is an ancestor.
+    other = {"n_cells": 3, "provenances": [older, older, older]}
+    assert S.band_provenance(other, "HEAD", repo)["ok"]
+
+    # The same band split across two packages: refused.
+    mixed = {"n_cells": 3, "provenances": [older, newer, newer]}
+    v = S.band_provenance(mixed, "HEAD", repo)
+    assert not v["ok"] and "different packages" in v["why"]
+
+    # A cell with no provenance at all: refused, and counted.
+    missing = {"n_cells": 3, "provenances": [newer, newer, None]}
+    v = S.band_provenance(missing, "HEAD", repo)
+    assert not v["ok"] and "carry no provenance" in v["why"]
