@@ -54,21 +54,21 @@ def test_epochs_defaults_to_two_and_lands_in_the_record(tiny_model):
 
 
 def test_loss_decreases_over_two_epochs(tiny_model):
-    rec = recover_model(tiny_model, _data(), epochs=2, lr=1e-3, batch_size=4)
+    rec = recover_model(tiny_model, _data(), epochs=2, lr=1e-3, batch_size=4, domain="same as eval")
     assert len(rec["epoch_losses"]) == 2
     assert rec["epoch_losses"][1] < rec["epoch_losses"][0]
 
 
 def test_exactly_one_budget(tiny_model):
     with pytest.raises(ValueError, match="exactly one budget"):
-        recover_model(tiny_model, _data(), epochs=2, tokens=1000)
+        recover_model(tiny_model, _data(), epochs=2, tokens=1000, domain="same as eval")
     with pytest.raises(ValueError, match="exactly one budget"):
-        recover_model(tiny_model, _data(), epochs=None, tokens=None)
+        recover_model(tiny_model, _data(), epochs=None, tokens=None, domain="same as eval")
 
 
 def test_token_budget_builds_its_own_schedule(tiny_model):
     # 4x16 = 64 tokens a batch, so 200 tokens is four steps.
-    rec = recover_model(tiny_model, _data(), epochs=None, tokens=200, batch_size=4)
+    rec = recover_model(tiny_model, _data(), epochs=None, tokens=200, batch_size=4, domain="same as eval")
     assert rec["total_steps_planned"] == 4
     assert rec["steps"] == 4
     assert rec["tokens_seen"] >= 200
@@ -84,7 +84,7 @@ def test_sparsity_survives_a_user_supplied_mask(tiny_model):
     zeros_before = (param.data == 0).clone()
 
     rec = recover_model(tiny_model, _data(), epochs=2, lr=1e-2, batch_size=4,
-                        masks=masks, preserve_sparsity=True)
+                        masks=masks, preserve_sparsity=True, domain="same as eval")
 
     assert rec["n_masked_params"] == 1
     assert rec["sparsity_drift"] == 0.0
@@ -101,13 +101,13 @@ def test_sparsity_loss_raises(tiny_model):
     masks = _zero_a_block(tiny_model)
     with pytest.raises(RecoveryError, match="did not preserve the mask"):
         recover_model(tiny_model, _data(), epochs=2, lr=1e-2, batch_size=4,
-                      masks=masks, preserve_sparsity=True, enforce_masks=False)
+                      masks=masks, preserve_sparsity=True, enforce_masks=False, domain="same as eval")
 
 
 def test_mask_names_an_absent_parameter_raises(tiny_model):
     with pytest.raises(RecoveryError, match="does not have"):
         recover_model(tiny_model, _data(), epochs=1,
-                      masks={"no.such.weight": torch.ones(2, 2, dtype=torch.bool)})
+                      masks={"no.such.weight": torch.ones(2, 2, dtype=torch.bool)}, domain="same as eval")
 
 
 def test_capture_finds_no_mask_on_a_dense_model(tiny_model):
@@ -141,13 +141,13 @@ def test_clipping_bounds_the_step(tiny_model):
     start = {k: v.clone() for k, v in tiny_model.state_dict().items()}
 
     rl = recover_model(loose, data, epochs=1, batch_size=4, max_grad_norm=None,
-                       optimizer=torch.optim.SGD(loose.parameters(), lr=0.1))
+                       optimizer=torch.optim.SGD(loose.parameters(), lr=0.1), domain="same as eval")
     # Clip at half the norm this fixture actually produces. A bound orders of
     # magnitude below it would scale the update below float32's resolution at
     # these weights, and the test would then be measuring rounding.
     bound = rl["grad_norms"][0] / 2
     rc = recover_model(clipped, data, epochs=1, batch_size=4, max_grad_norm=bound,
-                       optimizer=torch.optim.SGD(clipped.parameters(), lr=0.1))
+                       optimizer=torch.optim.SGD(clipped.parameters(), lr=0.1), domain="same as eval")
 
     # The logged norm is the norm BEFORE clipping, so both runs see the same one.
     assert rc["grad_norms"][0] == pytest.approx(rl["grad_norms"][0], rel=1e-5)
@@ -167,7 +167,7 @@ def test_clipping_bounds_the_step(tiny_model):
 
 
 def test_grad_norms_and_loss_curve_have_one_entry_per_step(tiny_model):
-    rec = recover_model(tiny_model, _data(n=3), epochs=2, batch_size=4)
+    rec = recover_model(tiny_model, _data(n=3), epochs=2, batch_size=4, domain="same as eval")
     assert rec["steps"] == 6
     assert len(rec["grad_norms"]) == 6
     assert len(rec["loss_curve"]) == 6
@@ -187,13 +187,13 @@ def test_non_finite_loss_raises(tiny_model):
             return out
 
     with pytest.raises(RecoveryError, match="non-finite loss"):
-        recover_model(Diverged(tiny_model), _data(n=1), epochs=1, batch_size=4)
+        recover_model(Diverged(tiny_model), _data(n=1), epochs=1, batch_size=4, domain="same as eval")
 
 
 # -------------------------------------------------------------------- schedule
 def test_warmup_does_not_peak_outside_its_window(tiny_model):
     rec = recover_model(tiny_model, _data(n=10), epochs=1, batch_size=4,
-                        schedule="warmup_cosine", warmup_ratio=0.5)
+                        schedule="warmup_cosine", warmup_ratio=0.5, domain="same as eval")
     lrs = rec["lr_curve"]
     peak = lrs.index(max(lrs))
     assert lrs[0] < max(lrs), "step 0 must not already be at the peak"
@@ -210,7 +210,7 @@ def test_one_cycle_climbs_to_a_peak_above_its_start(tiny_model):
     from sal.recovery import ONE_CYCLE_DIV_FACTOR
 
     rec = recover_model(tiny_model, _data(n=10), epochs=1, batch_size=4,
-                        schedule="one_cycle", max_lr=1e-4, pct_start=0.30)
+                        schedule="one_cycle", max_lr=1e-4, pct_start=0.30, domain="same as eval")
     lrs = rec["lr_curve"]
     peak = lrs.index(max(lrs))
     assert rec["peak_lr"] == 1e-4
@@ -229,14 +229,14 @@ def test_one_cycle_climbs_to_a_peak_above_its_start(tiny_model):
 def test_warmup_cosine_never_exceeds_the_base_rate(tiny_model):
     """The contrast with one_cycle: no excursion above the rate asked for."""
     rec = recover_model(tiny_model, _data(n=10), epochs=1, batch_size=4,
-                        lr=5e-5, schedule="warmup_cosine", warmup_ratio=0.5)
+                        lr=5e-5, schedule="warmup_cosine", warmup_ratio=0.5, domain="same as eval")
     assert max(rec["lr_curve"]) == pytest.approx(5e-5)
     assert rec["peak_lr"] == 5e-5
 
 
 def test_unknown_schedule_raises(tiny_model):
     with pytest.raises(ValueError, match="schedule must be"):
-        recover_model(tiny_model, _data(n=1), epochs=1, schedule="cosine")
+        recover_model(tiny_model, _data(n=1), epochs=1, schedule="cosine", domain="same as eval")
 
 
 # --------------------------------------------------------------------- the rise
@@ -247,7 +247,7 @@ def test_max_rise_above_running_min():
 
 
 def test_the_rise_is_recorded_with_the_curve(tiny_model):
-    rec = recover_model(tiny_model, _data(n=3), epochs=1, batch_size=4)
+    rec = recover_model(tiny_model, _data(n=3), epochs=1, batch_size=4, domain="same as eval")
     rise, step = max_rise_above_running_min(rec["loss_curve"])
     assert rec["max_rise_above_running_min"] == rise
     assert rec["max_rise_step"] == step
@@ -380,3 +380,110 @@ def test_control_budget_matching():
     assert RecoveryControl(0.8, tokens=32_000_000).matches(None, 16_000_000) is False
     assert RecoveryControl(0.8, epochs=2).matches(None, 32_000_000) is False
     assert RecoveryControl(0.8).matches(2, None) is False
+
+
+# -------------------------------------------------------------------- autocast
+def test_autocast_for_returns_a_real_context_for_an_accelerator():
+    """The branch a CPU-only suite cannot otherwise reach.
+
+    Asserting that the source mentions autocast would be a source test, which
+    rule 11 allows only as a supplement. The choice is a function of the device
+    type, so the CUDA branch is executable here even with no CUDA device: what
+    is checked is which context object comes back, not that it casts.
+    """
+    import contextlib
+
+    from sal.recovery import autocast_for
+
+    cpu = autocast_for("cpu", torch.bfloat16)
+    assert isinstance(cpu, contextlib.nullcontext), (
+        "CPU autocast is a different dtype policy from the archived runs', so "
+        "the flag must not be honoured there")
+    off = autocast_for("cuda", None)
+    assert isinstance(off, contextlib.nullcontext)
+
+    on = autocast_for("cuda", torch.bfloat16)
+    assert isinstance(on, torch.autocast)
+    assert on.device == "cuda" and on.fast_dtype == torch.bfloat16
+
+    named = autocast_for("cuda", "float16")
+    assert isinstance(named, torch.autocast)
+    assert named.fast_dtype == torch.float16
+
+
+def test_the_recovery_record_states_the_autocast_it_ran_under(tiny_model):
+    rec = recover_model(tiny_model, _data(n=2), epochs=1, batch_size=4,
+                        amp_dtype=torch.bfloat16, domain="same as eval")
+    assert rec["amp_dtype"] == "torch.bfloat16"
+    off = recover_model(tiny_model, _data(n=2), epochs=1, batch_size=4, domain="same as eval")
+    assert off["amp_dtype"] is None
+
+
+def test_the_pipeline_records_the_precision_it_scored_at(tiny_model):
+    pipe = _pipe(tiny_model)
+    assert pipe.precision["eval_autocast"] is None
+    pipe2 = CompressionPipeline(tiny_model, _data(), metric="loss",
+                                batch_size=4, eval_autocast="float16")
+    assert pipe2.precision["eval_autocast"] == "float16"
+    # On CPU it is a no-op, so the score is the same either way.
+    assert pipe2._accuracy() == pytest.approx(pipe._accuracy())
+
+
+def test_domain_is_required_by_the_loop_too(tiny_model):
+    """Not only by the pipeline wrapper: the gate drives this function."""
+    with pytest.raises(TypeError):
+        recover_model(tiny_model, _data(), epochs=1)   # no domain at all
+    with pytest.raises(ValueError, match="needs domain="):
+        recover_model(tiny_model, _data(), domain="   ", epochs=1)
+    rec = recover_model(tiny_model, _data(n=1), domain="wikitext-2 train",
+                        epochs=1, batch_size=4)
+    assert rec["domain"] == "wikitext-2 train"
+
+
+def test_generic_warns_from_the_loop(tiny_model, caplog):
+    with caplog.at_level("WARNING"):
+        recover_model(tiny_model, _data(n=1), domain="generic", epochs=1,
+                      batch_size=4)
+    assert any("0.6398" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------- the budget
+def test_resolve_budget_tells_a_default_from_a_choice():
+    """The trap the gate's micro-test found: tokens= against an epochs default.
+
+    With `epochs=2` as a plain default, a decoder caller passing `tokens=` was
+    refused for "passing both", and had to write `epochs=None` to say what the
+    token budget already said.
+    """
+    from sal.recovery import DEFAULT_EPOCHS, UNSET, resolve_budget
+
+    assert resolve_budget(UNSET, None) == (DEFAULT_EPOCHS, None)
+    assert resolve_budget(UNSET, 128) == (None, 128)
+    assert resolve_budget(3, None) == (3, None)
+    assert resolve_budget(None, 128) == (None, 128)
+    with pytest.raises(ValueError, match="Both were given"):
+        resolve_budget(2, 128)
+    with pytest.raises(ValueError, match="got neither"):
+        resolve_budget(None, None)
+    assert DEFAULT_EPOCHS == 2
+
+
+def test_token_mode_needs_no_epochs_argument(tiny_model):
+    rec = recover_model(tiny_model, _data(n=4), domain="same as eval",
+                        tokens=200, batch_size=4)
+    assert rec["epochs"] is None and rec["tokens"] == 200
+    assert rec["steps"] == 4
+
+
+def test_the_pipeline_defaults_to_two_epochs_and_accepts_tokens(tiny_model):
+    pipe = _pipe(tiny_model)
+    pipe.compress(pruning=0.25, quantization=None)
+    pipe.recover(_data(), domain="same as eval")
+    assert pipe.validate().recovery["epochs"] == 2
+
+    pipe2 = _pipe(tiny_model)
+    pipe2.compress(pruning=0.25, quantization=None)
+    pipe2.recover(_data(), domain="same as eval", tokens=200)
+    rec = pipe2.validate().recovery
+    assert rec["epochs"] is None and rec["tokens"] == 200
+    assert "200 tokens" in pipe2.validate().stages[-1].detail

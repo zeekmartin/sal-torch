@@ -597,7 +597,7 @@ class CompressionPipeline:
     def __init__(self, model, eval_dataset, metric: str = "accuracy", batch_size: int = 8,
                  probe_dataset=None, seed: int = 0, accuracy_floor: Optional[float] = None,
                  model_name: str = "", max_batches: Optional[int] = None,
-                 strict_recovery: bool = False):
+                 strict_recovery: bool = False, eval_autocast=None):
         if metric not in ("accuracy", "loss"):
             raise ValueError(f"metric must be 'accuracy' or 'loss', got '{metric}'")
         adapters = detect_adapters(model)
@@ -620,6 +620,12 @@ class CompressionPipeline:
         self.accuracy_floor = accuracy_floor
         self.model_name = model_name
         self.max_batches = max_batches
+        # Every accuracy in this project's campaign was measured under
+        # float16 autocast, and the INT4 column is fp32 rounding then
+        # fp16-autocast scoring. A product that cannot say, or set, the
+        # precision it scored at cannot be compared with those figures, so
+        # this is explicit and lands in the report beside the dtypes.
+        self.eval_autocast = eval_autocast
 
         # What precision are the numbers about to be measured in? A config
         # that declares a narrower dtype than the parameters is the OPT bug
@@ -628,6 +634,8 @@ class CompressionPipeline:
         # us this model and may know exactly what it is.
         from sal.precision import check_load_precision
         self.precision = check_load_precision(model, strict=False)
+        self.precision["eval_autocast"] = (None if eval_autocast is None
+                                           else str(eval_autocast))
 
         self._total_params = sum(p.numel() for p in model.parameters())
         if self._total_params < SMALL_MODEL_PARAMS:
@@ -656,9 +664,13 @@ class CompressionPipeline:
         return model_size_mb(self.model if model is None else model)
 
     def _accuracy(self, model=None) -> float:
+        from sal.recovery import autocast_for
         from sal.robustness import _evaluate
-        return _evaluate(self.model if model is None else model, self.eval_dataset,
-                         self.metric, self.batch_size, self.max_batches)
+        m = self.model if model is None else model
+        dev = next(m.parameters()).device
+        with autocast_for(dev.type, self.eval_autocast):
+            return _evaluate(m, self.eval_dataset, self.metric,
+                             self.batch_size, self.max_batches)
 
     def _record(self, name: str, detail: str = "", seconds: float = 0.0,
                 measure: bool = True) -> Stage:
@@ -1093,13 +1105,13 @@ class CompressionPipeline:
 
     # ------------------------------------------------------------------ recover
     def recover(self, train_dataset, *, domain: str,
-                epochs: Optional[int] = 2, tokens: Optional[int] = None,
+                epochs=None, tokens: Optional[int] = None,
                 lr: float = 5e-5, batch_size: Optional[int] = None,
                 max_grad_norm: Optional[float] = 1.0,
                 schedule: str = "warmup_cosine", warmup_ratio: float = 0.05,
                 max_lr: Optional[float] = None, pct_start: float = 0.10,
                 preserve_sparsity: bool = True, masks: Optional[dict] = None,
-                control=None, optimizer=None,
+                control=None, optimizer=None, amp_dtype=None,
                 enforce_masks: bool = True) -> "CompressionPipeline":
         """Repair the compressed model, and measure the repair.
 
@@ -1137,8 +1149,7 @@ class CompressionPipeline:
         ``EXP32_RATIO_AT_2EP.md``, ``EXP33_SPARSE_VS_STRUCTURED.md``,
         ``data/pro/results/EXP36_OPT_SPARSE.md``.
         """
-        from sal.recovery import (GENERIC_DOMAIN, GENERIC_DOMAIN_WARNING,
-                                  recover_model)
+        from sal.recovery import recover_model
 
         if not self._compressed:
             raise PipelineError(
@@ -1151,26 +1162,28 @@ class CompressionPipeline:
                 "There is no default, because a recovery corpus that does not "
                 "match the evaluation domain can cost more than the pruning it "
                 "repairs. Pass domain='generic' to proceed knowingly.")
-        if domain.strip().lower() == GENERIC_DOMAIN:
-            logger.warning(GENERIC_DOMAIN_WARNING)
 
         self._baseline_stage()
         t0 = time.time()
+        from sal.recovery import UNSET
         rec = recover_model(
-            self.model, train_dataset, epochs=epochs, tokens=tokens, lr=lr,
+            self.model, train_dataset, domain=domain,
+            epochs=UNSET if (epochs is None and tokens is None) else epochs,
+            tokens=tokens, lr=lr,
             batch_size=batch_size or self.batch_size,
             max_grad_norm=max_grad_norm, schedule=schedule,
             warmup_ratio=warmup_ratio, max_lr=max_lr, pct_start=pct_start,
             preserve_sparsity=preserve_sparsity, masks=masks,
-            enforce_masks=enforce_masks, seed=self.seed, optimizer=optimizer)
-        rec["domain"] = domain
+            enforce_masks=enforce_masks, amp_dtype=amp_dtype, seed=self.seed,
+            optimizer=optimizer)
         rec["one_shot_accuracy"] = self._one_shot_accuracy
         self._control = control
         self._recovery = rec
         self._recovered = True
         self._deferred_floor = None
 
-        budget = f"{epochs} epoch(s)" if tokens is None else f"{tokens} tokens"
+        budget = (f"{rec['epochs']} epoch(s)" if tokens is None
+                  else f"{tokens} tokens")
         detail = (f"{budget}, domain={domain}, clip="
                   f"{'off' if not max_grad_norm else max_grad_norm}, "
                   f"{schedule}, {rec['steps']} steps")

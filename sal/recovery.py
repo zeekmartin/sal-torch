@@ -33,6 +33,7 @@ not recommended settings.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 from dataclasses import dataclass
@@ -52,6 +53,22 @@ SCHEDULES = ("warmup_cosine", "one_cycle")
 #: rather than implied by a default, because the choice of recovery corpus is
 #: the difference between repairing damage and measuring a domain shift.
 GENERIC_DOMAIN = "generic"
+
+
+class _Unset:
+    """Tells "the caller said 2" apart from "nobody said anything"."""
+
+    def __repr__(self):
+        return "<unset>"
+
+
+UNSET = _Unset()
+
+#: exp29 measured the curve and it peaks here: 5 epochs is below 2 on 3/3
+#: seeds in FP and INT4, and two epochs is 39% of the cost of five. It is a
+#: measured default and not an optimum, and the dense control's own curve peaks
+#: at 1, so the two do not share a knee.
+DEFAULT_EPOCHS = 2
 
 #: Measured on OPT-1.3B: 32M tokens of C4 make the UNPRUNED model worse on raw
 #: WikiText-2 by 0.6398 perplexity (pretrained 14.6240 against a dense control
@@ -99,6 +116,31 @@ class RecoveryControl:
 
 
 # ------------------------------------------------------------------ statistics
+def resolve_budget(epochs, tokens) -> tuple:
+    """``(epochs, tokens)`` with exactly one of them set.
+
+    Unset with no token budget is the measured two epochs. Unset with one is
+    token mode. Both given is refused, because then nothing says which one the
+    schedule was built from, and the schedule is the whole difference between
+    a two-epoch recovery and the first two epochs of a longer one.
+    """
+    if tokens is not None:
+        if epochs is not UNSET and epochs is not None:
+            raise ValueError(
+                "recover() takes exactly one budget: epochs= for vision "
+                "models and encoders, tokens= for decoders. Both were given "
+                "(epochs=%r, tokens=%r), which leaves it undefined which one "
+                "the schedule was built from." % (epochs, tokens))
+        return None, tokens
+    if epochs is UNSET:
+        return DEFAULT_EPOCHS, None
+    if epochs is None:
+        raise ValueError(
+            "recover() takes exactly one budget and got neither: pass epochs= "
+            "for a vision model or an encoder, or tokens= for a decoder.")
+    return epochs, None
+
+
 def max_rise_above_running_min(curve) -> tuple:
     """The largest rise above the running minimum, and the step it peaked at.
 
@@ -224,6 +266,21 @@ def _param_groups(model, lr: float, head_lr_multiplier: float) -> list:
     return groups
 
 
+def autocast_for(device_type: str, amp_dtype):
+    """The autocast context a run should use, or a null one.
+
+    Off on CPU whatever is asked for: the archived runs autocast on an
+    accelerator, and CPU autocast is a different dtype policy, so honouring
+    the flag there would quietly measure a third thing. Returned rather than
+    entered inline so that the choice is testable without the accelerator.
+    """
+    if amp_dtype is None or device_type == "cpu":
+        return contextlib.nullcontext()
+    if isinstance(amp_dtype, str):
+        amp_dtype = getattr(torch, amp_dtype.replace("torch.", ""))
+    return torch.autocast(device_type, dtype=amp_dtype)
+
+
 def _tokens_in(batch) -> int:
     if isinstance(batch, dict):
         for key in ("input_ids", "pixel_values", "inputs_embeds"):
@@ -237,7 +294,8 @@ def _tokens_in(batch) -> int:
 
 # ------------------------------------------------------------------- the stage
 def recover_model(model, train_dataset, *,
-                  epochs: Optional[int] = 2,
+                  domain: str,
+                  epochs=UNSET,
                   tokens: Optional[int] = None,
                   lr: float = 5e-5,
                   head_lr_multiplier: float = 10.0,
@@ -251,14 +309,30 @@ def recover_model(model, train_dataset, *,
                   preserve_sparsity: bool = True,
                   masks: Optional[dict] = None,
                   enforce_masks: bool = True,
+                  amp_dtype=None,
                   seed: int = 0,
                   device=None,
                   optimizer=None) -> dict:
     """Fine-tune a compressed model and return everything the run measured.
 
+    ``domain`` is required and has no default: it names the domain the
+    recovery data comes from and is recorded with the result. A corpus from
+    outside the evaluation domain can cost more than the pruning it repairs,
+    so there is no silent default. Pass ``"generic"`` to proceed knowingly,
+    which warns with the measured reason.
+
     ``epochs`` and ``tokens`` are mutually exclusive: a decoder's budget is a
     token count, and epochs over a corpus shard is not a unit that transfers
     between scales.
+
+    ``amp_dtype`` runs the forward and backward under autocast, and is how a
+    published cell is reproduced: every recovery in the campaign ran under
+    **bfloat16** autocast, and every score under **float16** autocast, which
+    are different and were both written up as "autocast bfloat16" until the
+    pre-report audit. It defaults to ``None``, i.e. no autocast, because that
+    is the only choice that is right on a CPU and in a unit test; a GPU run
+    that wants the archived recipe passes ``torch.bfloat16``. The value is
+    recorded in the result.
 
     ``masks`` may be supplied by the caller (``{parameter name: bool tensor}``
     of the weights to keep non-zero); if it is ``None`` and
@@ -269,11 +343,16 @@ def recover_model(model, train_dataset, *,
     """
     from sal.fi import _iter_data, _to_dev
 
-    if (epochs is None) == (tokens is None):
+    if not isinstance(domain, str) or not domain.strip():
         raise ValueError(
-            "recover() takes exactly one budget: epochs= for vision models and "
-            "encoders, tokens= for decoders. Passing both, or neither, leaves "
-            "it undefined which one the schedule was built from.")
+            "recover_model() needs domain=: a short string naming the domain "
+            "the recovery data comes from, which is recorded with the result. "
+            "There is no default, because a recovery corpus that does not "
+            "match the evaluation domain can cost more than the pruning it "
+            "repairs. Pass domain='generic' to proceed knowingly.")
+    if domain.strip().lower() == GENERIC_DOMAIN:
+        logger.warning(GENERIC_DOMAIN_WARNING)
+    epochs, tokens = resolve_budget(epochs, tokens)
     if schedule not in SCHEDULES:
         raise ValueError(f"schedule must be one of {SCHEDULES}, got {schedule!r}")
     if epochs is not None and epochs < 1:
@@ -318,6 +397,7 @@ def recover_model(model, train_dataset, *,
             handles.append(p.register_hook(lambda g, m=m: g * m))
 
     params = [p for p in model.parameters() if p.requires_grad]
+    autocast = autocast_for(device.type, amp_dtype)
     loss_curve: list = []
     grad_norms: list = []
     lr_curve: list = []
@@ -335,8 +415,10 @@ def recover_model(model, train_dataset, *,
                     break
                 batch = _to_dev(batch, device)
                 tokens_seen += _tokens_in(batch)
-                out = model(**batch) if isinstance(batch, dict) else model(batch)
-                loss = out.loss if hasattr(out, "loss") else out
+                with autocast:
+                    out = (model(**batch) if isinstance(batch, dict)
+                           else model(batch))
+                    loss = out.loss if hasattr(out, "loss") else out
                 if loss is None:
                     raise RecoveryError(
                         "the model returned no loss for a recovery batch: the "
@@ -395,11 +477,13 @@ def recover_model(model, train_dataset, *,
 
     rise, rise_step = max_rise_above_running_min(loss_curve)
     record = {
+        "domain": domain,
         "epochs": epochs, "tokens": tokens, "tokens_seen": tokens_seen,
         "steps": step, "total_steps_planned": total_steps,
         "batch_size": batch_size, "lr": lr,
         "head_lr_multiplier": head_lr_multiplier,
         "max_grad_norm": max_grad_norm,
+        "amp_dtype": (None if amp_dtype is None else str(amp_dtype)),
         "schedule": schedule, "warmup_steps": warmup_steps,
         "peak_lr": peak_lr,
         "warmup_ratio": warmup_ratio if schedule == "warmup_cosine" else None,

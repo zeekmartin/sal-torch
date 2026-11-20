@@ -81,7 +81,45 @@
   were trained with: identical seeds, identical masks, step for step, at three
   seeds and three quotas. `stats()` reports the mode and the resample count.
 
+- **The release gate's six bands, pre-registered in code**
+  (`experiments/v070_gate_bands.py`), with the runners that drive the shipped
+  pipeline against them: `experiments/gate_v070_vit.py` here for the two
+  vision run sets, and the decoder cell in the research repository. Each cell
+  runs twice: paper mode reproduces the archived recipe and is scored
+  two-sided, default mode asks the shipped defaults to be no worse and is
+  scored one-sided. A two-sided band fails a result that is *better* than the
+  archive, on purpose, because paper mode is a reproduction. The vision
+  family's two modes are the same configuration, since the archived vision
+  recipe already clips at 1.0 and warms up over 5% of the steps before
+  decaying; the recipe change bites only on the decoder. Both runners have a
+  `--micro` mode that reaches every stage on a synthetic model on CPU in
+  seconds (cardinal rule 8) and write each stage's JSON as it completes
+  (rule 10). 32 tests on the bands, each feeding the archived values through
+  the criterion and then a value outside it, so a band that cannot fail is
+  caught before a GPU-hour is spent on it.
+- **`amp_dtype` on `recover()` and `eval_autocast` on `CompressionPipeline`.**
+  Every recovery in the campaign ran under bfloat16 autocast and every score
+  under float16 autocast, which are different and were both written up as
+  "autocast bfloat16" until the pre-report audit. `recover()` had no autocast
+  at all and the pipeline scored in whatever context the caller happened to be
+  in, so a gate could not score the way the archive scored. Both are now
+  explicit, recorded in the result and in the precision record, and off on CPU
+  whatever is asked for, because CPU autocast is a third dtype policy.
+  `sal.recovery.autocast_for()` is the choice as a function, so the
+  accelerator branch is testable without an accelerator.
+
 ### Changed
+- **`recover()` resolves its budget through one function.** `epochs=2` as a
+  plain default collided with `tokens=`: a decoder caller was refused for
+  "passing both" and had to write `epochs=None` to say what the token budget
+  already said. A sentinel now tells a default from a choice, so unset means
+  the measured two epochs, `tokens=` alone means token mode, and giving both
+  explicitly is still refused. Found by the gate's own micro-test, which is
+  what rule 8 is for.
+- **`domain=` is required by `recover_model()` as well as by the pipeline
+  stage.** The enforcement was in the wrapper only, so a caller driving the
+  loop directly, as the gate does, could recover on a corpus nobody had to
+  name. One check, in the function that consumes the data.
 - **`accuracy_floor` is no longer applied to an unrecovered compressed model at
   `compress()` time.** It is held, logged as held, and applied by `validate()`
   if `recover()` never runs. This is a behaviour change and it is the point of
