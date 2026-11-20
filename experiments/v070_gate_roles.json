@@ -1,0 +1,20 @@
+{
+ "why": "The twelve arm cells of the v0.7.0 gate were measured before the runners recorded their own role, and measured data is never mutated, so the role is declared here instead of edited into the result files. Each entry names the SLURM job that wrote the cell and the submitter batch it belonged to; `sacct -X -j <id> -o JobID,JobName` is the record. Cells produced after this commit carry their own `role` and ignore this file.",
+ "batch": "submit_v070_gate.py, commit 7efca3ab29b0, package hash 9e72ad35717ddd14, 2026-11-20",
+ "gate_jobs": {"vit": "23894987 (g70gate-vit), writes results/gate_v070_vit_gate/", "opt": "23890317, the dense reference gate, written by exp36_opt_sparse.py"},
+ "cells": {
+  "gate_v070_vit_random_s42/gate_random_paper_s42.json": {"role": "arm", "why": "job 23894988 g70vit-ran-s42, stage 1 arm, full 1281167-image split"},
+  "gate_v070_vit_random_s123/gate_random_paper_s123.json": {"role": "arm", "why": "job 23894989 g70vit-ran-s123, stage 1 arm, full split"},
+  "gate_v070_vit_random_s456/gate_random_paper_s456.json": {"role": "arm", "why": "job 23894990 g70vit-ran-s456, stage 1 arm, full split"},
+  "gate_v070_vit_magnitude_s42/gate_magnitude_paper_s42.json": {"role": "arm", "why": "job 23894991 g70vit-mag-s42, stage 1 arm, full split"},
+  "gate_v070_vit_magnitude_s123/gate_magnitude_paper_s123.json": {"role": "arm", "why": "job 23894992 g70vit-mag-s123, stage 1 arm, full split"},
+  "gate_v070_vit_magnitude_s456/gate_magnitude_paper_s456.json": {"role": "arm", "why": "job 23894993 g70vit-mag-s456, stage 1 arm, full split"},
+  "gate_v070_vit_gate/gate_random_paper_s42.json": {"role": "gate", "why": "job 23894987 g70gate-vit, --gate: one seed, 2000 train and 1000 val images, 64 optimizer steps. NOT a measurement of the cell"},
+  "gate_v070_opt_paper_s42/gate_opt_paper_s42.json": {"role": "arm", "why": "job 23895009 g70opt-pap-s42, 32M C4 tokens, exp36 batching"},
+  "gate_v070_opt_paper_s123/gate_opt_paper_s123.json": {"role": "arm", "why": "job 23895010 g70opt-pap-s123, 32M C4 tokens, exp36 batching"},
+  "gate_v070_opt_paper_s456/gate_opt_paper_s456.json": {"role": "arm", "why": "job 23895011 g70opt-pap-s456, 32M C4 tokens, exp36 batching"},
+  "gate_v070_opt_default_s42/gate_opt_default_s42.json": {"role": "arm", "why": "job 23895012 g70opt-def-s42, 32M C4 tokens, shipped defaults"},
+  "gate_v070_opt_default_s123/gate_opt_default_s123.json": {"role": "arm", "why": "job 23895013 g70opt-def-s123, 32M C4 tokens, shipped defaults"},
+  "gate_v070_opt_default_s456/gate_opt_default_s456.json": {"role": "arm", "why": "job 23895014 g70opt-def-s456, 32M C4 tokens, shipped defaults"}
+ }
+}

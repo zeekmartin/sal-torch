@@ -78,6 +78,11 @@ class Band:
     cost_lo: Optional[float] = None
     cost_hi: Optional[float] = None
     archived_seeds: tuple = ()
+    #: ``{seed: archived value}``. The tuple above is an ordered summary and
+    #: is NOT safe to zip against a run's values: cells are read in whatever
+    #: order the file system hands them over, so seed 123's result would be
+    #: compared against seed 42's archive. Anything per-seed uses this map.
+    archived_by_seed: dict = field(default_factory=dict)
     archived_mean: Optional[float] = None
     archived_cost: Optional[float] = None
     control: str = ""
@@ -87,7 +92,7 @@ class Band:
     runs: str = ""                  # which run set satisfies it
     extra: dict = field(default_factory=dict)
 
-    def check(self, per_seed, cost=None) -> dict:
+    def check(self, per_seed, cost=None, seeds=None) -> dict:
         """Does this run meet the band? Returns the verdict and every number."""
         if not per_seed:
             return {"band": self.name, "passed": False,
@@ -129,6 +134,7 @@ class Band:
         return {"band": self.name, "cell": self.cell, "mode": self.mode,
                 "two_sided": self.two_sided, "metric": self.metric,
                 "n_seeds": len(per_seed), "per_seed": list(per_seed),
+                "seeds": list(seeds) if seeds else [],
                 "mean": mean, "cost": cost, "passed": ok,
                 "why": why or ["within the pre-registered band"],
                 "archived_mean": self.archived_mean,
@@ -223,7 +229,9 @@ G3_PAPER = Band(
     seed_lo=min(_G3_SEEDS) - DECLARED_PPL_TOLERANCE,
     seed_hi=max(_G3_SEEDS) + DECLARED_PPL_TOLERANCE,
     cost_lo=_G3_COST - _G3_SPREAD / 2, cost_hi=_G3_COST + _G3_SPREAD / 2,
-    archived_seeds=_G3_SEEDS, archived_mean=22.0134, archived_cost=_G3_COST,
+    archived_seeds=_G3_SEEDS,
+    archived_by_seed={42: 21.8833, 123: 21.7828, 456: 22.3740},
+    archived_mean=22.0134, archived_cost=_G3_COST,
     control="the archived dense control, 15.2639 over 3 seeds, after the same "
             "32M C4 tokens",
     tolerance="per-seed range widened by a DECLARED %.2f perplexity: no "
@@ -248,6 +256,123 @@ G3_DEFAULT = Band(
               "the only place the two modes measure different things",
     sources=G3_PAPER.sources, runs="run set D (3 seeds)")
 
+# ------------------------------------- the decoder floor, pre-registered
+#: Bands whose per-seed tolerance was DECLARED rather than measured, and which
+#: may therefore be explained after the fact by a floor that is measured.
+#: Only the decoder qualifies: the vision bands already carry a measured
+#: same-seed floor (0.040-0.170pp over four dense-control pairs) inside their
+#: own widening, so explaining them by one again would be counting it twice.
+BANDS_WITH_A_DECLARED_TOLERANCE = ("G3-paper",)
+
+#: Pre-registered 2026-11-20, BEFORE the re-run of R3 and before job 23898426
+#: that measures the floor landed. The rule, in full:
+#:
+#: If a band in `BANDS_WITH_A_DECLARED_TOLERANCE` fails, every reason it
+#: failed is a per-seed bound, and every seed that is out of its bounds sits
+#: within the floor measured by re-running the archived script at a fixed
+#: seed of ITS OWN archived value, then the band is recorded as
+#: **FAILED, EXPLAINED BY MEASURED NOISE**, with both numbers, and it does not
+#: block the tag. If any deviation exceeds that floor, or the mean or the cost
+#: is out of band, the rule does not apply and the failure stands.
+#:
+#: What this rule will not do: it will not rescue a band whose MEAN is out of
+#: band, because a mean that moves is not single-seed noise; it will not apply
+#: without a floor measured on this exact cell; and it never widens the band
+#: itself, so the recorded verdict stays FAILED.
+EXPLAINED_BY_NOISE = "FAILED, EXPLAINED BY MEASURED NOISE"
+
+
+def measured_floor(rerun_ppl: float, archived_ppl: float) -> float:
+    """``|rerun - archive|`` for one seed of one cell, the same-seed floor."""
+    return abs(float(rerun_ppl) - float(archived_ppl))
+
+
+def explain_by_noise(verdict: dict, band, floor: Optional[float],
+                     floor_source: str = "") -> dict:
+    """Apply the pre-registered rule to one failed band's verdict.
+
+    Returns the verdict with ``status``, ``explained`` and ``blocking`` set.
+    A band that passed, a band without a declared tolerance, or a missing
+    floor all leave the verdict exactly as it was, which is the conservative
+    direction in every case.
+    """
+    out = dict(verdict)
+    out.setdefault("status", "PASS" if verdict.get("passed") else "FAIL")
+    out.setdefault("explained", False)
+    out["blocking"] = not verdict.get("passed")
+    if verdict.get("passed") or band.name not in BANDS_WITH_A_DECLARED_TOLERANCE:
+        return out
+    if floor is None:
+        out["why"] = list(out.get("why", [])) + [
+            "no measured same-seed floor is available for this cell, so the "
+            "declared tolerance stands and the failure stands with it"]
+        return out
+    reasons = list(verdict.get("why", []))
+    if not reasons or any(not r.startswith("seed ") for r in reasons):
+        out["why"] = reasons + [
+            "not explainable by single-seed noise: %s"
+            % "; ".join(r for r in reasons if not r.startswith("seed "))]
+        return out
+    # Matched BY SEED, never by position: the cells arrive in file-system
+    # order, so zipping would compare one seed's result against another
+    # seed's archive and call the difference noise.
+    archived = dict(band.archived_by_seed or {})
+    per_seed = list(verdict.get("per_seed") or ())
+    seeds = [int(x) for x in (verdict.get("seeds") or ())]
+    if not archived or len(seeds) != len(per_seed):
+        out["why"] = reasons + [
+            "this cell's per-seed values cannot be matched to the archive by "
+            "seed (%d values, %d seed labels, %d archived), so no per-seed "
+            "comparison is defined"
+            % (len(per_seed), len(seeds), len(archived))]
+        return out
+    missing = [q for q in seeds if q not in archived]
+    if missing:
+        out["why"] = reasons + [
+            "the archive has no value for seed(s) %s"
+            % ", ".join(str(q) for q in missing)]
+        return out
+    deviations = {q: measured_floor(v, archived[q])
+                  for v, q in zip(per_seed, seeds)}
+    # The seeds that actually put the band out of its bounds, read from the
+    # bounds themselves rather than parsed out of the failure text. Only
+    # these have to be inside the floor: a seed that landed in band needs no
+    # explaining, and demanding it would block the tag on a seed nobody
+    # objected to.
+    offending = [q for v, q in zip(per_seed, seeds)
+                 if (band.seed_lo is not None and v < band.seed_lo)
+                 or (band.seed_hi is not None and v > band.seed_hi)]
+    if not offending:
+        out["why"] = reasons + [
+            "no single seed is out of its bounds, so this failure is not "
+            "single-seed noise"]
+        return out
+    worst = max(deviations[q] for q in offending)
+    if worst <= floor:
+        out["status"] = EXPLAINED_BY_NOISE
+        out["explained"] = True
+        out["blocking"] = False
+        out["why"] = reasons + [
+            "the out-of-band seed(s) %s deviate from their OWN archived seed "
+            "by %s, within the MEASURED same-seed floor %.4f%s. Every seed's "
+            "deviation: %s. So this failure is noise at the size the archive "
+            "itself re-runs at. The band is not widened and the verdict "
+            "stays FAILED"
+            % (", ".join(str(q) for q in offending),
+               ", ".join("%.4f" % deviations[q] for q in offending),
+               floor, (" from " + floor_source) if floor_source else "",
+               ", ".join("seed %s %.4f" % (q, deviations[q])
+                         for q in seeds))]
+        return out
+    out["why"] = reasons + [
+        "the worst out-of-band seed deviates by %.4f, which EXCEEDS the "
+        "measured same-seed floor %.4f%s, so this is not noise. Every "
+        "seed's deviation: %s"
+        % (worst, floor, (" from " + floor_source) if floor_source else "",
+           ", ".join("seed %s %.4f" % (q, deviations[q]) for q in seeds))]
+    return out
+
+
 BANDS = {b.name: b for b in (G1_PAPER, G1_DEFAULT, G2_PAPER, G2_DEFAULT,
                              G3_PAPER, G3_DEFAULT)}
 
@@ -258,6 +383,18 @@ RUN_SETS = {
     "C": ("G3-paper",),
     "D": ("G3-default",),
 }
+
+#: What a result file may call itself. Only ``"arm"`` is scoreable: a
+#: ``"gate"`` cell is the cheap end-to-end check that every stage runs (2000
+#: images, 64 optimizer steps) and a ``"micro"`` cell is CPU plumbing on a
+#: synthetic model. None of the three can be told apart by its keys, and the
+#: one time a gate cell reached the scorer alongside its arms it was scored as
+#: a fourth seed of G1 and moved the band's mean by 6.4pp. So the runner
+#: writes which one it ran and the scorer refuses a cell that does not say.
+CELL_ROLES = ("arm", "gate", "micro")
+
+#: The only role a band may be scored on.
+SCOREABLE_ROLE = "arm"
 
 #: The key a result file carries (the ViT strategy, or the decoder mode) to
 #: the bands that key is scored against. One place, so the runner and the
@@ -375,10 +512,10 @@ def verify_provenance(prov: Optional[dict], target: str = "HEAD",
             "why": "commit %s is an ancestor of %s" % (commit[:12], target)}
 
 
-def check(name: str, per_seed, cost=None) -> dict:
+def check(name: str, per_seed, cost=None, seeds=None) -> dict:
     if name not in BANDS:
         raise KeyError("unknown band %r; have %s" % (name, sorted(BANDS)))
-    return BANDS[name].check(per_seed, cost)
+    return BANDS[name].check(per_seed, cost, seeds=seeds)
 
 
 def check_all(results: dict, provenance: Optional[dict] = None,
@@ -389,7 +526,8 @@ def check_all(results: dict, provenance: Optional[dict] = None,
     passed unless the code that produced it is an ancestor of ``target``. The
     numbers and the code are two separate claims and both have to hold.
     """
-    verdicts = {n: check(n, r.get("per_seed", []), r.get("cost"))
+    verdicts = {n: check(n, r.get("per_seed", []), r.get("cost"),
+                         seeds=r.get("seeds"))
                 for n, r in results.items()}
     prov = verify_provenance(provenance, target=target, repo=repo) \
         if provenance is not None else None
