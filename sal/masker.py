@@ -24,6 +24,21 @@ The validated mechanism (see reference research, RANDOM is the default method):
 
 All three accumulate and use random selection (the only validated, zero-overhead
 selection method).
+
+``mask_mode`` chooses between the two methods that share this mechanism:
+
+  * ``"accumulate"`` (default) is **SAL**, exactly as above.
+  * ``"drophead"`` is **DropHead**: the full quota is drawn fresh every step
+    and nothing is held, so no head is ever permanently removed. ``schedule``,
+    ``prune_start_ratio``, ``prune_end_ratio`` and ``prune_interval`` do not
+    apply to it; the quota is ``num_heads_to_prune`` from step 0.
+
+The mechanism is identical in both: the same pre-hook, the same per-head
+slicing, the same random draw. Only whether the set is kept differs, which is
+what makes the comparison between them a comparison of the methods rather than
+of two implementations.
+
+What the choice is worth, measured, is in ``SALConfig.MASK_MODES``.
 """
 from __future__ import annotations
 import logging, random
@@ -47,6 +62,7 @@ class HeadMasker:
         self._active = False
         self._step_count = 0
         self._prune_events = 0
+        self._resample_events = 0
 
     # ------------------------------------------------------------------ setup
     def install(self):
@@ -146,6 +162,11 @@ class HeadMasker:
 
     def step(self, global_step: int, total_steps: int):
         self._step_count = global_step
+        if self.config.mask_mode == "drophead":
+            # DropHead: the full quota, drawn fresh, every step. No window and
+            # no ramp, which is why the schedule fields do not apply.
+            self._resample(self.config.num_heads_to_prune)
+            return
         progress = global_step / max(total_steps, 1)
         start = self.config.prune_start_ratio
 
@@ -183,6 +204,23 @@ class HeadMasker:
         span = max(end - start, 1e-9)
         w = min(1.0, max(0.0, (progress - start) / span))
         return min(full, int(round(full * w)))
+
+    def _resample(self, target: int):
+        """Drop the previous set and draw a fresh one of the same size.
+
+        The order of operations is the order the published prototype used
+        (clear every mask, mark active, then draw), because the draw consumes
+        this masker's own RNG: a different order would give a different set
+        from the same seed, and the two would stop being comparable.
+        """
+        if not self._hooks:
+            raise RuntimeError("Not installed")
+        for m in self._masks.values():
+            m.fill_(1.0)
+        self._active = True
+        if target > 0:
+            self._deactivate_random_heads(target)
+        self._resample_events += 1
 
     def _prune_to_count(self, target: int):
         """Accumulate randomly chosen heads until ``target`` are pruned."""
@@ -292,4 +330,7 @@ class HeadMasker:
         active = self._active_head_count() if self._masks else 0
         return {"active": self._active, "total_heads": self.config.total_heads,
                 "active_heads": active, "pruned_heads": self.config.total_heads - active,
-                "prune_events": self._prune_events, "prune_fraction": self.config.prune_fraction}
+                "prune_events": self._prune_events,
+                "resample_events": self._resample_events,
+                "mask_mode": self.config.mask_mode,
+                "prune_fraction": self.config.prune_fraction}

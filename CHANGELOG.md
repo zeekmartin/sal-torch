@@ -43,6 +43,43 @@
 - **`strict_recovery=True`** on the pipeline makes `validate()` refuse to score
   an unrecovered compressed model at all. Not the default: a user who wants the
   one-shot number should be able to ask for it.
+- **Matched-control reporting on `CompressionReport` (v0.7.0 item 2).**
+  `RecoveryControl` goes in, and three separately named quantities come out:
+  `fine_tuning_gain` (control minus pretrained, what the budget bought with
+  nothing pruned), `pruning_cost` (arm minus control, what the compression
+  cost) and `budget_matched`. **`pruning_cost` is emitted only when the
+  budgets match**, over epochs or over tokens; otherwise the field is absent
+  and `cost_statement` names the control that is missing. Without a control
+  the report gives the level and one sentence saying the cost is not isolated,
+  and prints **no delta against the pretrained checkpoint at all**: a 5-epoch
+  arm scored against a 2-epoch control was wrong by 0.97 to 1.12pp on three
+  headline cells of this project's own campaign, and the mistake survived in
+  committed data. `pruning_cost_pp` and `fine_tuning_gain_pp` exist for an
+  accuracy metric; for perplexity read the unit-bearing fields, where the
+  sign convention is the campaign's own (negative is worse for accuracy,
+  positive is worse for perplexity).
+- **A load-time precision check (v0.7.0 item 5).**
+  `sal.check_load_precision(model, state_dict)` raises when a load would lose
+  precision, and `sal.model_precision(model)` reports what the model is in.
+  OPT's config carries `torch_dtype: float16`, so `from_config` builds
+  half-precision parameters and `load_state_dict` narrows an fp32 checkpoint
+  without a word; the 6.7B zero-shot pass of this campaign ran that way and
+  had to be re-run in float32. "Narrower" counts mantissa bits as well as
+  width, so float16 to bfloat16 is caught too. `CompressionPipeline` runs the
+  check at construction, warns rather than raises there, and records the
+  dtypes on the report and in the `original` stage, so every report states the
+  precision its numbers were produced at.
+- **`mask_mode="drophead"` on `SALConfig` and `HeadMasker` (v0.7.0 item 3).**
+  DropHead was recommended throughout this documentation and was not callable
+  from the package. It now is: the full quota is drawn fresh every step and
+  nothing is held, through the same pre-hook and the same per-head slicing as
+  SAL, so a comparison between the two is a comparison of methods and not of
+  implementations. `"accumulate"` stays the default and `SALConfig.auto()`
+  does not choose, because the two are different methods with different
+  scopes. Tested against `ResampleMasker` in
+  `scripts/run_sal_qat_prototype.py`, the masker the published DropHead cells
+  were trained with: identical seeds, identical masks, step for step, at three
+  seeds and three quotas. `stats()` reports the mode and the resample count.
 
 ### Changed
 - **`accuracy_floor` is no longer applied to an unrecovered compressed model at

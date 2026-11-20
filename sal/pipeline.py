@@ -288,6 +288,8 @@ class CompressionReport:
     scan: Optional[ScanSummary] = None
     roundtrip_verified: Optional[bool] = None
     recovery: Optional[dict] = None
+    control: Optional["RecoveryControl"] = None
+    precision: Optional[dict] = None
 
     @property
     def first(self) -> Optional[Stage]:
@@ -309,6 +311,125 @@ class CompressionReport:
             return None
         return self.last.accuracy - self.first.accuracy
 
+    # ------------------------------------------------------- matched control
+    #: What the report says instead of a cost when it has no control to take
+    #: one against. `CONTROL_CONVENTION.md` exists because a delta against the
+    #: pretrained checkpoint is the sum of two effects, and a product user
+    #: reads one number and ships.
+    NO_CONTROL = (
+        "the pruning cost is not isolated, because no dense control trained "
+        "for the same budget was supplied")
+    UNMATCHED = (
+        "the pruning cost is not isolated, because the control was trained "
+        "for a different budget than the arm")
+
+    @property
+    def higher_is_better(self) -> bool:
+        return self.metric == "accuracy"
+
+    @property
+    def pretrained_accuracy(self) -> Optional[float]:
+        """The model as it was handed in. Not a control."""
+        return self.first.accuracy if self.first else None
+
+    @property
+    def recovered(self) -> bool:
+        return any(st.name == "recovered" for st in self.stages)
+
+    @property
+    def arm_accuracy(self) -> Optional[float]:
+        """The score the cost is taken on: the last measured stage."""
+        for st in reversed(self.stages):
+            if st.accuracy is not None:
+                return st.accuracy
+        return None
+
+    @property
+    def budget_matched(self) -> Optional[bool]:
+        """True only when the control was trained on the arm's own budget."""
+        if self.control is None:
+            return None
+        rec = self.recovery or {}
+        return bool(self.control.matches(rec.get("epochs"), rec.get("tokens")))
+
+    @property
+    def fine_tuning_gain(self) -> Optional[float]:
+        """Control minus pretrained: what the budget bought with nothing pruned.
+
+        In the metric's own units. Absent without a control, because it is
+        defined as control minus pretrained and there is no control to
+        subtract from.
+        """
+        if self.control is None or self.pretrained_accuracy is None:
+            return None
+        return self.control.accuracy - self.pretrained_accuracy
+
+    @property
+    def fine_tuning_gain_pp(self) -> Optional[float]:
+        g = self.fine_tuning_gain
+        return None if g is None or not self.higher_is_better else g * 100
+
+    @property
+    def pruning_cost(self) -> Optional[float]:
+        """Arm minus control, in the metric's own units.
+
+        **Emitted only when the budgets match.** A 5-epoch arm scored against
+        a 2-epoch control was wrong by 0.97 to 1.12pp on three headline cells
+        of this project's own campaign, and the mistake survived in committed
+        data.
+
+        The sign is the campaign's, not a third convention: the number is
+        arm minus control, so for accuracy a **negative** cost means the
+        compression cost accuracy (-3.91pp at 50% of heads on ViT-B/16) and
+        for perplexity a **positive** cost means it cost perplexity (+0.9939
+        for 50% unstructured on OPT-1.3B). :attr:`higher_is_better` says which
+        way to read it, and :attr:`cost_statement` spells it out in words.
+        """
+        if not self.budget_matched or self.arm_accuracy is None:
+            return None
+        return self.arm_accuracy - self.control.accuracy
+
+    @property
+    def pruning_cost_pp(self) -> Optional[float]:
+        """The cost in points of accuracy, negative meaning worse.
+
+        ``None`` for a loss or perplexity metric, where points of accuracy are
+        not the unit: read :attr:`pruning_cost` there, in which a positive
+        number means worse.
+        """
+        c = self.pruning_cost
+        return None if c is None or not self.higher_is_better else c * 100
+
+    @property
+    def cost_statement(self) -> str:
+        """One line on the cost, or on why there is not one."""
+        unit = "pp" if self.higher_is_better else f" {self.metric}"
+        if self.arm_accuracy is None:
+            return "nothing measured yet"
+        level = f"final {self.metric} {self.arm_accuracy:.4f}"
+        if self.control is None:
+            return f"{level}; {self.NO_CONTROL}"
+        if not self.budget_matched:
+            budget = self.control.budget
+            return (f"{level}; {self.UNMATCHED} (control: {budget[0]}="
+                    f"{budget[1]}, arm: epochs="
+                    f"{(self.recovery or {}).get('epochs')}, tokens="
+                    f"{(self.recovery or {}).get('tokens')})")
+        cost = self.pruning_cost
+        gain = self.fine_tuning_gain
+        shown = (f"pruning cost {cost * 100:+.2f}pp" if self.higher_is_better
+                 else f"pruning cost {cost:+.4f} {self.metric}")
+        line = (f"{level}; {shown} against a dense control trained for the "
+                f"same {self.control.budget[0]} "
+                f"({self.control.seeds} seed(s))")
+        if gain is not None:
+            line += (f"; the budget itself was worth "
+                     f"{gain * 100:+.2f}pp with nothing pruned"
+                     if self.higher_is_better else
+                     f"; the budget itself cost {gain:+.4f} {self.metric} "
+                     "with nothing pruned")
+        return line
+
     @property
     def summary(self) -> str:
         if not self.stages:
@@ -316,11 +437,20 @@ class CompressionReport:
         f, l = self.first, self.last
         acc = ""
         if f.accuracy is not None and l.accuracy is not None:
-            acc = (f", {f.accuracy:.3f} {self.metric} -> {l.accuracy:.3f} "
-                   f"({self.accuracy_delta:+.1%} relative)"
-                   if f.accuracy else f", {l.accuracy:.3f} {self.metric}")
-        return (f"{f.size_mb:.0f}MB -> {l.size_mb:.0f}MB "
+            if not f.accuracy:
+                acc = f", {l.accuracy:.3f} {self.metric}"
+            elif self.recovered:
+                # A delta against the model as handed in is now the sum of two
+                # effects, the compression and the recovery, and must not read
+                # as a cost. The cost line says what is and is not isolated.
+                acc = (f", {f.accuracy:.3f} {self.metric} -> "
+                       f"{l.accuracy:.3f} after recovery")
+            else:
+                acc = (f", {f.accuracy:.3f} {self.metric} -> {l.accuracy:.3f} "
+                       f"({self.accuracy_delta:+.1%} relative, one-shot)")
+        size = (f"{f.size_mb:.0f}MB -> {l.size_mb:.0f}MB "
                 f"({self.size_ratio:.1f}x smaller){acc}")
+        return f"{size}. {self.cost_statement}" if self.recovered else size
 
     @property
     def table(self) -> str:
@@ -350,6 +480,23 @@ class CompressionReport:
                        for s in self.stages],
             "scan": self.scan.to_dict() if self.scan else None,
             "recovery": self.recovery,
+            "precision": self.precision,
+            "cost_statement": self.cost_statement,
+            "budget_matched": self.budget_matched,
+            "control": (None if self.control is None else
+                        {"accuracy": self.control.accuracy,
+                         "epochs": self.control.epochs,
+                         "tokens": self.control.tokens,
+                         "seeds": self.control.seeds,
+                         "metric": self.control.metric}),
+            **({} if self.pruning_cost is None else
+               {"pruning_cost": round(self.pruning_cost, 6)}),
+            **({} if self.pruning_cost_pp is None else
+               {"pruning_cost_pp": round(self.pruning_cost_pp, 4)}),
+            **({} if self.fine_tuning_gain is None else
+               {"fine_tuning_gain": round(self.fine_tuning_gain, 6)}),
+            **({} if self.fine_tuning_gain_pp is None else
+               {"fine_tuning_gain_pp": round(self.fine_tuning_gain_pp, 4)}),
         }
 
     def save(self, path: str):
@@ -393,6 +540,14 @@ class CompressionPipeline:
         self.accuracy_floor = accuracy_floor
         self.model_name = model_name
         self.max_batches = max_batches
+
+        # What precision are the numbers about to be measured in? A config
+        # that declares a narrower dtype than the parameters is the OPT bug
+        # one save-and-reload away, and half-precision weights make a figure
+        # incomparable with the campaign's. Warn, never raise: the user handed
+        # us this model and may know exactly what it is.
+        from sal.precision import check_load_precision
+        self.precision = check_load_precision(model, strict=False)
 
         self._total_params = sum(p.numel() for p in model.parameters())
         if self._total_params < SMALL_MODEL_PARAMS:
@@ -483,7 +638,9 @@ class CompressionPipeline:
 
     def _baseline_stage(self):
         if not self._stages:
-            self._record("original", detail=f"{self._total_params / 1e6:.1f}M params")
+            self._record("original",
+                         detail=f"{self._total_params / 1e6:.1f}M params, "
+                                f"{self.precision['param_dtype']} weights")
 
     # -------------------------------------------------------------------- probe
     def probe(self, fraction: float = 0.5) -> ProbeSummary:
@@ -1000,7 +1157,9 @@ class CompressionPipeline:
         return CompressionReport(stages=list(self._stages), metric=self.metric,
                                  model_name=self.model_name, scan=self._scan,
                                  roundtrip_verified=self._roundtrip,
-                                 recovery=self._recovery)
+                                 recovery=self._recovery,
+                                 control=self._control,
+                                 precision=self.precision)
 
     def report(self) -> CompressionReport:
         """Alias for :meth:`validate` — the full report object."""

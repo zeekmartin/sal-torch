@@ -12,15 +12,36 @@ class SALConfig:
     prune_end_ratio: float = 0.80
     prune_interval: int = 1
     schedule: str = "random"
+    mask_mode: str = "accumulate"
     uniform_per_layer: bool = True
     fi_interval: int = 0
     attention_pattern: Optional[str] = None
     head_dim: Optional[int] = None
     _total_heads: int = field(init=False, repr=False, default=0)
 
+    #: ``"accumulate"`` is SAL: heads are pruned progressively and stay
+    #: pruned, so the adaptation is to one head set, fixed before training.
+    #: ``"drophead"`` resamples the full quota every step and holds nothing,
+    #: so the resilience it trains applies to any set of that size.
+    #:
+    #: Which to use is not a preference. **If a post-pruning fine-tune is
+    #: available, neither pays**: at a fixed head set SAL's weights are worth
+    #: +0.05pp and DropHead's +0.07pp after recovery, against the recovery
+    #: itself being worth up to 68pp, and on BERT-base across four GLUE tasks
+    #: magnitude plus 2 epochs of recovery beat DropHead on 8 of 8 cells by
+    #: 0.42 to 7.03pp over 3 seeds. If no fine-tune is possible, DropHead,
+    #: with no exception: on a 631M self-supervised encoder it is +0.67pp
+    #: above SAL on 3 of 3 seeds even on SAL's own trained-for head set, which
+    #: was the last cell where SAL could have been the right choice.
+    #: Public data archive, DOI 10.5281/zenodo.24391200.
+    MASK_MODES = ("accumulate", "drophead")
+
     def __post_init__(self):
         if self.schedule not in ("random", "progressive", "burst"):
             raise ValueError(f"schedule must be 'random'/'progressive'/'burst', got '{self.schedule}'")
+        if self.mask_mode not in self.MASK_MODES:
+            raise ValueError(f"mask_mode must be one of {self.MASK_MODES}, "
+                             f"got '{self.mask_mode}'")
         if not 0.0 < self.prune_fraction < 1.0:
             raise ValueError(f"prune_fraction must be in (0,1), got {self.prune_fraction}")
         if self.prune_start_ratio >= self.prune_end_ratio:
