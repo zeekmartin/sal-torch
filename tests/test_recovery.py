@@ -412,11 +412,14 @@ def test_autocast_for_returns_a_real_context_for_an_accelerator():
 
 
 def test_the_recovery_record_states_the_autocast_it_ran_under(tiny_model):
+    """On a CPU a pin falls back, and the record says what actually ran."""
     rec = recover_model(tiny_model, _data(n=2), epochs=1, batch_size=4,
                         amp_dtype=torch.bfloat16, domain="same as eval")
-    assert rec["amp_dtype"] == "torch.bfloat16"
+    assert rec["amp_requested"] == "torch.bfloat16"
+    assert rec["amp_dtype"] is None
+    assert "CPU" in rec["amp_note"] and "pinned" in rec["amp_note"]
     off = recover_model(tiny_model, _data(n=2), epochs=1, batch_size=4, domain="same as eval")
-    assert off["amp_dtype"] is None
+    assert off["amp_dtype"] is None and off["amp_requested"] is None
 
 
 def test_the_pipeline_records_the_precision_it_scored_at(tiny_model):
@@ -487,3 +490,114 @@ def test_the_pipeline_defaults_to_two_epochs_and_accepts_tokens(tiny_model):
     rec = pipe2.validate().recovery
     assert rec["epochs"] is None and rec["tokens"] == 200
     assert "200 tokens" in pipe2.validate().stages[-1].detail
+
+
+# ------------------------------------------------- device-aware precision
+def test_select_precision_covers_every_device_and_request():
+    """Each branch, with the device's capability injected rather than probed.
+
+    The float16-with-a-scaler branch cannot run on this machine, so what is
+    tested here is the decision: which dtype, whether a scaler is needed, and
+    what the note says. The call sequence that branch would take is tested
+    separately in test_backward_and_clip_unscales_before_it_measures.
+    """
+    from sal.recovery import ARCHIVED_AMP, select_precision
+
+    assert select_precision("cpu", None) == (None, False, "fp32, no autocast")
+    assert select_precision("cuda", None)[0] is None
+
+    dtype, scaler, note = select_precision("cuda", "auto", supports_bf16=True)
+    assert (dtype, scaler) == (torch.bfloat16, False)
+    assert "as the archive" in note
+
+    dtype, scaler, note = select_precision("cuda", "auto", supports_bf16=False)
+    assert (dtype, scaler) == (torch.float16, True)
+    assert "GradScaler" in note and ARCHIVED_AMP in note
+
+    dtype, scaler, note = select_precision("cpu", "auto", supports_bf16=True)
+    assert (dtype, scaler) == (None, False)
+    assert "fp32 on a CPU" in note and ARCHIVED_AMP in note
+
+    # A pin the device can honour is honoured.
+    assert select_precision("cuda", torch.bfloat16, supports_bf16=True)[:2] == \
+        (torch.bfloat16, False)
+    assert select_precision("cuda", "float16", supports_bf16=True)[:2] == \
+        (torch.float16, True)
+
+
+def test_a_pinned_bfloat16_is_refused_where_it_is_unsupported():
+    """Pinning is for reproducing a cell, so a substitution would be a lie."""
+    from sal.recovery import select_precision
+
+    with pytest.raises(RecoveryError, match="pinned"):
+        select_precision("cuda", torch.bfloat16, supports_bf16=False)
+
+    # On a CPU it falls back instead of raising: nobody reproduces a published
+    # accelerator figure on a CPU, and the gate's own micro-test runs here.
+    dtype, scaler, note = select_precision("cpu", torch.bfloat16,
+                                           supports_bf16=True)
+    assert dtype is None and scaler is False
+    assert "pinned" in note and "CPU" in note
+
+
+def test_backward_and_clip_unscales_before_it_measures():
+    """The order a scaler forces, checked by recording the calls.
+
+    With a scaler the gradients have to be unscaled before they are clipped or
+    measured, or the logged norm is the loss scale rather than the gradient.
+    This runs the real function against a recording stub, so the ordering is
+    executed rather than read.
+    """
+    from sal.recovery import backward_and_clip
+
+    model = torch.nn.Linear(4, 4)
+    opt = torch.optim.SGD(model.parameters(), lr=0.1)
+    calls = []
+
+    class Stub:
+        def scale(self, loss):
+            calls.append("scale")
+            return loss
+
+        def unscale_(self, optimizer):
+            calls.append("unscale_")
+
+        def step(self, optimizer):
+            calls.append("step")
+            optimizer.step()
+
+        def update(self):
+            calls.append("update")
+
+    loss = model(torch.randn(2, 4)).sum()
+    norm = backward_and_clip(loss, list(model.parameters()), 1.0, opt, Stub())
+    assert calls == ["scale", "unscale_", "step", "update"]
+    assert norm > 0
+
+    # And without a scaler the plain path still steps the optimizer once.
+    opt2 = torch.optim.SGD(model.parameters(), lr=0.1)
+    before = model.weight.detach().clone()
+    loss2 = model(torch.randn(2, 4)).sum()
+    backward_and_clip(loss2, list(model.parameters()), 1.0, opt2, None)
+    assert not torch.equal(before, model.weight.detach())
+
+
+def test_auto_precision_warns_with_the_precision_it_used(tiny_model, caplog):
+    with caplog.at_level("WARNING"):
+        rec = recover_model(tiny_model, _data(n=1), domain="same as eval",
+                            epochs=1, batch_size=4, amp_dtype="auto")
+    assert rec["amp_requested"] == "auto"
+    assert rec["grad_scaler"] is False
+    assert rec["amp_dtype"] is None, "CPU: fp32, whatever was asked for"
+    line = [r.getMessage() for r in caplog.records
+            if "recovery precision" in str(r.msg)]
+    assert line and "fp32 on a CPU" in line[0]
+    assert "bfloat16" in line[0], "the warning must name the archived precision"
+
+
+def test_no_warning_when_no_autocast_was_asked_for(tiny_model, caplog):
+    with caplog.at_level("WARNING"):
+        rec = recover_model(tiny_model, _data(n=1), domain="same as eval",
+                            epochs=1, batch_size=4)
+    assert rec["amp_note"] == "fp32, no autocast"
+    assert not [r for r in caplog.records if "recovery precision" in str(r.msg)]

@@ -186,11 +186,20 @@ def run_cell(model, eval_data, train_data, *, strategy, seed, pruning,
     rec_kwargs = dict(epochs=epochs, domain="ImageNet-1k train split, the "
                                             "evaluation domain")
     if mode == "paper":
-        # The archived vision recipe: clip 1.0, linear warmup over 5% of the
-        # steps, then cosine. These are also the shipped defaults, which is
-        # why one run set satisfies both of this cell's bands.
+        # The archived vision recipe, pinned rather than defaulted into: clip
+        # 1.0, linear warmup over 5% of the steps, then cosine, under bfloat16
+        # autocast. These are also the shipped defaults, which is why one run
+        # set satisfies both of this cell's bands. bfloat16 is pinned and not
+        # left to "auto" because a paper-mode run that quietly used float16
+        # with a GradScaler would not be the paper recipe; on a device without
+        # bfloat16 the pin raises, which is the honest outcome.
         rec_kwargs.update(max_grad_norm=1.0, schedule="warmup_cosine",
-                          warmup_ratio=0.05)
+                          warmup_ratio=0.05,
+                          amp_dtype=(torch.bfloat16 if amp else None))
+    else:
+        # The shipped defaults, including "auto" precision, which is what a
+        # user gets and therefore what the one-sided band judges.
+        rec_kwargs.update(amp_dtype=("auto" if amp else None))
     pipe = CompressionPipeline(model, eval_data, metric="accuracy",
                                batch_size=128, seed=seed,
                                model_name="ViT-B/16 (gate, %s)" % label,
@@ -201,8 +210,18 @@ def run_cell(model, eval_data, train_data, *, strategy, seed, pruning,
     path = Path(outdir) / ("gate_%s.json" % label)
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    def peak_gib():
+        if not torch.cuda.is_available():
+            return None
+        return torch.cuda.max_memory_allocated() / 2 ** 30
+
     def save(stage: str):
         # Rule 10: write as each stage completes, not at the end of the cell.
+        # Rule 9: each stage's OWN peak, reset between stages, because a
+        # single end-of-run figure hides which stage was the expensive one.
+        out.setdefault("peak_gib", {})[stage] = peak_gib()
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
         out["last_stage"] = stage
         out["seconds"] = time.time() - t0
         path.write_text(json.dumps(out, indent=1, default=str),

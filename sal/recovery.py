@@ -266,6 +266,99 @@ def _param_groups(model, lr: float, head_lr_multiplier: float) -> list:
     return groups
 
 
+#: What the campaign's own runs used, and what a figure is comparable with.
+ARCHIVED_AMP = "bfloat16 autocast on MI250X (scoring: float16 autocast)"
+
+
+def bf16_supported(device_type: str) -> bool:
+    """Does this device do bfloat16 autocast? Probed, never assumed."""
+    if device_type == "cuda":
+        try:
+            return bool(torch.cuda.is_available()
+                        and torch.cuda.is_bf16_supported())
+        except (AssertionError, RuntimeError):      # no driver, no device
+            return False
+    return device_type == "cpu"     # torch has CPU bf16, see select_precision
+
+
+def select_precision(device_type: str, requested=None, *, supports_bf16=None):
+    """``(amp_dtype, needs_scaler, note)`` for this device and this request.
+
+    ``requested`` is ``None`` for no autocast at all, ``"auto"`` to take the
+    best this device has, or an explicit dtype, which is a **pin**:
+
+    * a pin the device can honour is honoured;
+    * a pin of bfloat16 on an accelerator without bfloat16 **raises**, because
+      the only reason to pin it is to reproduce a published cell and a silent
+      substitution would make the run something else;
+    * a pin on a CPU falls back to fp32 with a note, since nobody reproduces a
+      published accelerator figure on a CPU and CPU autocast is a third dtype
+      policy rather than a cheaper version of the first two.
+
+    ``supports_bf16`` overrides the probe, which is what makes every branch
+    here testable on a machine with no accelerator at all.
+    """
+    probe = (bf16_supported(device_type) if supports_bf16 is None
+             else bool(supports_bf16))
+    if requested is None:
+        return None, False, "fp32, no autocast"
+
+    if isinstance(requested, str) and requested.lower() == "auto":
+        if device_type == "cpu":
+            return (None, False,
+                    "fp32 on a CPU: CPU autocast is a different dtype policy "
+                    "from the one the archived runs used (%s)" % ARCHIVED_AMP)
+        if probe:
+            return torch.bfloat16, False, "bfloat16 autocast, as the archive"
+        return (torch.float16, True,
+                "float16 autocast with a GradScaler: this device has no "
+                "bfloat16, and the archived figures were measured under %s"
+                % ARCHIVED_AMP)
+
+    dtype = (getattr(torch, requested.replace("torch.", ""))
+             if isinstance(requested, str) else requested)
+    if device_type == "cpu":
+        return (None, False,
+                "fp32 on a CPU: %s was pinned, and CPU autocast is a "
+                "different dtype policy from the archived %s"
+                % (dtype, ARCHIVED_AMP))
+    if dtype is torch.bfloat16 and not probe:
+        raise RecoveryError(
+            "bfloat16 autocast was pinned and %s does not support it. A pin "
+            "is for reproducing a published cell, so it is refused rather "
+            "than substituted: pass amp_dtype='auto' to take float16 with a "
+            "GradScaler instead, and do not call the result a reproduction."
+            % device_type)
+    needs_scaler = dtype is torch.float16
+    return (dtype, needs_scaler,
+            "%s autocast%s, pinned" % (str(dtype).replace("torch.", ""),
+                                       " with a GradScaler" if needs_scaler
+                                       else ""))
+
+
+def backward_and_clip(loss, params, max_grad_norm, optimizer, scaler=None):
+    """One backward, one clip, one step, in the order that keeps the log true.
+
+    With a scaler the gradients must be **unscaled before** they are clipped
+    or measured, or the logged norm is the loss scale rather than the
+    gradient. Returns the norm before clipping, which is what the result
+    records.
+    """
+    if scaler is None:
+        loss.backward()
+    else:
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
+    norm = torch.nn.utils.clip_grad_norm_(
+        params, max_grad_norm if max_grad_norm else float("inf"))
+    if scaler is None:
+        optimizer.step()
+    else:
+        scaler.step(optimizer)
+        scaler.update()
+    return float(norm)
+
+
 def autocast_for(device_type: str, amp_dtype):
     """The autocast context a run should use, or a null one.
 
@@ -325,14 +418,17 @@ def recover_model(model, train_dataset, *,
     token count, and epochs over a corpus shard is not a unit that transfers
     between scales.
 
-    ``amp_dtype`` runs the forward and backward under autocast, and is how a
-    published cell is reproduced: every recovery in the campaign ran under
-    **bfloat16** autocast, and every score under **float16** autocast, which
-    are different and were both written up as "autocast bfloat16" until the
-    pre-report audit. It defaults to ``None``, i.e. no autocast, because that
-    is the only choice that is right on a CPU and in a unit test; a GPU run
-    that wants the archived recipe passes ``torch.bfloat16``. The value is
-    recorded in the result.
+    ``amp_dtype`` is ``None`` for no autocast, ``"auto"`` to take the best
+    precision the device has, or an explicit dtype, which is a pin. Every
+    recovery in the campaign ran under **bfloat16** autocast and every score
+    under **float16** autocast, which are different and were both written up
+    as "autocast bfloat16" until the pre-report audit, so ``"auto"`` prefers
+    bfloat16 and falls back to float16 with a GradScaler where the device has
+    no bfloat16, or to fp32 on a CPU. Whatever runs is warned about in one
+    line and recorded in the result, because a run at a different precision
+    from the archived one is not comparable with it. A pinned bfloat16 on an
+    accelerator without bfloat16 raises rather than substituting: see
+    :func:`select_precision`.
 
     ``masks`` may be supplied by the caller (``{parameter name: bool tensor}``
     of the weights to keep non-zero); if it is ``None`` and
@@ -397,7 +493,15 @@ def recover_model(model, train_dataset, *,
             handles.append(p.register_hook(lambda g, m=m: g * m))
 
     params = [p for p in model.parameters() if p.requires_grad]
+    amp_requested = amp_dtype
+    amp_dtype, needs_scaler, amp_note = select_precision(device.type, amp_dtype)
+    if amp_requested is not None:
+        # One line, naming what actually ran. A run that silently used a
+        # different precision from the archived one is not comparable with it,
+        # and nothing in the output would have said so.
+        logger.warning("recovery precision: %s", amp_note)
     autocast = autocast_for(device.type, amp_dtype)
+    scaler = (torch.amp.GradScaler(device.type) if needs_scaler else None)
     loss_curve: list = []
     grad_norms: list = []
     lr_curve: list = []
@@ -429,15 +533,13 @@ def recover_model(model, train_dataset, *,
                         f"non-finite loss at step {step}: {loss.item()}. A diverged "
                         "run still yields a number and writing it is worse than "
                         "stopping.")
-                loss.backward()
-                # clip_grad_norm_ returns the norm BEFORE clipping, so the log is
-                # the real gradient and not the clipped one. With no clipping
-                # asked for, an infinite bound measures without scaling anything.
-                norm = torch.nn.utils.clip_grad_norm_(
-                    params, max_grad_norm if max_grad_norm else float("inf"))
-                grad_norms.append(float(norm))
+                # clip_grad_norm_ returns the norm BEFORE clipping, so the
+                # log is the real gradient and not the clipped one. With no
+                # clipping asked for, an infinite bound measures without
+                # scaling anything.
                 lr_curve.append(float(opt.param_groups[0]["lr"]))
-                opt.step()
+                grad_norms.append(backward_and_clip(
+                    loss, params, max_grad_norm, opt, scaler))
                 opt.zero_grad(set_to_none=True)
                 # Not after the final optimizer step. Both schedules are
                 # unclamped past the planned end, exactly as torch's is, where
@@ -484,6 +586,9 @@ def recover_model(model, train_dataset, *,
         "head_lr_multiplier": head_lr_multiplier,
         "max_grad_norm": max_grad_norm,
         "amp_dtype": (None if amp_dtype is None else str(amp_dtype)),
+        "amp_requested": (None if amp_requested is None else str(amp_requested)),
+        "amp_note": amp_note,
+        "grad_scaler": bool(needs_scaler),
         "schedule": schedule, "warmup_steps": warmup_steps,
         "peak_lr": peak_lr,
         "warmup_ratio": warmup_ratio if schedule == "warmup_cosine" else None,
