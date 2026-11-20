@@ -228,6 +228,39 @@ dominates the selection criterion by more than an order of magnitude.** Choose
 random because it is free, not because it rescues a bad pruning decision.
 Full trail in `results/lumi_v060/EXP40B_RANDOM.md`.
 
+#### The recipe those vision figures were measured under
+
+`recover()`'s defaults are this recipe, with two elements that are yours
+rather than its: the batch size, which is whatever your data yields when you
+hand it batches, and the augmentation. Every element is stated because a
+recovery at a different recipe is not comparable with the numbers above.
+
+| | |
+|---|---|
+| optimizer | AdamW, weight decay 0.05 |
+| learning rate | 5e-5 on the backbone, **20x that on the classifier** (`head_lr_multiplier`) |
+| schedule | linear warmup over 5% of the total steps, then cosine to zero |
+| gradient clipping | global norm 1.0 |
+| batch size | 64 (the caller's; `batch_size=` applies only when `recover()` does the batching) |
+| epochs | 2 |
+| precision | **bfloat16** autocast while training, **float16** autocast while scoring |
+| data order | reshuffled every epoch from a seeded generator |
+| **augmentation** | **random horizontal flip, p=0.5 per image, applied to every training batch** |
+
+**The augmentation is yours to supply, and it is not optional for
+reproduction.** `recover()` does not augment: it takes whatever batches the
+dataset yields, because the same stage has to recover a decoder on token
+windows where flipping is meaningless. The measured figures above were
+produced with that flip in the data pipeline, and leaving it out costs, on
+ViT-B/16 at 50% of heads, **0.15 to 0.26pp** of final accuracy on 3 of 3
+seeds, with training loss 0.049 lower in the first epoch and 0.039 in the
+second, measured on six runs with a spread of 0.0006 across seeds. If you
+compare your own recovery against these numbers, flip your training batches.
+
+The classifier's 20x is the same story read from the other side: it shipped as
+10x for one cycle, on the strength of a write-up sentence rather than the
+recipe, and the release gate is what caught it.
+
 **It refuses LoRA/QLoRA models.** Not a warning — an error, with the reason and
 what to do instead. SAL works by letting the model reorganize around silenced
 heads, and adapters freeze the weights that would do the reorganizing; measured,

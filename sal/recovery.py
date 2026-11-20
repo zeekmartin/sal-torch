@@ -254,6 +254,16 @@ def _one_cycle(total_steps: int, pct_start: float):
     return factor, max(0, int(up_end))
 
 
+#: The classifier's learning rate, as a multiple of the backbone's, in the
+#: recipe every published vision recovery figure was measured under:
+#: ``run_sal_qat_prototype.make_optimizer`` runs ``LR_HEAD`` 1e-3 against
+#: ``LR_BACKBONE`` 5e-5. The default shipped as 10.0 for one release cycle on
+#: the strength of a write-up that said "10x on the classifier", which the
+#: release gate then caught: the archive is 20x, and a default traced to a
+#: measurement has to match the measurement.
+ARCHIVED_HEAD_LR_MULTIPLIER = 20.0
+
+
 def _param_groups(model, lr: float, head_lr_multiplier: float) -> list:
     head, body = [], []
     for name, p in model.named_parameters():
@@ -474,7 +484,7 @@ def recover_model(model, train_dataset, *,
                   epochs=UNSET,
                   tokens: Optional[int] = None,
                   lr: float = 5e-5,
-                  head_lr_multiplier: float = 10.0,
+                  head_lr_multiplier: float = ARCHIVED_HEAD_LR_MULTIPLIER,
                   weight_decay: float = 0.05,
                   batch_size: int = 8,
                   max_grad_norm: Optional[float] = 1.0,
@@ -501,6 +511,13 @@ def recover_model(model, train_dataset, *,
     ``epochs`` and ``tokens`` are mutually exclusive: a decoder's budget is a
     token count, and epochs over a corpus shard is not a unit that transfers
     between scales.
+
+    ``head_lr_multiplier`` is **20.0**, the archived vision recipe's ratio of
+    ``LR_HEAD`` to ``LR_BACKBONE``, and it applies to parameters whose top
+    level name is one of :data:`HEAD_PREFIXES`. A model with tied embeddings
+    has no such parameter and gets one group: OPT's ``lm_head`` is its
+    embedding, so ``named_parameters()`` never yields it and the decoder cells
+    train at a single rate, which is also what their archived recipe did.
 
     ``shuffle`` is **on by default** and reshuffles every epoch from
     ``seed + epoch``, because a recovery that walks its data in one fixed

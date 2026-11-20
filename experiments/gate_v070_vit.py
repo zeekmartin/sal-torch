@@ -59,10 +59,14 @@ for _p in (str(SCRIPTS), str(HERE)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from v070_gate_bands import (BANDS_BY_CELL, check_all,  # noqa: E402
-                             package_provenance)
+from v070_gate_bands import (BANDS_BY_CELL, CELL_ROLES,  # noqa: E402
+                             check_all, package_provenance)
 
 DATASET = "evanarlian/imagenet_1k_resized_256"
+#: What the archived vision recipe augments with, recorded in every cell so a
+#: reader does not have to infer it from the accuracy.
+AUGMENTATION = ("horizontal flip, p=0.5 per sample, drawn on the device as "
+                "run_sal_qat_prototype.make_step draws it")
 SEEDS = (42, 123, 456)
 #: band names per strategy, from the pre-registration itself rather than a
 #: second copy of it: the scorer reads the same map.
@@ -81,10 +85,22 @@ class NormalizedSplit:
 
     def __init__(self, split, batch_size: int, normalize, with_labels=True,
                  workers: int = 0, shuffle: bool = False, seed: int = 0,
-                 block: int = 0):
+                 block: int = 0, flip: bool = False, device=None):
         self.split, self.batch_size = split, batch_size
         self.normalize, self.with_labels, self.workers = (normalize,
                                                           with_labels, workers)
+        # The archived recipe AUGMENTS, and `recover()` does not: augmentation
+        # is a property of the data a caller hands in, not of a recovery
+        # stage that has to work on tokens as well as images. The gate's
+        # vision cell therefore carries exp40's augmentation here, in the data
+        # view, in `make_step`'s own three lines and its own order: move to
+        # the device, normalize, then flip half the batch horizontally.
+        #
+        # Measured cost of not doing this: training loss 0.049 lower in epoch
+        # one and 0.039 in epoch two, on 6 of 6 vision runs with a spread of
+        # 0.0006 across three seeds, and 0.15 to 0.26pp of validation
+        # accuracy, which is what failed G1.
+        self.flip, self.device = flip, device
         # The training pass is SHUFFLED, with its own seed, and block-shuffled
         # when the split is memory-mapped. That is what the archived recipe
         # does (exp23's recover calls batches(shuffle=True, seed=...) and a
@@ -100,6 +116,40 @@ class NormalizedSplit:
                          seed=self.seed, workers=self.workers,
                          block=self.block)
 
+    def _peek_batch(self) -> dict:
+        """One batch, built by slicing, for the schedule's step count only.
+
+        Never trained on and never scored: `recover()` takes it to learn the
+        batch shape and, for a token budget, the tokens per batch. Its
+        CONTENT is irrelevant, which is what makes it safe to serve without
+        touching the sampler or the global generator. This view reports its
+        own length, so no caller has to walk this pass to count it.
+        """
+        x, y = self.split[0][:self.batch_size], self.split[1][:self.batch_size]
+        batch = {"pixel_values": self._prepare(x, augment=False)}
+        if self.with_labels:
+            batch["labels"] = (y.to(self.device) if self.device is not None
+                               else y)
+        return batch
+
+    def _prepare(self, x, augment: bool):
+        """`make_step`'s input pipeline: to the device, normalize, then flip.
+
+        The draw is ``torch.rand(n, device=...) < 0.5`` from the device's own
+        generator, which is the generator and the shape `make_step` uses. The
+        order matters twice over: normalizing on the device is what the
+        archive did, and one draw per training batch in sequence is what keeps
+        this stream the archive's stream.
+        """
+        if self.device is not None:
+            x = x.to(self.device)
+        x = self.normalize(x)
+        if not augment:
+            return x
+        dev = x.device
+        picked = torch.rand(x.shape[0], device=dev) < 0.5
+        return torch.where(picked.view(-1, 1, 1, 1), x.flip(-1), x)
+
     def __iter__(self):
         # ONE loader, iterated once per epoch, because `_BlockShuffle` creates
         # its generator once and advances it across epochs: that is how exp23
@@ -107,24 +157,35 @@ class NormalizedSplit:
         # loader each epoch would repeat the first epoch's order instead.
         #
         # The first call is the schedule's one-batch peek, not an epoch, and
-        # exp23 has no such peek. Serving it from a throwaway loader keeps the
-        # training sampler's generator at the state exp23 starts from; without
-        # this the peek advances it two draws and every epoch after it is a
-        # different order from the published run.
+        # exp23 has no such peek, so it must leave no trace.
+        #
+        # The peek consumes NO randomness of any kind: it is one batch the
+        # schedule counts and the loop never trains on, and this pass is the
+        # whole reason the gate's order and augmentation can be the archive's.
+        #
+        # It used to be served from a throwaway loader, which was wrong in a
+        # way only the equivalence test found: `iter(DataLoader)` draws a
+        # base seed from the GLOBAL generator when the loader has none of its
+        # own, so a throwaway pass left the global stream one draw ahead and
+        # every flip decision after it differed from exp40's. exp40 builds one
+        # loader and iterates it twice, so the gate must create exactly two
+        # iterators as well. Slicing the split directly creates none.
         if self.shuffle and not self._peeked:
             self._peeked = True
-            source = self._build()
+            yield self._peek_batch()
+            return
+        augment = self.flip
+        if self.shuffle:
+            if self._loader is None:
+                self._loader = self._build()
+            source = self._loader
         else:
-            if self.shuffle:
-                if self._loader is None:
-                    self._loader = self._build()
-                source = self._loader
-            else:
-                source = self._build()
+            source = self._build()
         for x, y in source:
-            batch = {"pixel_values": self.normalize(x)}
+            batch = {"pixel_values": self._prepare(x, augment)}
             if self.with_labels:
-                batch["labels"] = y
+                batch["labels"] = (y.to(self.device) if self.device is not None
+                                   else y)
             yield batch
 
     def __len__(self):
@@ -213,8 +274,22 @@ def _synthetic(n_train=16, n_val=16, classes=4, layers=2, heads=4, dim=32):
 
 
 def run_cell(model, eval_data, train_data, *, strategy, seed, pruning,
-             epochs, mode, control, outdir, label, amp, log=print) -> dict:
-    """One seed of one run set, through the shipped pipeline. Writes as it goes."""
+             epochs, mode, control, outdir, label, amp, role, log=print) -> dict:
+    """One seed of one run set, through the shipped pipeline. Writes as it goes.
+
+    ``role`` is ``"arm"``, ``"gate"`` or ``"micro"`` and goes into the result,
+    because the scorer must not have to guess. A gate cell and an arm cell are
+    the same shape, same keys, same ``last_stage``, and the only thing in the
+    JSON that separated them was the magnitude of the numbers: a 4-minute gate
+    at 2000 images folded silently into G1 as a fourth seed and pulled the
+    band's mean from 78.60 to 72.23. The caller knows which it ran, so the
+    caller says so and nothing downstream infers it from a step count.
+    """
+    # Checked before anything is built or measured: a cell that would be
+    # written with a role nothing downstream accepts is 2 GPU-hours spent on
+    # a result the scorer will refuse.
+    if role not in CELL_ROLES:
+        raise ValueError("role must be one of %s, got %r" % (CELL_ROLES, role))
     from sal import CompressionPipeline, RecoveryControl
 
     t0 = time.time()
@@ -243,8 +318,11 @@ def run_cell(model, eval_data, train_data, *, strategy, seed, pruning,
     # imported and compared against the sidecar beside it. A band is not
     # passed on a result that cannot say this.
     import sal
-    out = {"label": label, "strategy": strategy, "seed": seed, "mode": mode,
+    out = {"label": label, "role": role,
+           "strategy": strategy, "seed": seed, "mode": mode,
            "pruning": pruning, "epochs": epochs,
+           "augmentation": (AUGMENTATION if getattr(train_data, "flip", False)
+                            else "none"),
            "provenance": package_provenance(sal),
            "sal_version": sal.__version__,
            "precision": pipe.precision, "stages": []}
@@ -349,7 +427,8 @@ def main(argv=None) -> int:
             cell = run_cell(model, eval_data, train_data, strategy=args.strategy,
                             seed=seed, pruning=0.50, epochs=1, mode=args.mode,
                             control=RecoveryControl(clean, epochs=1, seeds=1),
-                            outdir=outdir, label="micro_s%d" % seed, amp=None)
+                            outdir=outdir, label="micro_s%d" % seed,
+                            role="micro", amp=None)
             results.append(cell)
             per_seed.append(cell["recovered_accuracy"] * 100)
             costs.append(cell["pruning_cost_pp"])
@@ -403,11 +482,11 @@ def main(argv=None) -> int:
                             workers=P.LOADER_WORKERS),
             NormalizedSplit(train_split, args.batch_size, P.normalize,
                             workers=P.LOADER_WORKERS, shuffle=True, seed=seed,
-                            block=P.LOADER_BLOCK),
+                            block=P.LOADER_BLOCK, flip=True, device=device),
             strategy=args.strategy, seed=seed, pruning=args.pruning,
             epochs=args.epochs, mode=args.mode, control=control,
             outdir=outdir, label="%s_%s_s%d" % (args.strategy, args.mode, seed),
-            amp=amp, log=P.log)
+            role=("gate" if args.gate else "arm"), amp=amp, log=P.log)
         results.append(cell)
         per_seed.append(cell["recovered_accuracy"] * 100)
         costs.append(cell["pruning_cost_pp"])

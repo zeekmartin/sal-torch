@@ -2,6 +2,23 @@
 
 ## [Unreleased], v0.7.0 in progress
 
+### Changed
+- **`recover()`'s `head_lr_multiplier` default is 20.0, not 10.0.** The recipe
+  every published vision recovery figure was measured under runs the classifier
+  at `LR_HEAD` 1e-3 against `LR_BACKBONE` 5e-5, which is a factor of 20. The
+  default shipped as 10 on the strength of a write-up sentence that said "10x
+  on the classifier"; the release gate caught it, as part of a 0.15 to 0.26pp
+  deficit against the archived cell on 3 of 3 seeds. The default is now the
+  module constant `ARCHIVED_HEAD_LR_MULTIPLIER`, and a test recomputes it from
+  the harness constants rather than asserting a literal, so a drift on either
+  side fails. Pass `head_lr_multiplier=10.0` to keep the old behaviour.
+- **The README now states the full vision recovery recipe**, including the one
+  element `recover()` deliberately does not provide: the archived figures were
+  measured with a random horizontal flip (p=0.5) in the training data
+  pipeline. `recover()` does not augment, because the same stage recovers
+  decoders on token windows. Leaving the flip out costs 0.15 to 0.26pp on
+  ViT-B/16 at 50% of heads, measured on 6 runs.
+
 ### Added
 - **`CompressionPipeline.recover()`, the repair stage, v0.7.0 item 1.** It sits
   between `compress()` and `validate()` and raises if called before
