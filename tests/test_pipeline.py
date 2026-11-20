@@ -152,7 +152,14 @@ def test_small_model_warning(tiny_model, caplog):
 
 
 def test_accuracy_floor_stops_the_run(tiny_model):
-    """A floor must stop the pipeline rather than return a small broken model."""
+    """A floor must stop the pipeline rather than return a small broken model.
+
+    This covers the floor on the ORIGINAL model, which is what an impossible
+    floor trips first and which is never deferred: there is no recovery that
+    repairs a model nobody has compressed. The floor on a compressed model is
+    held until ``validate()`` as of v0.7.0, and that path is covered in
+    ``tests/test_recovery.py``.
+    """
     # metric="loss": the floor is an upper bound, so an impossible one trips at once.
     pipe = CompressionPipeline(tiny_model, _data(), metric="loss", batch_size=4,
                                accuracy_floor=0.0001)

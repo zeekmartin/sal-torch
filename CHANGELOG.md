@@ -1,5 +1,62 @@
 # Changelog
 
+## [Unreleased], v0.7.0 in progress
+
+### Added
+- **`CompressionPipeline.recover()`, the repair stage, v0.7.0 item 1.** It sits
+  between `compress()` and `validate()` and raises if called before
+  `compress()`. Defaults, each measured rather than chosen: `epochs=2` for
+  vision models and encoders, `tokens=` instead for decoders (the two are
+  mutually exclusive, and passing both or neither raises),
+  `max_grad_norm=1.0`, `schedule="warmup_cosine"` with `warmup_ratio=0.05`,
+  and `preserve_sparsity=True`. The gradient norm and the full loss curve are
+  recorded every step, with `max_rise_above_running_min` and the step it peaked
+  at, because the first and last of a curve that rises in the middle and comes
+  most of the way back look unremarkable. Sources, public data archive
+  DOI 10.5281/zenodo.24391200: at 50% of attention heads a ViT-B/16 on
+  ImageNet-1k reads 9.56% one-shot and 77.642% after two epochs against a dense
+  control trained for the same two epochs.
+- **`domain=` is required on `recover()`,** with no default. A recovery corpus
+  from outside the evaluation domain can cost more than the pruning it repairs:
+  on OPT-1.3B, 32M tokens of C4 made the *unpruned* model worse on raw
+  WikiText-2 by 0.6398 perplexity, and at 6.7B the recovered arm ended worse
+  than its own one-shot model on 3 of 3 seeds. `domain="generic"` is accepted
+  and warns with that result; there is no silent default.
+- **A domain guard.** With a `RecoveryControl` supplied, a recovery whose dense
+  control moved against the evaluation metric by at least the arm's one-shot
+  damage is flagged `domain_shift_dominates` and warns that the honest output
+  is the one-shot model.
+- **Mask-preserving recovery.** A user-supplied or captured zero pattern is
+  defended by a gradient hook and re-applied once at the end, and the drift is
+  measured *before* that re-apply so the re-apply cannot hide a failure.
+  `mask_preserved=False` **raises**: measured drift across 24 of 24 archived
+  recovery runs was exactly 0.0, so a violation is a defect and not a
+  tolerance. On a structurally sliced model there is no mask and the flag is a
+  no-op.
+- **`sal.RecoveryControl`,** the dense model trained for the same budget with
+  nothing pruned, with `matches()` over epochs or tokens. The report fields
+  computed from it (`pruning_cost_pp`, `fine_tuning_gain_pp`,
+  `budget_matched`) are v0.7.0 item 2 and are not in this entry.
+- **`sal.recover_model()`** for use outside the pipeline, and
+  `CompressionReport.recovery`, which carries the whole record into
+  `to_dict()` and `save()`.
+- **`strict_recovery=True`** on the pipeline makes `validate()` refuse to score
+  an unrecovered compressed model at all. Not the default: a user who wants the
+  one-shot number should be able to ask for it.
+
+### Changed
+- **`accuracy_floor` is no longer applied to an unrecovered compressed model at
+  `compress()` time.** It is held, logged as held, and applied by `validate()`
+  if `recover()` never runs. This is a behaviour change and it is the point of
+  the release: the floor used to fire at 9.56% on a model two epochs of
+  recovery would have put at 77.6%, and the error text offered only a smaller
+  `prune_ratio`. The text now says to recover first, and keeps the
+  smaller-ratio suggestion for after recovery, where the remaining damage
+  really is the ratio.
+- Strings that said the pipeline has no recovery stage, in the module docstring
+  and in two `probe()` routing branches, now describe the stage that exists.
+  The wider figure audit of `sal/*.py` is v0.7.0 item 4 and is not done here.
+
 ## [0.6.1] — 2026-11-01
 
 A documentation and routing release: no change to the mechanism, the defaults or

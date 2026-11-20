@@ -21,6 +21,7 @@ from sal.slicing import slice_heads, SlicingError
 from sal.quantize import quantize, quantize_info, QuantizationError
 from sal.pipeline import (CompressionPipeline, CompressionReport,
                           PipelineError, ProbeSummary)
+from sal.recovery import RecoveryControl, RecoveryError, recover_model
 from sal.evaluation import (linear_probe, knn_accuracy, cka_similarity,
                             representation_similarity, measure_latency,
                             count_params, extract_features, compression_report)
@@ -61,6 +62,7 @@ __all__ = ["SALConfig", "SALCallback", "SALTrainer", "HeadMasker",
            "quantize", "quantize_info", "QuantizationError",
            "CompressionPipeline", "CompressionReport", "PipelineError",
            "ProbeSummary",
+           "RecoveryControl", "RecoveryError", "recover_model",
            "linear_probe", "knn_accuracy", "cka_similarity",
            "representation_similarity", "measure_latency", "count_params",
            "extract_features", "compression_report",

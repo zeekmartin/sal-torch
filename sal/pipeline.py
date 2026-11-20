@@ -5,16 +5,15 @@ training loop → head selection → slicing → a quantization backend → an
 evaluation harness. This object does that wiring and measures every stage, so
 the output is a deployment decision rather than a number.
 
-**Two limits to know before using it.**
+**The stages, in order:** probe → scan → compress → `recover()` → validate →
+export. `recover()` is where the accuracy in post-hoc pruning comes from and is
+new in v0.7.0: at 50% of heads the one-shot model reads 9.56% and two epochs of
+recovery reach 77.642% against a dense control trained for the same two epochs.
+Before v0.7.0 this pipeline had no such stage and delivered the first of those
+numbers, which is why `validate()` now holds an `accuracy_floor` failure on an
+unrecovered model rather than refusing it outright.
 
-*It does not repair the model.* The stages are probe → scan → sal_train →
-compress → validate → export; nothing recovers the damage `compress()` does.
-Almost every accuracy this project publishes includes a post-pruning fine-tune,
-which is a step this pipeline does not perform -- at 50% of heads the gap
-between the two is 9.56% against 77.6%. `recover()` is v0.7.0 item 1. Until it
-ships, run your own fine-tune between `compress()` and `validate()`.
-
-*The v0.4.0 recipe it was built around is superseded.* "Fully fine-tune with SAL,
+*The v0.4.0 recipe this object was built around is superseded.* "Fully fine-tune with SAL,
 then quantize" came from one model (GPT-2 Medium / SST-2, 355M, no recovery
 pass). The ImageNet-1k campaign -- three seeds, full validation split, a dense
 control trained for the same number of epochs -- measured that at a fixed head
@@ -26,8 +25,9 @@ that is where the accuracy is.
 
     pipe = CompressionPipeline(model, eval_dataset, metric="accuracy")
     print(pipe.scan().recommendation)
-    pipe.sal_train(train_dataset, epochs=3, prune_fraction=0.33)
-    pipe.compress(pruning=0.33, quantization="int4", slice_heads=True)
+    print(pipe.probe().recommendation)
+    pipe.compress(pruning=0.50, quantization="int4", slice_heads=True)
+    pipe.recover(train_dataset, epochs=2, domain="same as eval")
     print(pipe.validate().summary)
     pipe.export("compressed_model/")
     pipe.report().save("compression_report.pdf")
@@ -203,9 +203,8 @@ class ProbeSummary:
                 "    yes -> prune by magnitude, then recover. Strongest option "
                 "measured: 77.6% at 50% of heads on ViT-B/16 / ImageNet-1k "
                 "after 2 epochs, 3 seeds, against SAL's 76.5% and DropHead's "
-                "72.5%. This pipeline has no recover() stage yet (v0.7.0 "
-                "item 1) -- run the fine-tune yourself between compress() and "
-                "validate().",
+                "72.5%. Call recover() between compress() and "
+                "validate(); two epochs is the measured default.",
                 "    no  -> train with head masking first:",
                 "      sal_train(train_dataset, prune_fraction=0.5)  # SAL: ties "
                 "you to ONE head set, fixed before training",
@@ -242,9 +241,9 @@ class ProbeSummary:
                 "nothing measurable here -- but this threshold is the one the "
                 "evidence contradicts, so verify rather than trust it:",
                 "  compress(pruning=0.5, quantization='int4', slice_heads=True)",
-                "  then recover: a post-pruning fine-tune is worth far more "
-                "than any training-time method, and this pipeline does not run "
-                "one yet (v0.7.0 item 1).",
+                "  then recover(train_dataset, epochs=2, domain=...): a "
+                "post-pruning fine-tune is worth far more than any "
+                "training-time method.",
                 "measured: SAL and DropHead were indistinguishable on models in "
                 "this band (+0.08pp on BERT-base, +0.11pp on phi-2), and "
                 "DropHead cost 1.1pp of clean accuracy on I-JEPA for no gain. "
@@ -288,6 +287,7 @@ class CompressionReport:
     model_name: str = ""
     scan: Optional[ScanSummary] = None
     roundtrip_verified: Optional[bool] = None
+    recovery: Optional[dict] = None
 
     @property
     def first(self) -> Optional[Stage]:
@@ -349,6 +349,7 @@ class CompressionReport:
                         "detail": s.detail, "seconds": round(s.seconds, 2)}
                        for s in self.stages],
             "scan": self.scan.to_dict() if self.scan else None,
+            "recovery": self.recovery,
         }
 
     def save(self, path: str):
@@ -368,7 +369,8 @@ class CompressionPipeline:
 
     def __init__(self, model, eval_dataset, metric: str = "accuracy", batch_size: int = 8,
                  probe_dataset=None, seed: int = 0, accuracy_floor: Optional[float] = None,
-                 model_name: str = "", max_batches: Optional[int] = None):
+                 model_name: str = "", max_batches: Optional[int] = None,
+                 strict_recovery: bool = False):
         if metric not in ("accuracy", "loss"):
             raise ValueError(f"metric must be 'accuracy' or 'loss', got '{metric}'")
         adapters = detect_adapters(model)
@@ -406,6 +408,12 @@ class CompressionPipeline:
         self._compressed = False
         self._pruned_heads: list = []
         self._roundtrip: Optional[bool] = None
+        self.strict_recovery = strict_recovery
+        self._recovered = False
+        self._recovery: Optional[dict] = None
+        self._control = None
+        self._deferred_floor: Optional[Stage] = None
+        self._one_shot_accuracy: Optional[float] = None
 
     # ------------------------------------------------------------------ helpers
     def _size(self, model=None) -> float:
@@ -426,30 +434,52 @@ class CompressionPipeline:
         self._check_floor(stage)
         return stage
 
-    def _check_floor(self, stage: Stage):
+    def _below_floor(self, stage: Stage) -> bool:
         if self.accuracy_floor is None or stage.accuracy is None:
+            return False
+        return (stage.accuracy < self.accuracy_floor if self.metric == "accuracy"
+                else stage.accuracy > self.accuracy_floor)
+
+    def _check_floor(self, stage: Stage):
+        """Raise below the floor, unless the model is still repairable.
+
+        A compressed model that has not been recovered is **deferred**, not
+        passed. Raising here is what made the floor misdirect: at 50% of heads
+        the one-shot model reads 9.56% and two epochs of recovery reach 77.6%,
+        so a user refused at compress() and told to lower the ratio was being
+        refused for damage that was about to be repaired. The check is held and
+        applied by ``validate()`` if ``recover()`` never runs, so nothing is
+        exported on the strength of a number nobody looked at.
+        """
+        if not self._below_floor(stage):
             return
-        below = (stage.accuracy < self.accuracy_floor if self.metric == "accuracy"
-                 else stage.accuracy > self.accuracy_floor)
-        if below:
-            hint = ""
-            if self._compressed and stage.name not in ("original",):
-                # The floor currently fires on the UNREPAIRED model: this
-                # pipeline has no recover() stage, so a compressed model is
-                # scored before anything has repaired it. At 50% of heads that
-                # is 9.56% where two epochs of fine-tuning reach 77.6%. Say so,
-                # or the user reads a recoverable model as a broken one.
-                hint = (" This model has not been repaired: the pipeline has no "
-                        "recover() stage yet (v0.7.0 item 1), so a compressed "
-                        "model is scored one-shot. A short fine-tune after "
-                        "compress() is worth up to 68pp at 50% head pruning on "
-                        "the measured configuration. Run one before validate(), "
-                        "or lower accuracy_floor if you meant the one-shot "
-                        "number.")
-            raise PipelineError(
-                f"Stage '{stage.name}' scored {stage.accuracy:.4f}, past the "
-                f"accuracy_floor of {self.accuracy_floor:.4f}. Stopping rather than "
-                "returning a model that is small and broken." + hint)
+        if self._compressed and not self._recovered and stage.name != "original":
+            self._deferred_floor = stage
+            logger.warning(
+                "%s scored %.4f, past the accuracy_floor of %.4f. Held, not "
+                "raised: this model has not been repaired yet. Call recover() "
+                "before validate(); on the measured configuration two epochs "
+                "are worth up to 68pp at 50%% head pruning.",
+                stage.name, stage.accuracy, self.accuracy_floor)
+            return
+        raise PipelineError(self._floor_message(stage))
+
+    def _floor_message(self, stage: Stage) -> str:
+        head = (f"Stage '{stage.name}' scored {stage.accuracy:.4f}, past the "
+                f"accuracy_floor of {self.accuracy_floor:.4f}. Stopping rather "
+                "than returning a model that is small and broken.")
+        if self._recovered or stage.name == "original":
+            # Recovery has run, so the damage really is the ratio.
+            return head + (" This model has been recovered, so the remaining "
+                           "damage is the compression itself: try a smaller "
+                           "prune_ratio.")
+        return head + (
+            " Nothing exported. This model has not been repaired: call "
+            "recover() before validate() -- two epochs is worth up to 68pp at "
+            "50% head pruning on the measured configuration (ViT-B/16 / "
+            "ImageNet-1k, 3 seeds, against a dense control trained for the "
+            "same 2 epochs). If you intended the one-shot number, lower "
+            "accuracy_floor.")
 
     def _baseline_stage(self):
         if not self._stages:
@@ -745,6 +775,10 @@ class CompressionPipeline:
                            "made compression-resilient, so these numbers describe plain "
                            "post-hoc compression.")
 
+        # Set before the first measured stage, not after the last: the floor
+        # defers on a compressed-and-unrecovered model, and a stage recorded
+        # inside compress() is exactly that.
+        self._compressed = True
         if pruning:
             t0 = time.time()
             heads = self.select_heads(pruning, strategy=strategy)
@@ -777,7 +811,7 @@ class CompressionPipeline:
                                 f"{info.get('layers_quantized', '?')} layers",
                          seconds=time.time() - t0)
 
-        self._compressed = True
+        self._one_shot_accuracy = self._stages[-1].accuracy
         return self
 
     def _reapply_mask(self):
@@ -815,13 +849,158 @@ class CompressionPipeline:
             return batch
         return None
 
+    # ------------------------------------------------------------------ recover
+    def recover(self, train_dataset, *, domain: str,
+                epochs: Optional[int] = 2, tokens: Optional[int] = None,
+                lr: float = 5e-5, batch_size: Optional[int] = None,
+                max_grad_norm: Optional[float] = 1.0,
+                schedule: str = "warmup_cosine", warmup_ratio: float = 0.05,
+                max_lr: Optional[float] = None, pct_start: float = 0.10,
+                preserve_sparsity: bool = True, masks: Optional[dict] = None,
+                control=None, optimizer=None,
+                enforce_masks: bool = True) -> "CompressionPipeline":
+        """Repair the compressed model, and measure the repair.
+
+        This is where the accuracy in post-hoc pruning comes from. At 50% of
+        attention heads a ViT-B/16 on ImageNet-1k reads 9.56% one-shot and
+        77.642% after two epochs against a dense control trained for the same
+        two epochs; the pipeline used to deliver the first of those numbers.
+
+        ``epochs=2`` is **measured, not optimal**: the pruned curve peaks at 2
+        and declines, with 5 below 2 on 3/3 seeds in FP and INT4, and it is 39%
+        of the cost of five. The dense control with nothing pruned peaks at
+        **1**, so the two curves do not share a knee and neither knee can be
+        assumed to transfer. Re-measure on your data rather than trusting the
+        default. For a decoder pass ``tokens=`` instead: epochs over a corpus
+        shard is not a unit that transfers between scales.
+
+        ``domain`` is required and has no default. The recovery corpus must
+        come from the domain the model is evaluated on, because a mismatched
+        one is a domain shift that costs rather than a repair that pays:
+        measured on OPT-1.3B, 32M tokens of C4 made the **unpruned** model
+        worse on raw WikiText-2 by 0.6398 perplexity, and at 6.7B the same
+        corpus cost the dense control more than 50% unstructured pruning cost
+        it one-shot, so the recovered arm ended worse than its own one-shot
+        model on 3 of 3 seeds. Pass ``domain="generic"`` to proceed knowingly;
+        it warns and records the choice.
+
+        ``max_grad_norm`` is on, and the gradient norm and the full loss curve
+        are logged every step. The research harness that produced the decoder
+        cells clipped nothing under a schedule that was still raising the
+        learning rate while the model was at its most damaged, and recovery
+        diverged there on the most damaged arm on every seed.
+
+        Sources, public data archive DOI 10.5281/zenodo.24391200:
+        ``data/oss/results/lumi_v060/EXP29_RECOVERY_EPOCHS.md``,
+        ``EXP32_RATIO_AT_2EP.md``, ``EXP33_SPARSE_VS_STRUCTURED.md``,
+        ``data/pro/results/EXP36_OPT_SPARSE.md``.
+        """
+        from sal.recovery import (GENERIC_DOMAIN, GENERIC_DOMAIN_WARNING,
+                                  recover_model)
+
+        if not self._compressed:
+            raise PipelineError(
+                "recover() repairs what compress() damaged, so it runs after "
+                "it. Call compress() first, or drop the stage.")
+        if not isinstance(domain, str) or not domain.strip():
+            raise PipelineError(
+                "recover() needs domain=: a short string naming the domain the "
+                "recovery data comes from, which is recorded with the result. "
+                "There is no default, because a recovery corpus that does not "
+                "match the evaluation domain can cost more than the pruning it "
+                "repairs. Pass domain='generic' to proceed knowingly.")
+        if domain.strip().lower() == GENERIC_DOMAIN:
+            logger.warning(GENERIC_DOMAIN_WARNING)
+
+        self._baseline_stage()
+        t0 = time.time()
+        rec = recover_model(
+            self.model, train_dataset, epochs=epochs, tokens=tokens, lr=lr,
+            batch_size=batch_size or self.batch_size,
+            max_grad_norm=max_grad_norm, schedule=schedule,
+            warmup_ratio=warmup_ratio, max_lr=max_lr, pct_start=pct_start,
+            preserve_sparsity=preserve_sparsity, masks=masks,
+            enforce_masks=enforce_masks, seed=self.seed, optimizer=optimizer)
+        rec["domain"] = domain
+        rec["one_shot_accuracy"] = self._one_shot_accuracy
+        self._control = control
+        self._recovery = rec
+        self._recovered = True
+        self._deferred_floor = None
+
+        budget = f"{epochs} epoch(s)" if tokens is None else f"{tokens} tokens"
+        detail = (f"{budget}, domain={domain}, clip="
+                  f"{'off' if not max_grad_norm else max_grad_norm}, "
+                  f"{schedule}, {rec['steps']} steps")
+        if rec["n_masked_params"]:
+            detail += f", sparsity_drift={rec['sparsity_drift']:.6g}"
+        stage = self._record("recovered", detail=detail, seconds=time.time() - t0)
+        rec["accuracy"] = stage.accuracy
+        self._check_domain_shift(rec)
+        return self
+
+    def _check_domain_shift(self, rec: dict):
+        """Warn when the control moved as far as the damage being repaired.
+
+        A recovery whose own dense control degrades by as much as the arm lost
+        one-shot is measuring a domain shift, not a repair, and the honest
+        output is the one-shot model. Measured at 6.7B: the corpus cost the
+        dense control +1.0748 perplexity while 50% unstructured pruning cost
+        +1.1987 one-shot, and the recovered arm ended worse than its own
+        one-shot model on 3 of 3 seeds.
+        """
+        rec["domain_shift_dominates"] = None
+        control, first = self._control, self.original_accuracy
+        one_shot = rec.get("one_shot_accuracy")
+        if control is None or first is None or one_shot is None:
+            return
+        sign = 1.0 if self.metric == "accuracy" else -1.0
+        control_loss = (first - control.accuracy) * sign
+        one_shot_damage = (first - one_shot) * sign
+        rec["control_movement"] = control_loss
+        rec["one_shot_damage"] = one_shot_damage
+        dominates = control_loss > 0 and control_loss >= one_shot_damage
+        rec["domain_shift_dominates"] = dominates
+        if dominates:
+            logger.warning(
+                "the dense control moved against the evaluation metric by %.4f "
+                "while the arm's one-shot damage was %.4f, so this recovery is "
+                "measuring a domain shift at least as large as the damage it "
+                "repairs. The honest output is the one-shot model. Measured "
+                "precedent: at 6.7B the recovered arm ended worse than its own "
+                "one-shot model on 3 of 3 seeds.", control_loss, one_shot_damage)
+
+    @property
+    def original_accuracy(self):
+        """The accuracy of the model as it was handed in, if it was measured."""
+        return self._stages[0].accuracy if self._stages else None
+
     # ----------------------------------------------------------------- validate
     def validate(self) -> CompressionReport:
-        """The measured waterfall from original to compressed."""
+        """The measured waterfall from original to compressed.
+
+        If a floor was set and the compressed model is below it with no
+        recovery run, the floor is applied **here**: it was held at
+        ``compress()`` because the model was still repairable, and holding it
+        past the point where the user asks for the report would be passing a
+        number nobody looked at.
+        """
         self._baseline_stage()
+        if self._compressed and not self._recovered:
+            if self.strict_recovery:
+                raise PipelineError(
+                    "strict_recovery=True and this compressed model has not "
+                    "been recovered, so there is nothing honest to score: a "
+                    "one-shot number reads as the model's accuracy and is not. "
+                    "Call recover(), or construct the pipeline with "
+                    "strict_recovery=False if the one-shot number is what you "
+                    "want.")
+            if self._deferred_floor is not None:
+                raise PipelineError(self._floor_message(self._deferred_floor))
         return CompressionReport(stages=list(self._stages), metric=self.metric,
                                  model_name=self.model_name, scan=self._scan,
-                                 roundtrip_verified=self._roundtrip)
+                                 roundtrip_verified=self._roundtrip,
+                                 recovery=self._recovery)
 
     def report(self) -> CompressionReport:
         """Alias for :meth:`validate` — the full report object."""
