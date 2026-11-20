@@ -168,30 +168,48 @@ def _warmup_cosine(total_steps: int, warmup_ratio: float):
 
 #: The harness's OneCycleLR settings, which the published decoder cells ran:
 #: start at ``max_lr / 25``, cosine up to ``max_lr`` over ``pct_start`` of the
-#: run, cosine down to ``max_lr / 25 / 1e4``. Reproduced here rather than
-#: delegated, because torch's OneCycleLR divides by zero when the up phase
-#: rounds to less than one step, and a schedule that cannot be exercised on a
-#: tiny fixture cannot be tested (cardinal rule 11).
+#: run, cosine down to ``max_lr / 25 / 1e4``.
 ONE_CYCLE_DIV_FACTOR = 25.0
 ONE_CYCLE_FINAL_DIV_FACTOR = 1e4
 
 
 def _cos_anneal(start: float, end: float, pct: float) -> float:
-    return end + (start - end) * (1 + math.cos(math.pi * min(max(pct, 0.0), 1.0))) / 2
+    """torch's ``OneCycleLR._annealing_cos``, including its lack of clamping."""
+    return end + (start - end) / 2 * (math.cos(math.pi * pct) + 1)
 
 
 def _one_cycle(total_steps: int, pct_start: float):
-    """Factor over ``max_lr``: up to 1.0 at the peak, then down."""
-    up = max(1, int(round(pct_start * total_steps)))
+    """``OneCycleLR``'s schedule as a factor over ``max_lr``.
+
+    Reproduced rather than delegated for one reason: ``OneCycleLR`` divides by
+    zero whenever ``pct_start * total_steps`` is exactly 1, which a unit test
+    on a tiny fixture hits immediately, and a schedule that cannot be exercised
+    on the tiny fixture cannot be tested (cardinal rule 11). Everything else
+    follows torch exactly, because **paper mode has to reproduce the schedule
+    the archived numbers were measured under**: the up phase ends at the float
+    ``pct_start * total_steps - 1``, the within-phase percentage is not
+    clamped, and the anneal is torch's own. ``tests/test_recovery_schedules.py``
+    steps the two side by side at the campaign's real step counts and requires
+    agreement to 1e-12 relative.
+
+    Returns ``(factor, peak_step)``.
+    """
     low = 1.0 / ONE_CYCLE_DIV_FACTOR
     final = low / ONE_CYCLE_FINAL_DIV_FACTOR
+    up_end = float(pct_start * total_steps) - 1.0
+    down_end = float(total_steps - 1)
 
     def factor(step: int) -> float:
-        if step <= up:
-            return _cos_anneal(low, 1.0, step / up)
-        return _cos_anneal(1.0, final, (step - up) / max(1, total_steps - up))
+        step = float(step)
+        if step <= up_end:
+            # start_step is 0.0 in the up phase, so the span is up_end itself.
+            pct = (step / up_end) if up_end else 1.0
+            return _cos_anneal(low, 1.0, pct)
+        span = down_end - up_end
+        pct = ((step - up_end) / span) if span else 1.0
+        return _cos_anneal(1.0, final, pct)
 
-    return factor, up
+    return factor, max(0, int(up_end))
 
 
 def _param_groups(model, lr: float, head_lr_multiplier: float) -> list:
@@ -339,7 +357,12 @@ def recover_model(model, train_dataset, *,
                 lr_curve.append(float(opt.param_groups[0]["lr"]))
                 opt.step()
                 opt.zero_grad(set_to_none=True)
-                sched.step()
+                # Not after the final optimizer step. Both schedules are
+                # unclamped past the planned end, exactly as torch's is, where
+                # the cosine turns back upward; torch forbids the step outright
+                # and this loop simply does not take it.
+                if step < total_steps - 1:
+                    sched.step()
                 loss_curve.append(float(loss.detach()))
                 running += loss_curve[-1]
                 n += 1

@@ -216,8 +216,10 @@ def test_one_cycle_climbs_to_a_peak_above_its_start(tiny_model):
     assert rec["peak_lr"] == 1e-4
     assert lrs[0] == pytest.approx(1e-4 / ONE_CYCLE_DIV_FACTOR)
     assert max(lrs) == pytest.approx(1e-4)
-    assert peak == rec["warmup_steps"] == 3
-    assert lrs[0] < lrs[1] < lrs[2] < lrs[3], "it must still be climbing"
+    # torch's up phase ends at pct_start * total_steps - 1, so with 10 steps
+    # at 0.30 the peak is step 2 and not step 3.
+    assert peak == rec["warmup_steps"] == 2
+    assert lrs[0] < lrs[1] < lrs[2], "it must still be climbing"
     # It is still decaying at the last recorded step: the floor is only reached
     # at the planned final step, which is one past the last one that runs.
     assert lrs[-1] < max(lrs) / 10, "and then come down a long way"
