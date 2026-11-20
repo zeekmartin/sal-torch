@@ -5,6 +5,8 @@ test of it. So the clipping test reads the recorded norms and the parameter
 delta, the schedule test reads the recorded learning-rate curve, and the
 mask tests run the real loop over a real mask and then count the zeros.
 """
+import weakref
+
 import pytest
 import torch
 
@@ -601,3 +603,73 @@ def test_no_warning_when_no_autocast_was_asked_for(tiny_model, caplog):
                             epochs=1, batch_size=4)
     assert rec["amp_note"] == "fp32, no autocast"
     assert not [r for r in caplog.records if "recovery precision" in str(r.msg)]
+
+
+# ------------------------------------------- the data is never materialised
+class LazySplit:
+    """A re-iterable dataset that hands out a fresh batch every time.
+
+    Stands in for a memory-mapped ImageNet split: nothing is held between
+    passes, and every batch it yields is a new tensor, so anything the loop
+    keeps shows up as a live referent.
+    """
+
+    def __init__(self, n_batches=6, bs=2, sl=8, made=None):
+        self.n_batches, self.bs, self.sl = n_batches, bs, sl
+        self.iterations = 0
+        self.made = made if made is not None else []
+
+    def __len__(self):
+        return self.n_batches
+
+    def __iter__(self):
+        self.iterations += 1
+        for _ in range(self.n_batches):
+            batch = {"input_ids": torch.randint(0, 100, (self.bs, self.sl)),
+                     "labels": torch.randint(0, 100, (self.bs, self.sl))}
+            self.made.append(weakref.ref(batch["input_ids"]))
+            yield batch
+
+
+def test_recovery_holds_no_batch_after_it_has_used_it(tiny_model):
+    """The bug that OOM-killed the first real recovery, as a test.
+
+    `list(_iter_data(...))` is harmless on a fixture whose dataset is already
+    a list of four dicts, and fatal on ImageNet-1k, where a batch is 38.5 MB
+    and an epoch is 770 GB. Weak references make "holds nothing" checkable:
+    after the run, every batch the dataset handed out must be collectable.
+    """
+    import gc
+
+    split = LazySplit(n_batches=6)
+    rec = recover_model(tiny_model, split, domain="same as eval", epochs=2,
+                        batch_size=2)
+    assert rec["steps"] == 12, "two passes over six batches"
+    gc.collect()
+    alive = [r for r in split.made if r() is not None]
+    assert not alive, ("%d batch tensor(s) are still referenced after the "
+                       "run; the loop is holding the dataset" % len(alive))
+    assert len(split.made) >= 12, "the batches really were handed out"
+
+
+def test_recovery_re_iterates_once_per_epoch(tiny_model):
+    split = LazySplit(n_batches=4)
+    recover_model(tiny_model, split, domain="same as eval", epochs=3,
+                  batch_size=2)
+    # One pass to learn the length is allowed; the point is that it does not
+    # take ONE pass and keep it.
+    assert split.iterations >= 3, split.iterations
+    assert split.iterations <= 5, (
+        "%d passes for three epochs: the loop is re-reading more than it "
+        "needs" % split.iterations)
+
+
+def test_the_step_count_is_right_for_a_dataset_without_a_length(tiny_model):
+    class NoLen(LazySplit):
+        def __len__(self):
+            raise TypeError("no length here")
+
+    split = NoLen(n_batches=5)
+    rec = recover_model(tiny_model, split, domain="same as eval", epochs=2,
+                        batch_size=2)
+    assert rec["total_steps_planned"] == 10 and rec["steps"] == 10

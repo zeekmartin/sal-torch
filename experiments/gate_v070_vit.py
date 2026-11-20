@@ -80,15 +80,23 @@ class NormalizedSplit:
     """
 
     def __init__(self, split, batch_size: int, normalize, with_labels=True,
-                 workers: int = 0):
+                 workers: int = 0, shuffle: bool = False, seed: int = 0,
+                 block: int = 0):
         self.split, self.batch_size = split, batch_size
         self.normalize, self.with_labels, self.workers = (normalize,
                                                           with_labels, workers)
+        # The training pass is SHUFFLED, with its own seed, and block-shuffled
+        # when the split is memory-mapped. That is what the archived recipe
+        # does (exp23's recover calls batches(shuffle=True, seed=...) and a
+        # full shuffle of the 193 GB file measured 3.6x slower than the
+        # cached read), and an unshuffled recovery is a different run.
+        self.shuffle, self.seed, self.block = shuffle, seed, block
 
     def __iter__(self):
         import run_sal_qat_prototype as P
         for x, y in P.batches(self.split, self.batch_size,
-                              workers=self.workers):
+                              shuffle=self.shuffle, seed=self.seed,
+                              workers=self.workers, block=self.block):
             batch = {"pixel_values": self.normalize(x)}
             if self.with_labels:
                 batch["labels"] = y
@@ -366,8 +374,11 @@ def main(argv=None) -> int:
                                   seeds=getattr(ctrl, "seeds", 1))
         cell = run_cell(
             model,
-            NormalizedSplit(val_split, 128, P.normalize),
-            NormalizedSplit(train_split, args.batch_size, P.normalize),
+            NormalizedSplit(val_split, 128, P.normalize,
+                            workers=P.LOADER_WORKERS),
+            NormalizedSplit(train_split, args.batch_size, P.normalize,
+                            workers=P.LOADER_WORKERS, shuffle=True, seed=seed,
+                            block=P.LOADER_BLOCK),
             strategy=args.strategy, seed=seed, pruning=args.pruning,
             epochs=args.epochs, mode=args.mode, control=control,
             outdir=outdir, label="%s_%s_s%d" % (args.strategy, args.mode, seed),

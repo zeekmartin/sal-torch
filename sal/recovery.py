@@ -374,6 +374,44 @@ def autocast_for(device_type: str, amp_dtype):
     return torch.autocast(device_type, dtype=amp_dtype)
 
 
+def _steps_per_epoch(dataset, batch_size, fresh) -> tuple:
+    """``(batches per epoch, the first batch)``, without keeping the rest.
+
+    The schedule needs the total step count before the first step, so the
+    length has to be known up front. A dataset that knows its own length says
+    so; one that does not is walked once by a loop that keeps only the first
+    batch, which costs a pass over the data and no memory.
+
+    What is never done here is ``list()``. It was, and it is harmless on the
+    tiny fixture where a dataset is already a list of four dicts: on
+    ImageNet-1k at batch 64 each batch is 38.5 MB, so one epoch is 770 GB, and
+    the first real recovery was OOM-killed at 62.7 GB of a 60 GB limit
+    fourteen minutes in, after probe and the one-shot score had already run.
+    """
+    n = None
+    try:
+        n = len(dataset)
+    except TypeError:
+        pass
+    first = next(iter(fresh()), None)
+    if first is None:
+        return 0, None
+    if n is not None:
+        # An iterable OF BATCHES reports its batch count; a dataset of samples
+        # reports samples, and _iter_data wraps those in a DataLoader.
+        if isinstance(first, dict) or isinstance(first, (list, tuple)):
+            yields_batches = not isinstance(dataset, torch.Tensor)
+        else:
+            yields_batches = False
+        if yields_batches and hasattr(dataset, "__iter__"):
+            return n, first
+        return max(1, math.ceil(n / batch_size)), first
+    count = 0
+    for _ in fresh():
+        count += 1
+    return count, first
+
+
 def _tokens_in(batch) -> int:
     if isinstance(batch, dict):
         for key in ("input_ids", "pixel_values", "inputs_embeds"):
@@ -458,15 +496,20 @@ def recover_model(model, train_dataset, *,
 
     device = device or next(model.parameters()).device
     torch.manual_seed(seed)
-    batches = list(_iter_data(train_dataset, batch_size))
-    if not batches:
+    def fresh():
+        """A new pass over the data, holding nothing from the last one."""
+        return _iter_data(train_dataset, batch_size)
+
+    steps_per_epoch, first = _steps_per_epoch(train_dataset, batch_size, fresh)
+    if not steps_per_epoch:
         raise ValueError("recover() got an empty training dataset")
 
     if tokens is None:
-        total_steps = max(1, len(batches) * epochs)
+        total_steps = max(1, steps_per_epoch * epochs)
     else:
-        per_batch = max(1, _tokens_in(_to_dev(batches[0], device)))
+        per_batch = max(1, _tokens_in(_to_dev(first, device)))
         total_steps = max(1, math.ceil(tokens / per_batch))
+    del first
 
     if preserve_sparsity and masks is None:
         masks = capture_sparsity_masks(model)
@@ -513,7 +556,7 @@ def recover_model(model, train_dataset, *,
         done = False
         while not done:
             running, n = 0.0, 0
-            for batch in batches:
+            for batch in fresh():
                 if step >= total_steps:
                     done = True
                     break
