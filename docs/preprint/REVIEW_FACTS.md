@@ -494,13 +494,15 @@ A seed is **void** unless its one-shot perplexity reproduces the archive's, whic
 | archive job | rerun job | seed | one-shot, archive / rerun | recovered, archive / rerun | floor |
 |---|---|---|---|---|---|
 | 23726549 | 23898426 | 42 | 93.5936 / 93.5936 | 21.8833 / 21.5740 | **0.3093** |
-| 23738081 | 23909147 | 123 | 69.7558 / pending | 21.7828 / pending | pending |
-| 23738081 | 23909147 | 456 | 75.2705 / pending | 22.3740 / pending | pending |
+| 23738081 | 23909147 | 123 | 69.7558 / 69.7558 | 21.7828 / 22.0623 | **0.2796** |
+| 23738081 | 23909147 | 456 | 75.2705 / 75.2705 | 22.3740 / 22.7301 | **0.3561** |
 
-Measured floor over 1 pair(s): **0.3093** to **0.3093** perplexity, against the 0.10 that was declared.
+Measured floor over 3 pair(s): **0.2796** to **0.3561** perplexity, against the 0.10 that was declared.
 
-Per seed: seed 42 0.3093.
+Per seed: seed 42 0.3093, seed 123 0.2796, seed 456 0.3561.
 
-Pending: job 23909147 seed 123, job 23909147 seed 456. Regenerate this file when they land.
+**What this decided, and what it did not.** G3-paper failed with its worst out-of-band seed, 42, deviating 0.3852 from the archive. That exceeds every floor measured above, the largest of which is 0.3561, so the rule pre-registered before any of these runs landed records the band as FAILED rather than explained by measured noise. The band was not widened and the rule was not rewritten.
 
-**What this decided, and what it did not.** G3-paper failed with its worst out-of-band seed deviating 0.3852 from the archive. Measured against the first pair's 0.3093 that deviation is larger, so the pre-registered rule recorded the band as FAILED rather than explained by measured noise. The band was not widened and the rule was not rewritten. The excess is not independent of the floor: deviation minus floor equals rerun minus gate, so the 0.0759 by which the band misses the noise branch is exactly how far the product's pipeline and exp36's own script sit from each other, while both sit below the single value the archive recorded for that seed. Cardinal rule 13 now requires at least two pairs before a decoder band may be built at all.
+Three things the 3 pairs settle that one pair could not. **The declared 0.10 was too tight by a factor of 2.8 to 3.6**, in both directions. **The error is not a bias**: the re-run lands below the archive on 1 of the 3 seeds and above it on 2, so there is nothing to correct for, only a spread to size. And **the verdict survives the better measurement** -- it was reached against the first pair's 0.3093, and it would be reached identically against the largest of the 3. The excess is not independent of the floor either: deviation minus floor equals rerun minus gate, so the margin by which the band misses the noise branch is exactly how far the product's pipeline and exp36's own script sit from each other on that seed.
+
+Cardinal rule 13 requires a measured same-seed floor of at least two pairs before a decoder band may be built at all. With 3 pairs, the campaign that motivated the rule now satisfies it.
