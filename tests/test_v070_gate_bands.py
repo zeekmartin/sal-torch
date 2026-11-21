@@ -351,6 +351,14 @@ def test_provenance_is_enforced_per_band_not_per_batch(tmp_path):
     Demanding one package across the whole batch would refuse that, although
     each family is internally consistent and both are in the history being
     published.
+
+    This needs two real commits, so it needs real history. A shallow clone
+    has none: `actions/checkout` defaults to `fetch-depth: 1`, `HEAD~1` does
+    not resolve, and this test used to discard the exit status of its own
+    `git rev-parse` and compare an empty string, which failed as a bare
+    `assert False` with nothing saying why. Both workflows now check out the
+    full history so the test runs for real; the skip is for anyone running
+    the suite from an archive or a depth-limited clone, and it says so.
     """
     import subprocess
 
@@ -358,10 +366,18 @@ def test_provenance_is_enforced_per_band_not_per_batch(tmp_path):
     from v070_gate_bands import package_provenance
 
     repo = Path(__file__).resolve().parents[1]
-    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(repo),
-                          capture_output=True, text=True).stdout.strip()
-    parent = subprocess.run(["git", "rev-parse", "HEAD~1"], cwd=str(repo),
-                            capture_output=True, text=True).stdout.strip()
+
+    def rev(ref):
+        out = subprocess.run(["git", "rev-parse", ref], cwd=str(repo),
+                             capture_output=True, text=True)
+        if out.returncode != 0 or not out.stdout.strip():
+            pytest.skip("no %s in this checkout, so there is no second "
+                        "commit to build a different package from: this "
+                        "needs real git history, not a shallow clone" % ref)
+        return out.stdout.strip()
+
+    head = rev("HEAD")
+    parent = rev("HEAD~1")
 
     older = package_provenance(_staged(tmp_path / "a", commit=parent))
     newer = package_provenance(_staged(tmp_path / "b", commit=head))

@@ -11,6 +11,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The release gate's provenance test needs two real
+          # commits: it builds one staged package from HEAD and
+          # another from HEAD~1 and asserts each is an ancestor of
+          # what would be published. The default fetch-depth of 1
+          # leaves HEAD~1 unresolvable, so the test cannot run.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

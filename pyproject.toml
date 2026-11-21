@@ -1,5 +1,15 @@
 [build-system]
-requires = ["hatchling"]
+# Pinned, and the upper bound is the point. hatchling 1.33.0 emits
+# Metadata-Version 2.5; `packaging` 25.0, the current release, accepts up to
+# 2.4, so twine 6.2.0 refuses both the sdist and the wheel with
+# "InvalidDistribution: '2.5' is not a valid metadata version". The publish
+# workflow does `pip install build twine` and would hit exactly that, after
+# the tag had been pushed. Measured rather than assumed: built with 1.27.0 the
+# metadata reads 2.4 and `twine check` PASSES on both artifacts, while 1.25
+# and 1.24 reject `license = "LicenseRef-BSL-1.1"` outright, so 1.27 is the
+# floor as well as the ceiling. Widen this once packaging and twine accept
+# 2.5, not before.
+requires = ["hatchling>=1.27,<1.28"]
 build-backend = "hatchling.build"
 
 [project]
@@ -29,6 +39,21 @@ all = ["sal-torch[hf,reports,crypto,quant,dev]"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["sal"]
+
+# The release gate's result cells carry a loss, a gradient norm and a learning
+# rate for every one of 40038 optimizer steps, three times over per cell, so
+# each file is about 6 MB and the eight cells come to 72 MB. They stay
+# committed, because measured data is not thinned to suit a package and they
+# are the evidence the gate report cites. They have no business in a pip
+# sdist: they took it from 2.4 MB to 28.5 MB for a 150 KB library. Nothing in
+# `sal`, `tests`, `experiments` or `scripts` reads them, since the scorer is
+# handed paths on its command line, and that was checked before excluding
+# them. Excluded by directory rather than by size, so a new cell is excluded
+# too. `results/lumi_v060` deliberately stays IN: `results_corrections.py`
+# loads `CORRECTIONS.json` out of it, and the test suite shipped inside the
+# sdist would fail without it.
+[tool.hatch.build.targets.sdist]
+exclude = ["/results/gate_v070_*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
