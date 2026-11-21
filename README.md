@@ -7,23 +7,46 @@
 
 Training-time sparsification that makes neural networks structurally resilient to compression.
 
-> **Two things to know before reading any number on this page.**
+> **What v0.7.0 closed, and what it measured.**
 >
-> 1. **`CompressionPipeline` does not run a recovery pass.** Its stages are
->    `probe → scan → sal_train → compress → validate → export`; nothing repairs
->    the model after `compress()`. **Every row below marked as recovery** —
->    the magnitude + recovery arms, the FFN table, the 2-epoch figures —
->    includes a post-pruning fine-tune, which is a step the shipped pipeline
->    does not perform. At 50% of heads that gap is the difference between
->    **9.56%** and **77.6%**. The DropHead, SAL and GPT-2 tables contain no
->    recovery pass and are not affected. `recover()` is v0.7.0 item 1. Until it ships, run the recovery
->    yourself after `compress()` and before `validate()`.
-> 2. **DropHead is not callable from this package.** `HeadMasker` accumulates
->    and holds its pruned set — that is SAL. The per-step resampled variant that
->    this page recommends is implemented only in the research prototype,
->    `scripts/run_sal_qat_prototype.py` (`mask_mode="drophead"`). A supported
->    `mask_mode` on `HeadMasker` is v0.7.0 item 2. `probe()` returning the route
->    string `"drophead"` names a *regime*, not an API that exists here yet.
+> Two gaps were named at the top of this page for two releases. Both are now
+> shipped, and the point of v0.7.0 is that the shipped code was then made to
+> reproduce the published numbers rather than merely resemble them.
+>
+> 1. **`CompressionPipeline` runs a recovery pass.** The stages are
+>    `probe → scan → compress → recover → validate → export`. Until v0.7.0 every
+>    accuracy on this page came from the research scripts and not from the
+>    pipeline, which is how a missing recovery stage survived two releases. At
+>    50% of heads the stage is the difference between **9.56%** and **78.81%**.
+> 2. **DropHead is callable.** `HeadMasker` takes `mask_mode="drophead"`, the
+>    per-step resampled quota this page recommends. `mask_mode="sal"` is the
+>    accumulate-and-hold variant and remains the default for backward
+>    compatibility; it is not the recommended one.
+>
+> **The release gate.** Before this tag the shipped pipeline was run against
+> cells the project had already published, on bands written down *before* the
+> runs and never widened afterwards. **Five of six bands reproduced; one did
+> not.**
+>
+> | cell | pre-registered | the shipped pipeline | |
+> |---|---|---|---|
+> | ViT-B/16, 50% of heads, random, 2 epochs | mean [78.668, 78.942] | **78.814%**, cost -2.74pp | reproduced |
+> | ViT-B/16, 50% of heads, magnitude, 2 epochs | mean [77.44, 77.81] | **77.611%**, cost -3.94pp | reproduced |
+> | OPT-1.3B, 50% of heads, 32M C4 tokens | mean [21.783, 22.374] | **21.996** perplexity, cost +6.73 | mean reproduced |
+> | the same cell, per seed | each seed in [21.683, 22.474] | 21.498 / 21.896 / 22.596 | **two seeds outside** |
+>
+> That last row is the one that failed, and it is reported rather than
+> smoothed. Its tolerance had been **declared** at 0.10 perplexity because no
+> decoder cell in the campaign had ever been re-run at a fixed seed. Re-running
+> the original script, unchanged, at the failing seed put the same-seed floor
+> at **0.3093** perplexity, three times the declared figure: the pipeline reads
+> 21.498 and the original script reads 21.574, a gap of 0.076, while both sit
+> below the single archived value of 21.883. The band still fails, because the
+> failing seed deviates by 0.385 and that is more than 0.3093, so it is
+> recorded FAILED and the tag was taken as an explicit owner decision with that
+> failure named. **What this means for you:** the decoder perplexity in this
+> README is reproducible to about 0.3, not to 0.1, and the vision accuracies to
+> about 0.17pp. Treat differences smaller than that as noise.
 >
 > The v0.6.x campaign measured every arm on **ImageNet-1k**, three seeds, the
 > full 50 000-image validation split, and the measured path is:
@@ -120,16 +143,21 @@ Three lines. Any transformer. Compression-resilient.
 slicing → a quantization backend → an eval harness, and measures every stage, so
 what comes out is a deployment decision rather than a number.
 
-> **This pipeline has no recovery stage, and the example below therefore reports
-> a one-shot number.** "Fully fine-tune with SAL, then compress" was the v0.5.0
-> reading and the ImageNet-1k campaign superseded it: at a fixed head set,
-> SAL's weights are worth **+0.05pp** after a recovery pass against simply
+> **The example below is a demonstration of the API, not a result.** It is one
+> T4 run, one model, one seed, with no control arm and no recovery pass, and it
+> is kept because it shows what each call returns. Do not read its accuracies
+> as a measurement of anything: the measured path is
+> [the release gate](#v070--what-the-shipped-pipeline-reproduces) and
+> [the ImageNet-1k results](#v06x--the-imagenet-1k-replication), both with
+> three seeds and a matched control.
+>
+> **The recommended path is not "SAL-train, then compress".** That was the
+> v0.5.0 reading and the ImageNet-1k campaign superseded it: at a fixed head
+> set, SAL's weights are worth **+0.05pp** after a recovery pass against simply
 > starting from the pretrained checkpoint, while the recovery pass itself is
 > worth up to **68pp**. If you can fine-tune after pruning, that is where the
-> accuracy is, and the training method is close to irrelevant. Until
-> `recover()` ships (v0.7.0 item 1), insert your own fine-tune between
-> `compress()` and `validate()` — and note that `accuracy_floor`, if set,
-> currently fires on the *unrepaired* model.
+> accuracy is and the training method is close to irrelevant, so the path is
+> `probe → compress → recover → validate` with `sal_train` left out entirely.
 
 ```python
 from sal import CompressionPipeline
@@ -141,14 +169,18 @@ pipe = CompressionPipeline(model, eval_dataset, metric="accuracy")
 print(pipe.probe().recommendation)     # -> sal_aligned / drophead / skip_heads
 
 print(pipe.scan().recommendation)      # fragility, absorption map, projected sizes
-# Step 2. Train at the ratio you intend to deploy at — the gain is monotone in it,
-# and the best cells are the matched ones. Both default to 0.50 since v0.6.0.
-pipe.sal_train(train_dataset, epochs=3, prune_fraction=0.50)
+
+# Step 2. Prune. Random selection is the default and it is the right one.
 pipe.compress(pruning=0.50, quantization="int4", slice_heads=True)
+
+# Step 3. Recover. This is where the accuracy is: 9.56% without it, 78.81% with
+# it, on ViT-B/16 / ImageNet-1k at 50% of heads. Two epochs, not five.
+pipe.recover(train_dataset, epochs=2, domain="same as eval")
 
 report = pipe.validate()
 print(report.table)
-# measured — GPT-2 Medium / SST-2, one T4 (scripts/modal_v050_test.py)
+# ILLUSTRATIVE — one T4, one seed, no control, no recovery pass
+# (scripts/modal_v050_test.py, GPT-2 Medium / SST-2). An API demonstration.
 # stage                    size_mb   ratio    accuracy  seconds
 # -------------------------------------------------------------
 # original                  1419.3   1.00x      0.5020      0.0
@@ -202,7 +234,8 @@ more damage than spreading it.
 That grid was one seed, and under `random` its two arms landed 0.0039 apart —
 a tie. The five-seed run in [What we measured](#what-we-measured) settles it
 properly: with `random` selection, SAL leads head pruning by 2.45pp on 5 of 5
-seeds. See [ROADMAP.md](ROADMAP.md) for the full trail.
+seeds — one model, one binary task (GPT-2 Medium / SST-2, 355M), five seeds,
+**no recovery pass**. See [ROADMAP.md](ROADMAP.md) for the full trail.
 
 **Replicated on ImageNet-1k, with a recovery pass, at three seeds.** The grid
 above is one seed of GPT-2 Medium with no recovery. exp40b removed heads by
@@ -225,7 +258,8 @@ is "tie", not "random wins".
 Worth keeping in view: one-shot, the seed-to-seed spreads here are 14.7–17.9pp
 and after two epochs of recovery they are 0.25–0.55pp. **The recovery pass
 dominates the selection criterion by more than an order of magnitude.** Choose
-random because it is free, not because it rescues a bad pruning decision.
+random because it costs nothing to compute, not because it rescues a bad
+pruning decision.
 Full trail in `results/lumi_v060/EXP40B_RANDOM.md`.
 
 #### The recipe those vision figures were measured under
@@ -840,7 +874,8 @@ cannot answer, not a t-test on the magnitude.
 **What holds.** SAL wins 5 of 6 compressed variants, and it costs nothing on the
 clean model (+0.57pp — SAL is not buying resilience with accuracy). The effect
 is largest and most reliable exactly where SAL was designed to work: **head
-pruning**, +2.45pp at 33% on every seed and +2.06pp at 50%. Both combined
+pruning**, +2.45pp at 33% on every seed and +2.06pp at 50% — GPT-2 Medium /
+SST-2, one binary task, five seeds, **no recovery pass**. Both combined
 recipes hold too.
 
 **What does not.** *`int4` on its own does not replicate.* Three seeds of five
@@ -909,10 +944,17 @@ architecture and task-difficulty are all confounded across these two studies,
 and nothing here separates them. Do not assume your model lands at either end —
 measure it with `RobustnessTest`.
 
-#### ViT-B/16 on ImageNet-100 — fifteen seeds, and where SAL stops helping
+#### ViT-B/16 on ImageNet-100 — fifteen seeds, and what ImageNet-1k later took back
 
-The most finely measured study in the project: ViT-B/16 on ImageNet-100 (100-way),
-5 epochs, **15 seeds**, every compressed cell averaged over **20 random head
+> **Superseded for every cell it shares with the ImageNet-1k series
+> (exp23 to exp28b).** This study is ImageNet-100, 100-way, and the three-seed
+> full-split ImageNet-1k campaign overrides it wherever they overlap. It is
+> kept because its *method* lessons stand and because the retractions should
+> be legible next to what they retract, not filed elsewhere. **Do not quote
+> the figures in this subsection as current results.**
+
+The most finely measured study of the ImageNet-100 era: ViT-B/16, 5 epochs,
+**15 seeds**, every compressed cell averaged over **20 random head
 selections** rather than the 3 used above
 (`scripts/run_sal_qat_prototype.py`, full trail in
 `results/lumi_v060/PHASE2{,A,B}.md`). Head pruning at 50% plus INT4 weights:
@@ -920,21 +962,34 @@ selections** rather than the 3 used above
 | arm | P50+I4 top-1 | vs baseline |
 |---|---|---|
 | standard fine-tune | 31.0% ± 1.4 | — |
-| SAL | 43.2% ± 3.8 | **+12.1pp** |
-| SAL + QAT | 45.6% ± 4.3 | **+14.5pp ± 4.3**, 95% CI [+12.4, +16.7], 15/15 seeds |
+| SAL | 43.2% ± 3.8 | +12.1pp, ImageNet-100 |
+| SAL + QAT | 45.6% ± 4.3 | +14.5pp ± 4.3, 95% CI [+12.4, +16.7], 15/15 seeds, ImageNet-100 |
 
-Three things came out of it that the thinner studies could not show.
+That +14.5pp **replicates** on ImageNet-1k at three seeds, where the same cell
+reads +14.57pp — and on that same cell DropHead reads **+57.23pp**, which is
+what makes the figure a measurement of SAL rather than a recommendation of it.
+See [the ImageNet-1k results](#v06x--the-imagenet-1k-replication).
 
-- **Higher `prune_fraction` during training increases compression resilience
-  monotonically.** Sweeping it over {0.1, 0.2, 0.3, 0.4, 0.5}, the gain at
-  half-pruned + INT4 rises steadily: **+6.2 → +9.0 → +12.7 → +16.6 → +20.8pp**.
-  The best cells are the ones where the *training* ratio matches the
-  *deployment* ratio, and the cost is also monotone and small — 0.3 to 1.5pp of
-  clean accuracy. A monotone response across five levels is much stronger
-  evidence that the mechanism is real than any single cell. Practical rule:
-  **train at the ratio you intend to deploy at.** This is why the shipped
-  default changed from 0.33 to **0.50** in v0.6.0 — at 0.33 most of the effect
-  goes unused against a 50% target.
+Three things came out of it that the thinner studies could not show. The first
+is the one ImageNet-1k contradicted.
+
+- **The dose-response is monotone on ImageNet-100, and the cost claim that
+  travelled with it is withdrawn.** Sweeping `prune_fraction` over
+  {0.1, 0.2, 0.3, 0.4, 0.5}, the gain at half-pruned + INT4 rises steadily:
+  +6.2 → +9.0 → +12.7 → +16.6 → +20.8pp, with the best cells the ones where
+  the *training* ratio matches the *deployment* ratio. **The accompanying
+  "0.3 to 1.5pp of clean accuracy" is retracted outright**: measured on
+  ImageNet-1k across three seeds, SAL's clean accuracy reads
+  71.53 / 67.57 / 61.61%, a spread of **9.92pp**, against DropHead's
+  77.60 / 77.32 / 77.71%. A method whose accuracy moves ten points with the
+  training seed cannot carry a sub-2pp cost claim.
+  **And "train at the ratio you intend to deploy at" is no longer the
+  recommended path**, because training-time head masking is itself no longer
+  the recommended path: it is the branch taken only when no post-pruning
+  fine-tune is possible. Where you can recover, prune by magnitude or at
+  random and recover for two epochs. The v0.6.0 default of
+  `prune_fraction=0.50` still stands for callers who are on that branch, since
+  at 0.33 most of the effect goes unused against a 50% target.
 - **At 50% pruning SAL is robust; at 33% on this setup it is weak and
   inconsistent.** The 33% mean is small (+2 to +7pp depending on mask ratio)
   and one recurring seed sits *below* baseline at four of the five mask ratios,
@@ -953,6 +1008,63 @@ Three things came out of it that the thinner studies could not show.
   1.6pp. Head-selection sampling, not the training seed, was the dominant noise
   term — and it is the cheapest to remove, since it costs evaluation passes and
   no retraining.
+
+#### v0.7.0 — what the shipped pipeline reproduces
+
+Every figure in this README until v0.7.0 was measured by the research scripts.
+The release gate asked the only question that makes them product claims: does
+`CompressionPipeline`, as installed from PyPI, land on the same numbers. Six
+bands were written down before the runs — three cells, each scored twice, once
+against the archived recipe (**paper mode**, two-sided, because a reproduction
+landing outside the cell has not reproduced it) and once against the shipped
+defaults (**default mode**, one-sided). The bands were never widened, and the
+scorer refuses a band whose code is not an ancestor of what was published.
+
+| band | cell | pre-registered | measured | |
+|---|---|---|---|---|
+| G1-paper | ViT-B/16, 50% heads, random, 2 ep | mean [78.668, 78.942], each seed [78.498, 79.112], cost [-2.908, -2.568] | 78.814%, seeds 78.718 / 78.672 / 79.052, cost -2.740 | **PASS** |
+| G1-default | the same runs, shipped defaults | at or above 78.668 | 78.814% | **PASS** |
+| G2-paper | ViT-B/16, 50% heads, magnitude, 2 ep | mean [77.44, 77.81], each seed [77.27, 77.98], cost [-4.08, -3.74] | 77.611%, seeds 77.510 / 77.616 / 77.708, cost -3.943 | **PASS** |
+| G2-default | the same runs, shipped defaults | at or above 77.44 | 77.611% | **PASS** |
+| G3-paper | OPT-1.3B, 50% heads, 32M C4 tokens, archived recipe | mean [21.783, 22.374], each seed [21.683, 22.474] | mean 21.996, seeds 21.498 / 21.896 / 22.596 | **FAIL** |
+| G3-default | the same cell, shipped defaults | at or below 22.374 | mean 21.867 | **PASS** |
+
+Vision accuracies are top-1 on the full 50 000-image validation split, against
+the archived 2-epoch dense control (81.554%, 3 seeds) trained for the same
+number of epochs; the decoder figures are WikiText-2 perplexity, against the
+archived dense control after the same 32M C4 tokens (15.264). Three seeds
+each, 42 / 123 / 456. Cost 8.83 billed GPU-h on one AMD MI250X GCD per job.
+
+**G3-paper failed, and the reason is worth more than the verdict.** The mean
+and the matched pruning cost both reproduce; what misses is two of three
+per-seed windows, one low and one high. Those windows had been widened by a
+tolerance of 0.10 perplexity that was **declared rather than measured**,
+because no decoder cell in the campaign had ever been re-run at a fixed seed.
+So the original script was re-run, unchanged, at the failing seed. Its
+one-shot perplexity reproduced the archive's to every stored digit, which
+proves it removed the same 384 heads, and its recovered perplexity came out at
+21.574 against the archive's 21.883: a same-seed floor of **0.3093**, three
+times what had been declared. The pipeline's own value for that seed, 21.498,
+sits 0.076 from the original script's and 0.385 from the archive's. Since
+0.385 exceeds 0.3093, the pre-registered rule records the band as **FAILED**
+rather than explaining it away, and v0.7.0 was tagged on an explicit owner
+decision that names the failure.
+
+**What to take from it.** The decoder perplexities on this page are
+reproducible to roughly 0.3, not 0.1. The vision accuracies are reproducible
+to 0.040-0.170pp, which is measured over four same-seed control pairs. Any
+difference smaller than that is noise, including differences this README
+quotes. A band built on an unmeasured tolerance is now forbidden outright: a
+reproduction band for a decoder cell needs a measured same-seed floor from at
+least two pairs.
+
+Two defects in the shipped code were found by the gate itself and fixed before
+the tag: `recover()` defaulted the classifier learning rate to 10x the
+backbone where every published vision figure was measured at **20x**
+(`run_sal_qat_prototype.make_optimizer` runs 1e-3 against 5e-5), and
+`recover()` shuffled only once rather than every epoch. Both would have been
+invisible without a reproduction run, and both had been documented as
+correct.
 
 #### v0.6.x — the ImageNet-1k replication
 
@@ -1585,8 +1697,11 @@ losses included. v0.5.0 shipped `CompressionPipeline`, `slice_heads()`,
 self-supervised encoders. v0.6.x added DropHead, `probe()` as the router, and
 the ImageNet-1k replication — and withdrew the 2× speedup target, which is not
 reachable by magnitude pruning on a ViT-B/16 (1.74× measured, at batch 32).
-v0.7.0 is the pipeline the measurements imply: diagnose → route → compress →
-recover.
+v0.7.0 is the pipeline the measurements imply, diagnose → route → compress
+→ recover, and the release that put the shipped pipeline through a
+pre-registered reproduction of the published cells: five of six bands
+reproduced, one did not, and the one that did not is
+[named with its numbers](#v070--what-the-shipped-pipeline-reproduces).
 
 ## sal-torch-pro
 

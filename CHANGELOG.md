@@ -1,6 +1,66 @@
 # Changelog
 
-## [Unreleased], v0.7.0 in progress
+## [0.7.0] — 2026-11-21
+
+**The release that made the published numbers into product claims.** Until
+now every accuracy this project publishes came from the research scripts, not
+from `CompressionPipeline`, which is how a missing recovery stage survived two
+releases. v0.7.0 ships the stage, ships DropHead as a callable mode, and then
+runs the shipped pipeline against cells the project had already published, on
+six bands written down before the runs.
+
+**Five of six bands reproduced. One did not, and it is named here rather than
+smoothed.**
+
+| band | cell | measured | verdict |
+|---|---|---|---|
+| G1-paper / G1-default | ViT-B/16, 50% of heads, random, 2 epochs | 78.814%, seeds 78.718 / 78.672 / 79.052, cost -2.740pp | **PASS** |
+| G2-paper / G2-default | ViT-B/16, 50% of heads, magnitude, 2 epochs | 77.611%, seeds 77.510 / 77.616 / 77.708, cost -3.943pp | **PASS** |
+| G3-default | OPT-1.3B, 50% of heads, 32M C4 tokens, shipped defaults | mean 21.867 perplexity | **PASS** |
+| G3-paper | the same cell, archived recipe | mean 21.996, seeds 21.498 / 21.896 / 22.596 | **FAIL** |
+
+G3-paper reproduces the archived mean (22.013) and the matched pruning cost
+(+6.75 against +6.73) and misses two of three per-seed windows, one low and
+one high. Those windows carried a tolerance of 0.10 perplexity that had been
+**declared rather than measured**. Re-running the original script unchanged at
+the failing seed put the same-seed floor at **0.3093**, three times the
+declared figure: the pipeline reads 21.498, the original script reads 21.574,
+and both sit below the single archived value of 21.883. The failing seed
+deviates by 0.385, which exceeds 0.3093, so the rule pre-registered before any
+of this landed records the band **FAILED**. No band was widened and no rule
+was rewritten. The tag is an explicit owner decision that names the failure.
+
+**What this means for a reader of these numbers.** The decoder perplexities
+are reproducible to about 0.3, not 0.1. The vision accuracies are reproducible
+to 0.040-0.170pp, measured over four same-seed control pairs. Differences
+smaller than that are noise, including differences this changelog quotes.
+
+### Withdrawn
+- **"The clean-accuracy cost of SAL is 0.3 to 1.5pp."** Published from
+  ImageNet-100. Measured on ImageNet-1k across three seeds, SAL's clean
+  accuracy reads 71.53 / 67.57 / 61.61%, a spread of **9.92pp**, against
+  DropHead's 77.60 / 77.32 / 77.71%. A method whose accuracy moves ten points
+  with the training seed cannot carry a sub-2pp cost claim. The monotone
+  dose-response the figure travelled with (+6.2 to +20.8pp over
+  `prune_fraction` 0.1 to 0.5) stands as an ImageNet-100 measurement and is
+  marked as superseded where ImageNet-1k covers the same cell.
+- **"Train at the ratio you intend to deploy at", as a recommendation.** It
+  was a dose-response reading, and training-time head masking is no longer the
+  recommended path at all: it is the branch taken only when no post-pruning
+  fine-tune is possible. The `prune_fraction=0.50` default stands for callers
+  on that branch. Removed from the quickstart.
+- **The v0.5.0 pipeline table as a result.** One T4, one model, one seed, no
+  control arm and no recovery pass. It is relabelled in the README as a
+  demonstration of the API and is not a measurement of anything.
+- **"Pruning 33% of heads is free."** Withdrawn in v0.6.1 against its own
+  dense row and restated here: the comparison was an arm against itself, and
+  against the dense checkpoint trained for the same five epochs the same cell
+  reads -2.75pp. Every remaining "free" framing on the README is either gone
+  or now says what it is free of.
+- **The `+2.45pp` GPT-2 Medium figure is not withdrawn** and now carries its
+  scope at every occurrence: one model, one binary task (SST-2, 355M), five
+  seeds, **no recovery pass**, superseded by ImageNet-1k where the cells
+  overlap.
 
 ### Changed
 - **`recover()`'s `head_lr_multiplier` default is 20.0, not 10.0.** The recipe

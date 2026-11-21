@@ -484,3 +484,23 @@ DOI `10.5281/zenodo.20265572`, queried through the Zenodo REST API on 2026-11-15
 | resource type | Preprint |
 
 `refs.bib` currently carries *Structurally Adaptive Learning: Training-Time Sparsification for Compression-Resilient Transformers (preprint, version 2)*, which differs in four ways: it drops "Adaptive" before "Sparsification", replaces "Produces" with "for", shortens "Transformer Models" to "Transformers", and omits "Across Scales and Modalities" entirely. The parenthetical "(preprint, version 2)" is editorial and belongs in `version`/`note`, not in `title`.
+
+## A8. The decoder same-seed rerun floor, measured
+
+The vision bands could be widened by a floor that had been observed, 0.040-0.170pp over four dense-control pairs. The decoder had none, so the v0.7.0 gate's G3 bands were built on a **declared** 0.10 perplexity, and G3-paper then failed on it. These pairs measure what was declared. Each one is exp36's own unchanged command line, re-run against the archive job that first produced the value, with no `PYTHONPATH` front-run so the re-run takes the sal the archive ran.
+
+A seed is **void** unless its one-shot perplexity reproduces the archive's, which is what proves the same 384 heads were removed. The floor is then the absolute difference of the recovered perplexities.
+
+| archive job | rerun job | seed | one-shot, archive / rerun | recovered, archive / rerun | floor |
+|---|---|---|---|---|---|
+| 23726549 | 23898426 | 42 | 93.5936 / 93.5936 | 21.8833 / 21.5740 | **0.3093** |
+| 23738081 | 23909147 | 123 | 69.7558 / pending | 21.7828 / pending | pending |
+| 23738081 | 23909147 | 456 | 75.2705 / pending | 22.3740 / pending | pending |
+
+Measured floor over 1 pair(s): **0.3093** to **0.3093** perplexity, against the 0.10 that was declared.
+
+Per seed: seed 42 0.3093.
+
+Pending: job 23909147 seed 123, job 23909147 seed 456. Regenerate this file when they land.
+
+**What this decided, and what it did not.** G3-paper failed with its worst out-of-band seed deviating 0.3852 from the archive. Measured against the first pair's 0.3093 that deviation is larger, so the pre-registered rule recorded the band as FAILED rather than explained by measured noise. The band was not widened and the rule was not rewritten. The excess is not independent of the floor: deviation minus floor equals rerun minus gate, so the 0.0759 by which the band misses the noise branch is exactly how far the product's pipeline and exp36's own script sit from each other, while both sit below the single value the archive recorded for that seed. Cardinal rule 13 now requires at least two pairs before a decoder band may be built at all.

@@ -7,6 +7,12 @@ it to reorganize around the structure you remove.
 This document is where the project is going. Dates are release dates, not
 promises about the future ones.
 
+**v0.7.0 is the first release whose numbers were produced by the shipped
+pipeline.** Everything published before it was measured by the research
+scripts, and the release gate below is where the two were finally made to
+agree: six bands pre-registered before the runs, five reproduced, one failed
+and is recorded as failed.
+
 ---
 
 ## Shipped
@@ -502,9 +508,7 @@ for SAL.
 
 ---
 
-## Planned
-
-### v0.7.0 — diagnose, route, compress, recover
+### v0.7.0 — diagnose, route, compress, recover · 2026-11-21
 
 v0.6.x established that there is no single best method, and that the choice is
 measurable before any training happens. v0.7.0 makes that the shape of the
@@ -546,7 +550,7 @@ repairs.
   `[Unreleased]` entry in `CHANGELOG.md`; what follows is the specification it
   was built to, kept because it carries the measured reason for every default.
   Before it, `CompressionPipeline` had no recovery stage, so every accuracy
-  this project publishes for post-hoc pruning included a step the product did
+  this project published for post-hoc pruning included a step the product did
   not perform. Default 2 epochs,
   mask-preserving by default, and matched-control reporting that separates
   `fine_tuning_gain_pp` from `pruning_cost_pp` and emits the second only when
@@ -660,12 +664,16 @@ repairs.
   `data/pro/results/w3_ffn25_magnitude_s*/exp35_mlp_matched.json` and
   `data/pro/results/w3_ffn25_random_s*/exp35_mlp_matched.json`, with
   the generated table in `tables/CANONICAL_TABLES.md`.
-- **`mask_mode="drophead"` on `HeadMasker` — item 2.** DropHead is recommended
-  throughout this document and is **not callable from the package**:
-  `HeadMasker` accumulates and holds, which is SAL, and the per-step resampled
-  variant exists only in `scripts/run_sal_qat_prototype.py`. v0.7.0 adds it as a
-  supported mode, with tests reproducing the prototype's behaviour at identical
-  seeds and masks.
+- **`mask_mode="drophead"` on `HeadMasker` — item 2. SHIPPED.** DropHead was
+  recommended throughout this document and was **not callable from the
+  package**: `HeadMasker` accumulates and holds, which is SAL, and the
+  per-step resampled variant existed only in
+  `scripts/run_sal_qat_prototype.py`. It is now a supported mode, verified
+  against that prototype's own `ResampleMasker` at identical seeds and
+  identical masks, step for step, over three seeds and three quotas.
+  `"accumulate"` stays the default for backward compatibility and
+  `SALConfig.auto()` does not choose between them, because they are different
+  methods with different scopes.
 - **A multi-probe layer classifier — item 3.** exp42 measured
   `classify_layers_by_rank` over six independent probe draws on an unchanged
   ViT-B/16: `k=1` and `k=5` return the same set on 6 of 6 draws and `k=3` —
@@ -786,7 +794,7 @@ gate.poll()                  # every arm, inside the step loop: raise if failed
 a non-finite loss" rule, one level up: a diverged loss is caught in seconds, a
 quietly collapsing control arm currently is not caught at all.
 
-#### The v0.7.0 release gate
+#### The v0.7.0 release gate — run, and five of six bands reproduced
 
 **No v0.7.0 tag until the shipped pipeline reproduces the published figures.**
 Every accuracy on this page and in the README was produced by
@@ -794,14 +802,73 @@ Every accuracy on this page and in the README was produced by
 acceptable for a research trail and not acceptable for a product claim, and it
 is how the missing recovery stage went unnoticed through two releases.
 
-The gate: run the shipped pipeline end to end — `probe()` → magnitude selection
-→ `recover()` → `validate()` — on ViT-B/16 / ImageNet-1k, and check it lands
-within seed tolerance of the published cell (77.64% at 50% of heads after two
-epochs, three seeds spanning 77.44–77.81%). The control it is scored against is
-the 2-epoch dense control, verified before the run rather than quoted.
+**How it was run.** Six bands, three cells scored twice each: once against the
+archived recipe (paper mode, **two-sided**, because a reproduction landing
+outside the cell has not reproduced it) and once against the shipped defaults
+(default mode, one-sided). Every band was written into
+`experiments/v070_gate_bands.py` **before** any job was submitted, with its
+own control, its own tolerance and the source it came from, and no band was
+widened afterwards. The scorer refuses a band whose recorded commit is not an
+ancestor of what is published, and refuses to score at all while any result
+cell does not declare whether it is an arm, a gate sentinel or a micro run.
 
-If the pipeline cannot reproduce the number, the number is not a product claim
-and the README says so instead.
+| band | measured | verdict |
+|---|---|---|
+| G1-paper / G1-default | 78.814%, seeds 78.718 / 78.672 / 79.052, cost -2.740pp | **PASS** |
+| G2-paper / G2-default | 77.611%, seeds 77.510 / 77.616 / 77.708, cost -3.943pp | **PASS** |
+| G3-default | mean 21.867 perplexity | **PASS** |
+| G3-paper | mean 21.996, seeds 21.498 / 21.896 / 22.596 | **FAIL**, two of three per-seed windows |
+
+8.83 billed GPU-h over eleven jobs, three seeds per cell, the full
+50 000-image validation split for vision and 32M C4 tokens for the decoder.
+
+**What the gate caught in the shipped code**, none of which any unit test
+could see and all of which was documented as correct:
+
+- `recover()` defaulted the classifier learning rate to **10x** the backbone
+  where every published vision figure was measured at **20x**
+  (`make_optimizer` runs `LR_HEAD` 1e-3 against `LR_BACKBONE` 5e-5). Fixed,
+  with a test that recomputes the ratio from those two constants rather than
+  asserting a literal.
+- `recover()` shuffled its loader once rather than every epoch.
+- The gate's own vision data view omitted the archived recipe's **random
+  horizontal flip**, p=0.5 per image. The signature was unmistakable once
+  looked for: training loss 0.049 and 0.039 *below* the archive on 6 of 6 runs
+  with a spread of 0.0006, and accuracy 0.15 to 0.26pp below it. Lower
+  training loss with lower validation accuracy is what removing an
+  augmentation does. With the flip restored in `make_step`'s own order, the
+  loss deltas are ±0.0015 and change sign with the seed.
+- The scorer could not tell a 4-minute gate sentinel from a 2-hour arm: same
+  keys, same `last_stage`, same strategy, same file name. Scored as a fourth
+  seed it reported G1's mean as 72.2255 instead of 78.6007. Every result now
+  carries an explicit `role` written by the runner, and the scorer refuses
+  rather than guessing.
+
+**Why G3-paper failed, and why the tag proceeded anyway.** The decoder cell
+reproduces on its mean (21.996 against an archived 22.013) and on its matched
+pruning cost (+6.73 against +6.75); what misses is two of three per-seed
+windows, one low and one high. Those windows had been widened by a tolerance
+of 0.10 perplexity that was **declared, not measured** — no decoder cell in
+the campaign had ever been re-run at a fixed seed, where the vision bands
+could use an observed floor of 0.040-0.170pp over four control pairs. So the
+original script was re-run unchanged at the failing seed. Its one-shot
+perplexity reproduced the archive's to every stored digit, proving it removed
+the same 384 heads, and its recovered perplexity read 21.574 against the
+archive's 21.883: a same-seed floor of **0.3093**, three times what had been
+declared. The pipeline's own value for that seed, 21.498, sits **0.076** from
+the original script's and **0.385** from the archive's. Because 0.385 exceeds
+0.3093, the rule pre-registered before any of this landed records the band as
+**FAILED** rather than explained by measured noise, and the band was not
+widened. The tag is an explicit owner decision recorded in a separate sealed
+file that the release step checks, so the failure stays in the record and
+cannot be read as a pass.
+
+The lesson is now a cardinal rule: **a reproduction band for a decoder cell
+must be built from a measured same-seed floor of at least two pairs, and a
+declared tolerance is not a band.** An unmeasured tolerance decides verdicts
+while looking like rigour.
+
+## Planned
 
 ### v0.8.0 — Edge deployment exports
 

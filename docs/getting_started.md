@@ -1,8 +1,33 @@
 # Getting Started
 
-`sal-torch` makes any transformer resilient to compression by silencing
-attention heads during training, and it ships a structural **Fragility Index**
-(FI) diagnostic. The two are independent — use either on its own.
+`sal-torch` is a **measured compression tool**: diagnose, route, prune,
+recover, then verify against a matched control. It also ships a structural
+**Fragility Index** (FI) diagnostic, and a training-time head-masking method
+(SAL, and DropHead since v0.7.0). All three are independent — use any one on
+its own.
+
+> **Read this before picking a path.** If you can fine-tune after pruning,
+> **do that, and skip head training entirely**: prune at random, recover for
+> two epochs, and verify against a control trained for the same two epochs.
+> At a fixed head set, SAL's weights are worth **+0.05pp** and DropHead's
+> **+0.07pp** as a starting point for that fine-tune, while the fine-tune
+> itself is worth up to **68pp** (exp24, ViT-B/16 on ImageNet-1k, 3 seeds,
+> `results/lumi_v060/EXP24_SAL_RECOVERY.md`). Head training is the branch you
+> take when **no post-pruning fine-tune is possible**, and there the method is
+> DropHead. The shortest version of the recommended path:
+>
+> ```python
+> from sal import CompressionPipeline
+>
+> pipe = CompressionPipeline(model, eval_dataset, metric="accuracy")
+> pipe.probe()                                     # measure, do not guess
+> pipe.compress(pruning=0.50, slice_heads=True)    # random selection, the default
+> pipe.recover(train_dataset, epochs=2, domain="same as eval")
+> print(pipe.validate().table)
+> ```
+>
+> The SAL training run below is the other branch. It is supported and it is
+> not the default recommendation.
 
 ## Install
 

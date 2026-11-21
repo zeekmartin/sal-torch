@@ -154,6 +154,24 @@ see wave 1 below.
     a file rather than piping when the status matters. A status is a
     claim about what happened; passing one on without having looked at
     the output is reporting a result nobody measured.
+13. **A reproduction band for a decoder cell must be built from a MEASURED
+    same-seed floor of at least two pairs. A declared tolerance is not a
+    band.** The vision bands were widened by a floor that had been
+    observed: 0.040-0.170pp over four dense-control pairs. The decoder had
+    nothing comparable, so G3's tolerance was set at 0.10 perplexity by
+    choice rather than by measurement, and the v0.7.0 gate then failed
+    G3-paper on it. When the floor was finally measured, by re-running
+    exp36's own unchanged command line at a fixed seed, it read **0.3093** -
+    three times the declared figure. The failing seed deviated by 0.3852, so
+    the band still failed, but it failed against a number nobody had any
+    right to trust in either direction. Two pairs is the minimum because one
+    pair cannot tell a floor from a draw, and the pairing must reproduce the
+    **archive job's own command line**, including its full seed list: job
+    23738081 ran seeds 123 and 456 in one process, so a single-seed re-run of
+    456 starts from a different global RNG history and measures the floor
+    plus a command-line difference, inseparably. This is rule 7 pointed at
+    tolerances instead of values: a tolerance is a published claim too, and
+    an unmeasured one decides verdicts while looking like rigour.
 
 ## The validated mechanism (source of truth: reference research code)
 
@@ -311,6 +329,47 @@ the three shipped, `ExpertMasker`.
     both mask ratios: −5.02pp (CI [−5.64, −4.40]) at 0.3 and −4.77pp
     (CI [−5.15, −4.39]) at 0.5 (`PHASE2E.md`). This is cardinal rule 1,
     measured at scale.
+
+- **v0.7.0 (diagnose, route, compress, recover): RELEASED (2026-11-21).**
+  `CompressionPipeline.recover()` (item 1), matched-control reporting (item 2),
+  `mask_mode="drophead"` on `SALConfig`/`HeadMasker` (item 3), the load-time
+  precision check (item 5), `amp_dtype`/`eval_autocast`. **661 passed, 13
+  skipped** on CPU. **The release gate ran: five of six pre-registered bands
+  reproduced, G3-paper did not.** Measured by the shipped pipeline, three
+  seeds each: ViT-B/16 at 50% of heads reads **78.814%** random (cost
+  -2.740pp) and **77.611%** magnitude (cost -3.943pp), both inside their
+  bands; OPT-1.3B `heads_random_50` reads a mean of **21.996** perplexity
+  against an archived 22.013 with a matched cost of +6.73 against +6.75, but
+  two of its three per-seed windows are missed, one low and one high. Scored
+  on commit `c573f1303e51`, package hash `03a5a4be313ef2fa`, 8.83 billed
+  GPU-h over eleven jobs. **The tag is an owner override recorded in a sealed
+  decision file that the release step checks**
+  (`sal-torch-pro/docs/V070_TAG_OVERRIDE.json`), so the failure cannot be read
+  as a pass; the full report is `sal-torch-pro/docs/V070_GATE_REPORT.md` and
+  the diagnosis of the first batch is `V070_GATE_DIAGNOSIS.md`.
+  - **Three defects the gate found that no unit test could see**, all
+    documented as correct beforehand: `recover()` defaulted the classifier
+    learning rate to 10x the backbone where the archive runs **20x**;
+    `recover()` shuffled once rather than every epoch; and the gate's vision
+    data view omitted the archived recipe's **random horizontal flip** (p=0.5
+    per image), whose signature was a training loss 0.049 and 0.039 *below*
+    the archive on 6/6 runs with a 0.0006 spread and an accuracy 0.15-0.26pp
+    below it. With the flip restored in `make_step`'s own order the loss
+    deltas are ±0.0015 and change sign with the seed.
+  - **The scorer could not tell a gate sentinel from an arm** (same keys, same
+    `last_stage`, same strategy, same file name) and folded a 4-minute
+    sentinel into G1 as a fourth seed, reporting the mean as 72.2255 instead
+    of 78.6007. Every result now carries an explicit `role` written by the
+    runner, and the scorer refuses to score anything while a cell lacks one.
+  - **The decoder band's tolerance was declared, not measured**, which is now
+    cardinal rule 13. Re-running exp36's own unchanged command line at the
+    failing seed put the same-seed floor at **0.3093** perplexity against the
+    0.10 declared. The pipeline reads 21.498 and the original script 21.574, a
+    gap of 0.076, while both sit below the single archived 21.883; the failing
+    seed deviates 0.385, which exceeds the floor, so the pre-registered rule
+    recorded FAILED rather than "explained by measured noise". **Do not quote
+    a decoder perplexity in this project to better than 0.3**, or a vision
+    accuracy to better than 0.170pp.
 
 ### What the ImageNet-1k series retracted (exp23-exp28)
 
@@ -600,21 +659,25 @@ both until the pre-report audit.
   steps would have saved ~157 GPU-hours. This is the "fail loudly on a
   non-finite loss" lesson one level up: **fail loudly when the control arm
   regresses against its own starting point.**
-- Next: v0.7.0 on the repositioned narrative — **diagnose (FI) → route (probe)
+- v0.7.0 is **released** on the repositioned narrative — **diagnose (FI) → route (probe)
   → prune (magnitude by default) → recover (2 epochs) → verify against a
   matched control**. Head training is the branch taken only when no
   post-pruning fine-tune is possible, and there **DropHead with no exception**:
   the "SAL when the deployed head set is fixed" carve-out is **gone**, since
   exp28b measured that cell at 631M and DropHead matches or beats SAL there on
   3/3 seeds without committing to a head set at training time.
-  **v0.7.0 item 1** is `recover()` (`SPEC_V070_RECOVERY.md`); **item 2** is
-  `mask_mode="drophead"` on `HeadMasker`. **Release gate: no v0.7.0 tag until
-  the shipped `CompressionPipeline` runs probe → magnitude → recover →
-  validate end-to-end on ViT-B/16 / ImageNet-1k and reproduces 77.64% at 50% of
-  heads within the published three-seed spread (77.44-77.81%).** Every number
-  the project publishes today came from `scripts/run_sal_qat_prototype.py`, not
-  from the pipeline, which is how the missing recovery stage survived two
-  releases. The SSL recipe is **fixed and validated**
+  `recover()` (item 1, `SPEC_V070_RECOVERY.md`) and `mask_mode="drophead"` on
+  `HeadMasker` (item 3) both **shipped**. **The release gate ran and five of
+  six bands reproduced**: the shipped `CompressionPipeline` drives probe →
+  magnitude or random → recover → validate end to end on ViT-B/16 /
+  ImageNet-1k and reads 77.611% at 50% of heads with magnitude selection,
+  inside the published three-seed spread of 77.44-77.81%, and 78.814% with
+  random. G3-paper, the OPT-1.3B decoder cell in paper mode, **failed** and
+  was tagged under an owner override; see the v0.7.0 entry above and
+  cardinal rule 13. Before this release every number the project published
+  came from `scripts/run_sal_qat_prototype.py`, not from the pipeline, which
+  is how the missing recovery stage survived two releases. The SSL recipe is
+  **fixed and validated**
   (exp28b, frozen target encoder). Remaining: the epoch-1 control gate as a
   shipped safeguard and an FFN-ratio router (both specced in `ROADMAP.md`), and
   Phase 5 (license signing + compliance reports). The `nonaccum` control arm is

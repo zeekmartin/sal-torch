@@ -1,0 +1,395 @@
+{
+ "verdict": {
+  "bands": {
+   "G1-paper": {
+    "band": "G1-paper",
+    "cell": "ViT-B/16 / ImageNet-1k, 50% of heads, random selection, 2 epochs",
+    "mode": "paper",
+    "two_sided": true,
+    "metric": "top-1 accuracy, %",
+    "n_seeds": 3,
+    "per_seed": [
+     78.718,
+     78.672,
+     79.052
+    ],
+    "seeds": [
+     42,
+     123,
+     456
+    ],
+    "mean": 78.81400000000001,
+    "cost": -2.740000000000002,
+    "passed": true,
+    "why": [
+     "within the pre-registered band"
+    ],
+    "archived_mean": 78.816,
+    "archived_cost": -2.738,
+    "tolerance": "per-seed range widened by the measured same-seed rerun floor, 0.170pp",
+    "sources": [
+     "data/oss/results/lumi_v060/EXP40B_RANDOM.md",
+     "data/oss/results/lumi_v060/CONTROL_CONVENTION.md"
+    ],
+    "status": "PASS",
+    "explained": false,
+    "blocking": false
+   },
+   "G1-default": {
+    "band": "G1-default",
+    "cell": "ViT-B/16 / ImageNet-1k, 50% of heads, random selection, 2 epochs",
+    "mode": "default",
+    "two_sided": false,
+    "metric": "top-1 accuracy, %",
+    "n_seeds": 3,
+    "per_seed": [
+     78.718,
+     78.672,
+     79.052
+    ],
+    "seeds": [
+     42,
+     123,
+     456
+    ],
+    "mean": 78.81400000000001,
+    "cost": -2.740000000000002,
+    "passed": true,
+    "why": [
+     "within the pre-registered band"
+    ],
+    "archived_mean": 78.816,
+    "archived_cost": null,
+    "tolerance": "one-sided: no worse than the archived per-seed minimum",
+    "sources": [
+     "data/oss/results/lumi_v060/EXP40B_RANDOM.md",
+     "data/oss/results/lumi_v060/CONTROL_CONVENTION.md"
+    ],
+    "status": "PASS",
+    "explained": false,
+    "blocking": false
+   },
+   "G2-paper": {
+    "band": "G2-paper",
+    "cell": "ViT-B/16 / ImageNet-1k, 50% of heads, magnitude selection, 2 epochs",
+    "mode": "paper",
+    "two_sided": true,
+    "metric": "top-1 accuracy, %",
+    "n_seeds": 3,
+    "per_seed": [
+     77.51,
+     77.616,
+     77.708
+    ],
+    "seeds": [
+     42,
+     123,
+     456
+    ],
+    "mean": 77.61133333333333,
+    "cost": -3.942666666666668,
+    "passed": true,
+    "why": [
+     "within the pre-registered band"
+    ],
+    "archived_mean": 77.642,
+    "archived_cost": -3.91,
+    "tolerance": "published three-seed span widened by the measured same-seed rerun floor, 0.170pp",
+    "sources": [
+     "data/oss/results/lumi_v060/EXP32_RATIO_AT_2EP.md",
+     "data/oss/results/lumi_v060/CONTROL_CONVENTION.md"
+    ],
+    "status": "PASS",
+    "explained": false,
+    "blocking": false
+   },
+   "G2-default": {
+    "band": "G2-default",
+    "cell": "ViT-B/16 / ImageNet-1k, 50% of heads, magnitude selection, 2 epochs",
+    "mode": "default",
+    "two_sided": false,
+    "metric": "top-1 accuracy, %",
+    "n_seeds": 3,
+    "per_seed": [
+     77.51,
+     77.616,
+     77.708
+    ],
+    "seeds": [
+     42,
+     123,
+     456
+    ],
+    "mean": 77.61133333333333,
+    "cost": -3.942666666666668,
+    "passed": true,
+    "why": [
+     "within the pre-registered band"
+    ],
+    "archived_mean": 77.642,
+    "archived_cost": null,
+    "tolerance": "one-sided: no worse than the published lower bound",
+    "sources": [
+     "data/oss/results/lumi_v060/EXP32_RATIO_AT_2EP.md",
+     "data/oss/results/lumi_v060/CONTROL_CONVENTION.md"
+    ],
+    "status": "PASS",
+    "explained": false,
+    "blocking": false
+   },
+   "G3-paper": {
+    "band": "G3-paper",
+    "cell": "OPT-1.3B, heads_random_50, 32M C4 tokens, published recipe (unclipped AdamW, one_cycle, pct_start 0.10)",
+    "mode": "paper",
+    "two_sided": true,
+    "metric": "WikiText-2 perplexity",
+    "n_seeds": 3,
+    "per_seed": [
+     21.498051998810688,
+     21.895566891100465,
+     22.595711509157876
+    ],
+    "seeds": [
+     42,
+     123,
+     456
+    ],
+    "mean": 21.996443466356343,
+    "cost": 6.732577080629514,
+    "passed": false,
+    "why": [
+     "seed 0 value 21.4981 outside [21.6828, 22.4740]",
+     "seed 2 value 22.5957 outside [21.6828, 22.4740]",
+     "the worst out-of-band seed deviates by 0.3852, which EXCEEDS the measured same-seed floor 0.3093 from seed 42 re-run 21.5740 against the archive's 21.8833, so this is not noise. Every seed's deviation: seed 42 0.3852, seed 123 0.1128, seed 456 0.2217"
+    ],
+    "archived_mean": 22.0134,
+    "archived_cost": 6.7495,
+    "tolerance": "per-seed range widened by a DECLARED 0.10 perplexity: no decoder cell was ever re-run at a fixed seed, so there is no measured floor here",
+    "sources": [
+     "data/pro/results/EXP36_OPT_SPARSE.md",
+     "data/pro/results/exp36_rec_*/exp36_opt_sparse.json"
+    ],
+    "status": "FAIL",
+    "explained": false,
+    "blocking": true
+   },
+   "G3-default": {
+    "band": "G3-default",
+    "cell": "OPT-1.3B, heads_random_50, 32M C4 tokens, shipped defaults (max_grad_norm=1.0, warmup_cosine)",
+    "mode": "default",
+    "two_sided": false,
+    "metric": "WikiText-2 perplexity",
+    "n_seeds": 3,
+    "per_seed": [
+     21.501608206047923,
+     21.683552877305896,
+     22.415604712716902
+    ],
+    "seeds": [
+     42,
+     123,
+     456
+    ],
+    "mean": 21.866921932023573,
+    "cost": 6.603055546296744,
+    "passed": true,
+    "why": [
+     "within the pre-registered band"
+    ],
+    "archived_mean": 22.0134,
+    "archived_cost": null,
+    "tolerance": "one-sided: no worse than the archived per-seed maximum. This is the only family where the recipe actually changed, so it is the only place the two modes measure different things",
+    "sources": [
+     "data/pro/results/EXP36_OPT_SPARSE.md",
+     "data/pro/results/exp36_rec_*/exp36_opt_sparse.json"
+    ],
+    "status": "PASS",
+    "explained": false,
+    "blocking": false
+   }
+  },
+  "passed": false,
+  "provenance": {
+   "G1-paper": {
+    "ok": true,
+    "commit": "c573f1303e511b997bbdb64803085c2220ccaaa3",
+    "why": "commit c573f1303e51 is an ancestor of HEAD",
+    "n_cells": 3
+   },
+   "G1-default": {
+    "ok": true,
+    "commit": "c573f1303e511b997bbdb64803085c2220ccaaa3",
+    "why": "commit c573f1303e51 is an ancestor of HEAD",
+    "n_cells": 3
+   },
+   "G2-paper": {
+    "ok": true,
+    "commit": "c573f1303e511b997bbdb64803085c2220ccaaa3",
+    "why": "commit c573f1303e51 is an ancestor of HEAD",
+    "n_cells": 3
+   },
+   "G2-default": {
+    "ok": true,
+    "commit": "c573f1303e511b997bbdb64803085c2220ccaaa3",
+    "why": "commit c573f1303e51 is an ancestor of HEAD",
+    "n_cells": 3
+   },
+   "G3-paper": {
+    "ok": true,
+    "commit": "c573f1303e511b997bbdb64803085c2220ccaaa3",
+    "why": "commit c573f1303e51 is an ancestor of HEAD",
+    "n_cells": 3
+   },
+   "G3-default": {
+    "ok": true,
+    "commit": "7efca3ab29b0781d9f47f8f3104d6c14900781a1",
+    "why": "commit 7efca3ab29b0 is an ancestor of HEAD",
+    "n_cells": 3
+   }
+  },
+  "n_checked": 6,
+  "n_bands": 6,
+  "complete": true,
+  "blocking": [
+   "G3-paper"
+  ],
+  "measured_floor": 0.3093466604128139
+ },
+ "roles": {
+  "gate_v070_vit_random_s42/gate_random_paper_s42.json": {
+   "role": "arm",
+   "source": "the result file"
+  },
+  "gate_v070_vit_random_s123/gate_random_paper_s123.json": {
+   "role": "arm",
+   "source": "the result file"
+  },
+  "gate_v070_vit_random_s456/gate_random_paper_s456.json": {
+   "role": "arm",
+   "source": "the result file"
+  },
+  "gate_v070_vit_magnitude_s42/gate_magnitude_paper_s42.json": {
+   "role": "arm",
+   "source": "the result file"
+  },
+  "gate_v070_vit_magnitude_s123/gate_magnitude_paper_s123.json": {
+   "role": "arm",
+   "source": "the result file"
+  },
+  "gate_v070_vit_magnitude_s456/gate_magnitude_paper_s456.json": {
+   "role": "arm",
+   "source": "the result file"
+  },
+  "gate_v070_opt_paper_s42/gate_opt_paper_s42.json": {
+   "role": "arm",
+   "source": "the result file"
+  },
+  "gate_v070_opt_paper_s123/gate_opt_paper_s123.json": {
+   "role": "arm",
+   "source": "the result file"
+  },
+  "gate_v070_opt_paper_s456/gate_opt_paper_s456.json": {
+   "role": "arm",
+   "source": "the result file"
+  },
+  "gate_v070_opt_default_s42/gate_opt_default_s42.json": {
+   "role": "arm",
+   "source": "declared: job 23895012 g70opt-def-s42, 32M C4 tokens, shipped defaults"
+  },
+  "gate_v070_opt_default_s123/gate_opt_default_s123.json": {
+   "role": "arm",
+   "source": "declared: job 23895013 g70opt-def-s123, 32M C4 tokens, shipped defaults"
+  },
+  "gate_v070_opt_default_s456/gate_opt_default_s456.json": {
+   "role": "arm",
+   "source": "declared: job 23895014 g70opt-def-s456, 32M C4 tokens, shipped defaults"
+  }
+ },
+ "scored": {
+  "G1-paper": {
+   "per_seed": [
+    78.718,
+    78.672,
+    79.052
+   ],
+   "cost": -2.740000000000002,
+   "seeds": [
+    42,
+    123,
+    456
+   ],
+   "n_cells": 3
+  },
+  "G1-default": {
+   "per_seed": [
+    78.718,
+    78.672,
+    79.052
+   ],
+   "cost": -2.740000000000002,
+   "seeds": [
+    42,
+    123,
+    456
+   ],
+   "n_cells": 3
+  },
+  "G2-paper": {
+   "per_seed": [
+    77.51,
+    77.616,
+    77.708
+   ],
+   "cost": -3.942666666666668,
+   "seeds": [
+    42,
+    123,
+    456
+   ],
+   "n_cells": 3
+  },
+  "G2-default": {
+   "per_seed": [
+    77.51,
+    77.616,
+    77.708
+   ],
+   "cost": -3.942666666666668,
+   "seeds": [
+    42,
+    123,
+    456
+   ],
+   "n_cells": 3
+  },
+  "G3-paper": {
+   "per_seed": [
+    21.498051998810688,
+    21.895566891100465,
+    22.595711509157876
+   ],
+   "cost": 6.732577080629514,
+   "seeds": [
+    42,
+    123,
+    456
+   ],
+   "n_cells": 3
+  },
+  "G3-default": {
+   "per_seed": [
+    21.501608206047923,
+    21.683552877305896,
+    22.415604712716902
+   ],
+   "cost": 6.603055546296744,
+   "seeds": [
+    42,
+    123,
+    456
+   ],
+   "n_cells": 3
+  }
+ },
+ "n_cells": 12
+}
