@@ -2,7 +2,14 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    # Release branches too. A patch release is cut from a maintenance
+    # branch when the tip of main carries surface that the patch must not
+    # ship -- v0.7.1 was cut without the ungated pruners -- and a branch
+    # whose whole purpose is to be tagged is the last place CI should be
+    # optional. Testing it through a pull request would not do: that runs
+    # on the branch MERGED into main, which is the tree the release
+    # deliberately does not have.
+    branches: [main, "release-*"]
   pull_request:
     branches: [main]
 
