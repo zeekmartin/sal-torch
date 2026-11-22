@@ -23,7 +23,7 @@ def _config(**kw):
 
 
 def _per_layer(masker, num_layers):
-    return [int((masker._masks[l] == 0.0).sum().item()) for l in range(num_layers)]
+    return [int((masker._masks[layer] == 0.0).sum().item()) for layer in range(num_layers)]
 
 
 def _arm(masker):

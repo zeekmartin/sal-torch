@@ -22,4 +22,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev,reports,crypto]"
+      # Lint before the tests, so a lint failure does not consume a test run.
+      # The rule set and every exception are configured in pyproject.toml,
+      # with their counts and their reasons.
+      - run: ruff check sal/ tests/
       - run: pytest tests/ -v

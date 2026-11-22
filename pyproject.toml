@@ -58,3 +58,34 @@ exclude = ["/results/gate_v070_*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
+
+# ruff runs in CI as of this commit. It reported 152 findings over 9 rules on
+# the tree as it stood; 55 carried meaning and were fixed, 97 are configured
+# here. The counts are recorded because a count is the only way to tell a
+# deliberate exception from a quiet one later.
+#
+# Fixed rather than ignored: one F821 (an unresolvable forward reference that
+# made typing.get_type_hints() raise on CompressionReport), one F841, three
+# F401, and all 50 E741 -- the ambiguous `l`, renamed by token and by scope,
+# which is not the same name in every place it appeared.
+#
+# Ignored because they contradict a deliberate style and not because they are
+# inconvenient. 71 E702 and 13 E701 are the compact fixture style: in a test
+# fixture, eight assignments on one line read as a block where eight lines
+# read as a procedure, and 71 occurrences are a style rather than an
+# accident. 7 E401 is the same choice about imports. 3 E731 are lambdas used
+# as test doubles, where a def would be longer and no clearer. Turning any of
+# them on would mean a 94-line diff across code the v0.7.0 release gate had
+# just certified, for no defect.
+[tool.ruff]
+src = ["sal", "tests"]
+
+[tool.ruff.lint]
+ignore = ["E701", "E702", "E401", "E731"]
+
+# Deliberate, not an oversight: these imports follow a sys.path manipulation
+# that has to run first, so they cannot move to the top of the file. A
+# per-file exception with its reason beside it, rather than switching the
+# rule off everywhere.
+[tool.ruff.lint.per-file-ignores]
+"tests/test_license.py" = ["E402"]

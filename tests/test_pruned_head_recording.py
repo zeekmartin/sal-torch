@@ -7,7 +7,7 @@ bookkeeping the aligned-pruning comparison cannot be made at all.
 import pytest
 import torch
 
-from sal import HeadMasker, SALConfig, SALTrainer
+from sal import HeadMasker, SALTrainer
 
 
 @pytest.fixture

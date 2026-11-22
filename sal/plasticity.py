@@ -112,15 +112,15 @@ class PlasticityMap:
 
     @property
     def hub_layers(self) -> list:
-        return [l for l, c in self.absorption_map.items() if c == HUB]
+        return [layer for layer, c in self.absorption_map.items() if c == HUB]
 
     @property
     def elastic_layers(self) -> list:
-        return [l for l, c in self.absorption_map.items() if c == ELASTIC]
+        return [layer for layer, c in self.absorption_map.items() if c == ELASTIC]
 
     @property
     def saturated_layers(self) -> list:
-        return [l for l, c in self.absorption_map.items() if c == SATURATED]
+        return [layer for layer, c in self.absorption_map.items() if c == SATURATED]
 
     @property
     def summary(self) -> str:
@@ -136,11 +136,11 @@ class PlasticityMap:
         n_target = int(round(target_compression * total))
 
         # Never touch structural hubs.
-        never = [(l, h) for l in self.hub_layers for h in range(nh)]
+        never = [(layer, h) for layer in self.hub_layers for h in range(nh)]
 
         # Prefer pruning elastic layers (most redundant first), then saturated.
-        elastic = sorted(self.elastic_layers, key=lambda l: self.mutual_info.get(l, 0), reverse=True)
-        saturated = sorted(self.saturated_layers, key=lambda l: self.mutual_info.get(l, 0), reverse=True)
+        elastic = sorted(self.elastic_layers, key=lambda layer: self.mutual_info.get(layer, 0), reverse=True)
+        saturated = sorted(self.saturated_layers, key=lambda layer: self.mutual_info.get(layer, 0), reverse=True)
 
         safe, n_elastic, n_saturated = [], 0, 0
         for layer in elastic + saturated:

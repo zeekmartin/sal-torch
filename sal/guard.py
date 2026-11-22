@@ -149,8 +149,8 @@ def _build_grad_masks(model, protected_set: list, nh: int) -> dict:
     masks: dict = {}
     attn_mods = arch_support.get_attention_modules(model)
     by_layer: dict = {}
-    for (l, h) in protected_set:
-        by_layer.setdefault(l, []).append(h)
+    for (layer, h) in protected_set:
+        by_layer.setdefault(layer, []).append(h)
     for li, attn in enumerate(attn_mods):
         heads = by_layer.get(li)
         if not heads:
@@ -241,9 +241,9 @@ class StructuralGuard:
     @property
     def protection_map(self) -> dict:
         m: dict = {}
-        for (l, h) in self._protected:
-            m.setdefault(l, []).append(h)
-        return {l: sorted(hs) for l, hs in m.items()}
+        for (layer, h) in self._protected:
+            m.setdefault(layer, []).append(h)
+        return {layer: sorted(hs) for layer, hs in m.items()}
 
     @property
     def num_layers(self) -> int:
@@ -308,7 +308,7 @@ class StructuralGuard:
             "num_heads": self._nh,
             "protected_heads": [list(x) for x in self._protected],
             "trainable_heads": [list(x) for x in self._trainable],
-            "head_mi": {f"{l},{h}": round(v, 6) for (l, h), v in self._head_mi.items()},
+            "head_mi": {f"{layer},{h}": round(v, 6) for (layer, h), v in self._head_mi.items()},
             "absorption_map": {str(k): v for k, v in self._amap.items()},
             "baseline": self._baseline.to_dict() if self._baseline is not None else None,
         }
@@ -328,8 +328,8 @@ class StructuralGuard:
         d = json.loads(Path(path).read_text())
         head_mi = {}
         for k, v in d.get("head_mi", {}).items():
-            l, h = k.split(",")
-            head_mi[(int(l), int(h))] = float(v)
+            layer, h = k.split(",")
+            head_mi[(int(layer), int(h))] = float(v)
         amap = {int(k): v for k, v in d.get("absorption_map", {}).items()}
         baseline = StructuralSnapshot.from_dict(d["baseline"]) if d.get("baseline") else None
         return cls(

@@ -105,9 +105,9 @@ class _MaskedHeads:
         self.projs = arch_support.get_output_projections(model)
         self.nh = num_heads
         self.by_layer: dict = {i: set() for i in range(len(self.projs))}
-        for (l, h) in pruned_set:
-            if l in self.by_layer:
-                self.by_layer[l].add(h)
+        for (layer, h) in pruned_set:
+            if layer in self.by_layer:
+                self.by_layer[layer].add(h)
         self.handles: list = []
 
     def _make(self, heads):
@@ -198,7 +198,7 @@ def _method_magnitude(model, dataset, eval_dataset, ctx):
 
 def _method_random_posthoc(model, dataset, eval_dataset, ctx):
     rng = np.random.RandomState(ctx["seed"])
-    all_heads = [(l, h) for l in range(ctx["num_layers"]) for h in range(ctx["num_heads_per_layer"])]
+    all_heads = [(layer, h) for layer in range(ctx["num_layers"]) for h in range(ctx["num_heads_per_layer"])]
     idx = rng.choice(len(all_heads), size=ctx["n_prune"], replace=False)
     pruned = [all_heads[i] for i in idx]
     with _MaskedHeads(model, pruned, ctx["num_heads_per_layer"]):

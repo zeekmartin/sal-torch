@@ -57,6 +57,19 @@ from typing import Optional
 
 import torch
 
+# `control` was annotated as Optional["RecoveryControl"], a forward reference
+# that nothing in this module could resolve. The annotation is a string, so
+# no call ever broke -- but typing.get_type_hints() on CompressionReport
+# raised NameError, which is a real failure for any caller that introspects
+# the report, and a linter was the only thing that could see it.
+#
+# A `TYPE_CHECKING` import would silence the linter and leave that failure in
+# place, because TYPE_CHECKING is False at runtime. This is a real import, so
+# the annotation resolves. It is safe because there is no cycle: sal.recovery
+# imports nothing from sal.pipeline, and its only sal imports are from sal.fi
+# inside functions.
+from sal.recovery import RecoveryControl                       # noqa: E402
+
 logger = logging.getLogger(__name__)
 
 SMALL_MODEL_PARAMS = 100_000_000
@@ -198,8 +211,8 @@ class ScanSummary:
             f"fragility index: {self.fi_score:.3f} (diagnostic only -- FI does "
             f"not predict how much pruning costs; run probe() for that)",
         ]
-        elastic = [l for l, c in self.absorption_map.items() if c == "ELASTIC"]
-        hub = [l for l, c in self.absorption_map.items() if c == "HUB"]
+        elastic = [layer for layer, c in self.absorption_map.items() if c == "ELASTIC"]
+        hub = [layer for layer, c in self.absorption_map.items() if c == "HUB"]
         lines.append(f"absorption: {len(elastic)} elastic layer(s), {len(hub)} hub layer(s)")
         q = self.quantization
         lines.append(f"size: {q['original_size_mb']:.0f}MB -> "
@@ -368,7 +381,7 @@ class CompressionReport:
     scan: Optional[ScanSummary] = None
     roundtrip_verified: Optional[bool] = None
     recovery: Optional[dict] = None
-    control: Optional["RecoveryControl"] = None
+    control: Optional[RecoveryControl] = None
     precision: Optional[dict] = None
 
     @property
@@ -483,7 +496,6 @@ class CompressionReport:
     @property
     def cost_statement(self) -> str:
         """One line on the cost, or on why there is not one."""
-        unit = "pp" if self.higher_is_better else f" {self.metric}"
         if self.arm_accuracy is None:
             return "nothing measured yet"
         level = f"final {self.metric} {self.arm_accuracy:.4f}"
@@ -514,21 +526,21 @@ class CompressionReport:
     def summary(self) -> str:
         if not self.stages:
             return "nothing measured yet"
-        f, l = self.first, self.last
+        f, last = self.first, self.last
         acc = ""
-        if f.accuracy is not None and l.accuracy is not None:
+        if f.accuracy is not None and last.accuracy is not None:
             if not f.accuracy:
-                acc = f", {l.accuracy:.3f} {self.metric}"
+                acc = f", {last.accuracy:.3f} {self.metric}"
             elif self.recovered:
                 # A delta against the model as handed in is now the sum of two
                 # effects, the compression and the recovery, and must not read
                 # as a cost. The cost line says what is and is not isolated.
                 acc = (f", {f.accuracy:.3f} {self.metric} -> "
-                       f"{l.accuracy:.3f} after recovery")
+                       f"{last.accuracy:.3f} after recovery")
             else:
-                acc = (f", {f.accuracy:.3f} {self.metric} -> {l.accuracy:.3f} "
+                acc = (f", {f.accuracy:.3f} {self.metric} -> {last.accuracy:.3f} "
                        f"({self.accuracy_delta:+.1%} relative, one-shot)")
-        size = (f"{f.size_mb:.0f}MB -> {l.size_mb:.0f}MB "
+        size = (f"{f.size_mb:.0f}MB -> {last.size_mb:.0f}MB "
                 f"({self.size_ratio:.1f}x smaller){acc}")
         return f"{size}. {self.cost_statement}" if self.recovered else size
 

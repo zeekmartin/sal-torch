@@ -263,8 +263,8 @@ def test_the_target_count_is_measured_and_cross_checked():
     m, layers, calib = _fresh()
     rep = prune_model(m, layers, calib, "wanda", SPARSITY,
                       log=lambda *a, **k: None, group_size=2)
-    assert rep["target_params"] == sum(l.weight.numel()
-                                       for l in layers.values())
+    assert rep["target_params"] == sum(lin.weight.numel()
+                                       for lin in layers.values())
     assert rep["grouped"]["target_params_summed"] == rep["target_params"]
     assert rep["layers"] == len(layers)
 
@@ -279,7 +279,7 @@ def test_the_report_describes_the_model_that_now_exists():
     m, layers, calib = _fresh()
     rep = prune_model(m, layers, calib, "wanda", SPARSITY,
                       log=lambda *a, **k: None, group_size=2)
-    zeros = sum(int((l.weight.data == 0).sum()) for l in layers.values())
+    zeros = sum(int((lin.weight.data == 0).sum()) for lin in layers.values())
     assert rep["target_zeros"] == zeros
     assert rep["target_zero_frac"] == pytest.approx(
         zeros / rep["target_params"], abs=1e-12)

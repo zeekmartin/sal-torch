@@ -14,7 +14,7 @@ def _batch(bs=2, sl=16):
 
 def _uniform(layers=4, heads=(1, 5)):
     """Remove the same heads from every layer — the only shape slicing accepts."""
-    return [(l, h) for l in range(layers) for h in heads]
+    return [(layer, h) for layer in range(layers) for h in heads]
 
 
 def test_slice_removes_heads(tiny_model):
@@ -107,12 +107,12 @@ def test_out_of_range_rejected(tiny_model):
     with pytest.raises(SlicingError, match="Layer index out of range"):
         slice_heads(tiny_model, [(9, 1)])
     with pytest.raises(SlicingError, match="Head index out of range"):
-        slice_heads(tiny_model, [(l, 99) for l in range(4)])
+        slice_heads(tiny_model, [(layer, 99) for layer in range(4)])
 
 
 def test_removing_every_head_rejected(tiny_model):
     with pytest.raises(SlicingError, match="Cannot remove all"):
-        slice_heads(tiny_model, [(l, h) for l in range(4) for h in range(8)])
+        slice_heads(tiny_model, [(layer, h) for layer in range(4) for h in range(8)])
 
 
 def test_empty_removal_rejected(tiny_model):
@@ -132,6 +132,6 @@ def test_grouped_query_attention_rejected(tiny_model):
 
 def test_slice_fraction_of_heads(tiny_model):
     """Removing a single head per layer works as well as several."""
-    sliced = slice_heads(tiny_model, [(l, 0) for l in range(4)], verify_input=_batch())
+    sliced = slice_heads(tiny_model, [(layer, 0) for layer in range(4)], verify_input=_batch())
     assert sliced.config.num_attention_heads == 7
     assert sliced.transformer.h[0].attn.q_proj.weight.shape == (56, 64)

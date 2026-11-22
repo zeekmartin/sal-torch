@@ -100,9 +100,9 @@ def draw_plasticity_bars(pmap, ax):
     """Grouped three-axis bars (routing / CKA / MI) per layer onto ``ax``."""
     layers = list(range(pmap.num_layers))
     cka_layer = _cka_per_layer(pmap)
-    routing = [0.0 if np.isnan(pmap.routing.get(l, np.nan)) else pmap.routing[l] for l in layers]
-    cka = [cka_layer[l] for l in layers]
-    mi = [pmap.mutual_info.get(l, 0.0) for l in layers]
+    routing = [0.0 if np.isnan(pmap.routing.get(layer, np.nan)) else pmap.routing[layer] for layer in layers]
+    cka = [cka_layer[layer] for layer in layers]
+    mi = [pmap.mutual_info.get(layer, 0.0) for layer in layers]
 
     x = np.arange(len(layers))
     w = 0.27
@@ -110,7 +110,7 @@ def draw_plasticity_bars(pmap, ax):
     ax.bar(x, cka, w, label="CKA (neighbour)", color="#6a1b9a")
     ax.bar(x + w, mi, w, label="MI (heads)", color="#00838f")
     ax.set_xticks(x)
-    ax.set_xticklabels([str(l) for l in layers])
+    ax.set_xticklabels([str(layer) for layer in layers])
     ax.set_xlabel("layer")
     ax.set_ylabel("score [0-1]")
     ax.set_ylim(0, 1.05)
@@ -122,14 +122,14 @@ def draw_plasticity_bars(pmap, ax):
 def draw_absorption_map(pmap, ax):
     """Colour-coded per-layer absorption strip onto ``ax``."""
     layers = list(range(pmap.num_layers))
-    colors = [_CLASS_COLORS.get(pmap.absorption_map.get(l, ""), "#9e9e9e") for l in layers]
+    colors = [_CLASS_COLORS.get(pmap.absorption_map.get(layer, ""), "#9e9e9e") for layer in layers]
     ax.bar(range(len(layers)), [1] * len(layers), color=colors, width=0.9)
-    for i, l in enumerate(layers):
-        label = pmap.absorption_map.get(l, "?")
+    for i, layer in enumerate(layers):
+        label = pmap.absorption_map.get(layer, "?")
         ax.text(i, 0.5, label, rotation=90, ha="center", va="center",
                 color="white", fontsize=8, fontweight="bold")
     ax.set_xticks(range(len(layers)))
-    ax.set_xticklabels([str(l) for l in layers])
+    ax.set_xticklabels([str(layer) for layer in layers])
     ax.set_yticks([])
     ax.set_xlabel("layer")
     ax.set_title("Absorption map")
@@ -140,9 +140,9 @@ def draw_guard_map(guard, ax):
     """Protected (red) vs trainable (green) heads per layer, onto ``ax``."""
     nl, nh = guard.num_layers, guard.num_heads
     grid = np.zeros((nl, nh))
-    for (l, h) in guard.protected_heads:
-        if 0 <= l < nl and 0 <= h < nh:
-            grid[l, h] = 1.0
+    for (layer, h) in guard.protected_heads:
+        if 0 <= layer < nl and 0 <= h < nh:
+            grid[layer, h] = 1.0
     from matplotlib.colors import ListedColormap
     cmap = ListedColormap([_ELASTIC_COLOR, _SATURATED_COLOR])  # 0 trainable, 1 protected
     ax.imshow(grid, aspect="auto", cmap=cmap, vmin=0, vmax=1)
@@ -158,15 +158,15 @@ def draw_guard_map(guard, ax):
 def draw_drift_bars(report, ax):
     """Per-layer retention bars (CKA, 1=identical); reclassified layers in red."""
     layers = sorted(report.layer_drift.keys())
-    vals = [0.0 if np.isnan(report.layer_drift[l]) else report.layer_drift[l] for l in layers]
-    colors = [_SATURATED_COLOR if l in report.classification_changes else _ELASTIC_COLOR
-              for l in layers]
+    vals = [0.0 if np.isnan(report.layer_drift[layer]) else report.layer_drift[layer] for layer in layers]
+    colors = [_SATURATED_COLOR if layer in report.classification_changes else _ELASTIC_COLOR
+              for layer in layers]
     bars = ax.bar(range(len(layers)), vals, color=colors, width=0.7)
     for b, v in zip(bars, vals):
         ax.text(b.get_x() + b.get_width() / 2, b.get_height(), f"{v:.2f}",
                 ha="center", va="bottom", fontsize=8)
     ax.set_xticks(range(len(layers)))
-    ax.set_xticklabels([str(l) for l in layers])
+    ax.set_xticklabels([str(layer) for layer in layers])
     ax.set_xlabel("layer")
     ax.set_ylabel("activation retention (CKA)")
     ax.set_ylim(0, 1.08)
@@ -385,7 +385,7 @@ def render_drift_pdf(report, path: str):
     draw_drift_bars(report, ax)
     fig.tight_layout()
     png = _fig_to_png(fig)
-    changes = ", ".join(f"L{l}:{a}->{b}" for l, (a, b) in report.classification_changes.items())
+    changes = ", ".join(f"L{layer}:{a}->{b}" for layer, (a, b) in report.classification_changes.items())
     lines = [
         report.summary,
         f"FI before={report.fi_before:.3f}, after={report.fi_after:.3f}",

@@ -549,7 +549,7 @@ def recover_model(model, train_dataset, *,
     hook and still measures the drift, which is how the test that the invariant
     is actually enforced can fail honestly.
     """
-    from sal.fi import _iter_data, _to_dev
+    from sal.fi import _to_dev
 
     if not isinstance(domain, str) or not domain.strip():
         raise ValueError(

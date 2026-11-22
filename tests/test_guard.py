@@ -73,12 +73,12 @@ class TestProtect:
         g.protect(tiny_model)
         _backward_once(tiny_model)
 
-        for (l, h) in g.protected_heads:
-            assert _q_head_grad(tiny_model, l, h) == 0.0
-            assert _o_head_grad(tiny_model, l, h) == 0.0
+        for (layer, h) in g.protected_heads:
+            assert _q_head_grad(tiny_model, layer, h) == 0.0
+            assert _o_head_grad(tiny_model, layer, h) == 0.0
         # At least some trainable head must carry a non-zero gradient.
-        live = [(_q_head_grad(tiny_model, l, h) + _o_head_grad(tiny_model, l, h))
-                for (l, h) in g.trainable_heads]
+        live = [(_q_head_grad(tiny_model, layer, h) + _o_head_grad(tiny_model, layer, h))
+                for (layer, h) in g.trainable_heads]
         assert max(live) > 0.0
         g.release()
 
@@ -90,8 +90,8 @@ class TestProtect:
         assert not g.is_active
         _backward_once(tiny_model)
         # After release, every protected head's gradient flows again.
-        flowed = [(_q_head_grad(tiny_model, l, h) + _o_head_grad(tiny_model, l, h))
-                  for (l, h) in g.protected_heads]
+        flowed = [(_q_head_grad(tiny_model, layer, h) + _o_head_grad(tiny_model, layer, h))
+                  for (layer, h) in g.protected_heads]
         assert max(flowed) > 0.0
 
     def test_protect_is_reentrant(self, tiny_model, probe_data):

@@ -104,7 +104,7 @@ def test_size_mb_shrinks_with_bits(mod):
 def test_uniform_heads_same_count_per_layer_and_deterministic(mod):
     a = mod.uniform_random_heads(4, 12, 0.5, 7)
     assert a == mod.uniform_random_heads(4, 12, 0.5, 7)
-    assert all(sum(1 for l, _ in a if l == layer) == 6 for layer in range(4))
+    assert all(sum(1 for li, _ in a if li == layer) == 6 for layer in range(4))
 
 
 # ------------------------------------------------------------------ end to end

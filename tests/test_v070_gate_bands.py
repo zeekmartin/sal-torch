@@ -167,7 +167,6 @@ def test_an_unknown_band_raises():
 # ----------------------------------------------------------------- provenance
 def _staged(tmp_path, commit="0" * 40, dirty=False, tamper=False):
     """A staged package plus its sidecar, exactly as the cluster holds one."""
-    import hashlib
     import json
     import types
 

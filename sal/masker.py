@@ -235,10 +235,10 @@ class HeadMasker:
         if self.config.uniform_per_layer:
             self._deactivate_balanced_heads(n)
             return
-        active = [(l, h)
-                  for l in range(self.config.num_layers)
+        active = [(layer, h)
+                  for layer in range(self.config.num_layers)
                   for h in range(self.config.num_heads_per_layer)
-                  if self._masks[l][h].item() == 1.0]
+                  if self._masks[layer][h].item() == 1.0]
         for li, hi in self.rng.sample(active, min(n, len(active))):
             self._masks[li][hi] = 0.0
 
@@ -255,14 +255,14 @@ class HeadMasker:
         :func:`sal.slice_heads` argument — see :meth:`pruned_heads`.
         """
         for _ in range(n):
-            pruned = {l: int((self._masks[l] == 0.0).sum().item())
-                      for l in range(self.config.num_layers)}
-            candidates = [l for l in range(self.config.num_layers)
-                          if pruned[l] < self.config.num_heads_per_layer]
+            pruned = {li: int((self._masks[li] == 0.0).sum().item())
+                      for li in range(self.config.num_layers)}
+            candidates = [li for li in range(self.config.num_layers)
+                          if pruned[li] < self.config.num_heads_per_layer]
             if not candidates:
                 return
-            fewest = min(pruned[l] for l in candidates)
-            layer = self.rng.choice([l for l in candidates if pruned[l] == fewest])
+            fewest = min(pruned[li] for li in candidates)
+            layer = self.rng.choice([li for li in candidates if pruned[li] == fewest])
             free = (self._masks[layer] == 1.0).nonzero(as_tuple=True)[0].tolist()
             self._masks[layer][self.rng.choice(free)] = 0.0
 

@@ -38,8 +38,8 @@ def test_pipeline_scan(pipe):
 def test_pipeline_select_heads_is_uniform(pipe):
     heads = pipe.select_heads(0.25)
     by_layer = {}
-    for l, h in heads:
-        by_layer.setdefault(l, []).append(h)
+    for layer, h in heads:
+        by_layer.setdefault(layer, []).append(h)
     assert sorted(by_layer) == [0, 1, 2, 3]
     assert {len(v) for v in by_layer.values()} == {2}      # 25% of 8 heads
 
@@ -191,8 +191,8 @@ def test_selection_strategies_match_total_count(pipe):
         heads = pipe.select_heads(0.25, strategy=strategy)
         counts[strategy] = len(heads)
         by_layer = {}
-        for l, h in heads:
-            by_layer.setdefault(l, []).append(h)
+        for layer, h in heads:
+            by_layer.setdefault(layer, []).append(h)
         assert {len(v) for v in by_layer.values()} == {2}   # uniform
     assert counts["magnitude"] == counts["random"] == 8
 
@@ -209,8 +209,8 @@ def test_magnitude_picks_the_weakest_heads(pipe):
     norms = pipe._head_norms()
     chosen = set(pipe.select_heads(0.25, "magnitude"))
     for li in range(4):
-        picked = sorted(n for (l, h), n in norms.items() if l == li and (l, h) in chosen)
-        kept = sorted(n for (l, h), n in norms.items() if l == li and (l, h) not in chosen)
+        picked = sorted(n for (layer, h), n in norms.items() if layer == li and (layer, h) in chosen)
+        kept = sorted(n for (layer, h), n in norms.items() if layer == li and (layer, h) not in chosen)
         assert max(picked) <= min(kept)
 
 
@@ -231,10 +231,10 @@ def test_fi_guided_respects_layer_classes(pipe):
     critical = {li for li, c in layer_map.items()
                 if getattr(c, "value", str(c)) == "CRITICAL"}
     heads = pipe.select_heads(0.25, "fi_guided")
-    assert not ({l for l, _ in heads} & critical)
+    assert not ({layer for layer, _ in heads} & critical)
     by_layer = {}
-    for l, h in heads:
-        by_layer.setdefault(l, []).append(h)
+    for layer, h in heads:
+        by_layer.setdefault(layer, []).append(h)
     assert all(len(v) <= 7 for v in by_layer.values())
 
 
