@@ -34,7 +34,12 @@ hf = ["transformers>=4.38"]
 reports = ["matplotlib", "fpdf2"]
 crypto = ["PyNaCl>=1.5.0"]
 quant = ["bitsandbytes>=0.43"]
-dev = ["pytest>=7.0", "pytest-cov", "ruff"]
+# ruff carries an upper bound because it is a CI GATE, not a convenience: an
+# unpinned linter can fail a build on a day nobody touched the code, which is
+# what happened the first time this step ran. `select` in [tool.ruff.lint]
+# makes the rule set ours, and the bound keeps a minor release from changing
+# what the gate means before anyone has looked.
+dev = ["pytest>=7.0", "pytest-cov", "ruff>=0.15,<0.18"]
 all = ["sal-torch[hf,reports,crypto,quant,dev]"]
 
 [tool.hatch.build.targets.wheel]
@@ -80,7 +85,20 @@ addopts = "-v --tb=short"
 [tool.ruff]
 src = ["sal", "tests"]
 
+# `select` is explicit, and that is the point. Configured with `ignore`
+# alone, the rule set is "whatever this version of ruff defaults to, minus
+# these four" -- which is not a decision, and it changed under us: the first
+# CI run of this lint step passed locally on ruff 0.15.14 and failed on the
+# 0.17.6 that pip resolved, with 291 findings across UP, I, RUF, PLR, ISC and
+# BLE, because 0.17 widened the default set. A gate whose rules change when a
+# dependency releases is not a gate.
+#
+# E4, E7, E9 and F are ruff's historical default and exactly the set the 152
+# findings were reviewed and decided under. Widening it is a separate
+# decision with its own diff, not something a version bump should make for
+# us: pyupgrade alone would be 94 changes to shipped library code.
 [tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
 ignore = ["E701", "E702", "E401", "E731"]
 
 # Deliberate, not an oversight: these imports follow a sys.path manipulation
