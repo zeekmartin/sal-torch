@@ -1,5 +1,83 @@
 # Changelog
 
+## [0.7.1] - 2026-11-22
+
+**A safety patch, and nothing else.** One behaviour changes: `recover()` now
+stops on an absurd gradient instead of clipping it away. No new API, no new
+claim, no figure revised.
+
+### Why
+
+A compression campaign ran two fine-tuning arms for 1221 steps each with
+pre-clip gradient norms between 1e14 and 1e15 -- every single step past any
+sane bound -- inside this package's `recover()`. Both finished. Both returned
+a record with a loss curve that moved. Neither model had learned: the control
+arm's accuracy after 10 million tokens of fine-tuning was 52.97% against the
+untrained model's 53.23%.
+
+With `max_grad_norm=1.0` the clip divided every parameter's step by about
+2e-16, which is the quiet failure this patch exists to stop: a run that
+completes, a record that looks populated, and a model that is unchanged.
+`recover()` already recorded `grad_norm_max` and nothing read it, and it
+already raised on a non-finite **loss**, which a finite loss with an exploded
+gradient sails straight past.
+
+### Changed
+
+- `recover()` raises `RecoveryError` on the **first** step whose pre-clip
+  gradient norm is non-finite or past `GRADIENT_NORM_BOUND = 1e4`. On the
+  first step, not on a summary at the end: a guard that reports afterwards
+  has already spent the budget it was meant to protect. The message names the
+  attention implementation, the autocast dtype and the model type -- none of
+  which is obvious at the call site, since `attn_implementation` is usually
+  whatever `from_pretrained` chose -- and quotes the measured comparison, so
+  the reader knows what to change.
+- It fires with `max_grad_norm=None` too. That is the configuration in which
+  an explosion moves the weights instead of freezing them, and a guard that
+  only worked when clipping is on would miss it.
+- `grad_norm_bound=` is a parameter with that default, so a caller whose
+  model genuinely has gradients this large can proceed knowingly.
+- The returned record now carries the attention implementation, so a result
+  says what it ran under and not only what it measured.
+
+### The bound is measured, not chosen
+
+A probe ran the same 15 steps on the same batches under four
+attention/precision combinations on Qwen2.5-1.5B, on AMD MI250X:
+
+| attention | precision | pre-clip max | median | loss over 15 steps |
+|---|---|---|---|---|
+| SDPA | bf16 autocast | **6.93e14** | 1.53e14 | 11.81 -> **12.74** |
+| eager | bf16 autocast | **498.7** | 38.1 | 11.72 -> **7.12** |
+| SDPA | fp32 | **610.4** | 33.4 | 11.85 -> **6.21** |
+
+Either change removes it, so it is the **interaction** of SDPA with bfloat16
+autocast and not either one alone. Healthy observations now span 46.81 to
+992.6 across six archived decoder recoveries under the same bf16 autocast,
+plus the 498.7 and 610.4 above. 1e4 is ten times above the worst of them and
+ten orders of magnitude below the failure, and a test asserts every archived
+maximum still clears it: a bound that retroactively condemned healthy
+published work would be the wrong bound.
+
+The failure is **model-dependent**. OPT-1.3B is healthy at the same precision
+and attention, every archived loss curve falls, and **no figure this project
+has published is affected.**
+
+### Added
+
+- A known-issues entry in the README with the numbers and the workaround for
+  anyone on a release before this one.
+- Twelve tests, every one of which executes the loop rather than asserting
+  that a line of source is present.
+
+### Not in this release
+
+The unstructured and 2:4 pruners are **not** here. They are written and
+tested, and they wait for their reproduction gate against the archived cells
+before they ship, in v0.8.0. This tag is cut from a maintenance branch for
+that reason: a safety patch should carry the safety fix and no new surface.
+
+
 ## [0.7.0] — 2026-11-21
 
 **The release that made the published numbers into product claims.** Until
