@@ -346,6 +346,87 @@ def select_precision(device_type: str, requested=None, *, supports_bf16=None):
                                        else ""))
 
 
+#: The pre-clip gradient norm past which a recovery stops rather than clips.
+#: Measured, not chosen: a probe on Qwen2.5-1.5B (job 23937845) ran the same
+#: 15 steps on the same batches under four attention/precision combinations
+#: and found healthy maxima of **498.7** (eager attention, bfloat16 autocast)
+#: and **610.4** (SDPA, fp32), with medians of 38 and 33 -- the same band the
+#: campaign's GPT-2 note quotes for eager, "15-140". The failing combination,
+#: SDPA under bfloat16 autocast, reached **6.93e14** on every one of its 15
+#: steps.
+#:
+#: So 1e4 sits about twenty times above the worst healthy observation and ten
+#: orders of magnitude below the failure. A gradient in between is not a
+#: large gradient, it is a different phenomenon: clipping it to 1.0 divides
+#: every parameter's step by about 1e14, and the run reports a loss curve
+#: that moves and a model that has not learned.
+GRADIENT_NORM_BOUND = 1.0e4
+
+
+def describe_attention(model) -> dict:
+    """The model's attention implementation and type, for the message.
+
+    A guard that says "your gradients exploded" without saying under which
+    attention implementation sends the reader back to the experiment that
+    produced it. Both facts are available, and neither is obvious at the call
+    site: `attn_implementation` is usually chosen by `from_pretrained`'s
+    default rather than by the caller.
+    """
+    cfg = getattr(model, "config", None)
+    attn = (getattr(cfg, "_attn_implementation", None)
+            or getattr(cfg, "attn_implementation", None)
+            or "unknown (the model's config does not say)")
+    return {"attn_implementation": attn,
+            "model_type": getattr(cfg, "model_type", None)}
+
+
+def check_gradient_norm(norm: float, step: int, model, amp_dtype,
+                        bound: float = GRADIENT_NORM_BOUND) -> None:
+    """Stop on the FIRST absurd pre-clip gradient norm.
+
+    Not on a summary at the end. `recover_model` has always recorded
+    `grad_norm_max` and nothing read it: the B3 pilot's arms B and C each ran
+    1221 steps between 1e14 and 1e15, every step past this bound, and both
+    reported a loss curve that moved and a model that had not changed -- arm
+    B's accuracy after 10M tokens of fine-tuning was 52.97% against the
+    untrained model's 53.23%. A guard that reports after the run has already
+    spent the budget it was meant to protect.
+
+    The non-finite case is separate and was never covered at all:
+    `recover_model` raises on a non-finite LOSS, and a finite loss with an
+    infinite gradient passes that check untouched.
+    """
+    finite = (norm == norm) and norm not in (float("inf"), float("-inf"))
+    if finite and abs(norm) <= bound:
+        return
+
+    info = describe_attention(model)
+    if not finite:
+        what = "is not finite"
+        factor = "a very large factor"
+    else:
+        what = "is %.4g, past the %.4g bound" % (norm, bound)
+        factor = "1/%.4g" % norm if norm else "a very large factor"
+
+    nl = chr(10)
+    lines = [
+        "the gradient norm at step %d %s, BEFORE clipping." % (step, what),
+        "Clipping it would scale every parameter's step by about %s, and the "
+        "run would report a loss curve that moves and a model that has not "
+        "learned." % factor,
+        "attention implementation: %r; autocast: %s; model_type: %r."
+        % (info["attn_implementation"], amp_dtype, info["model_type"]),
+        "On AMD MI250X this is measured to happen with SDPA attention under "
+        "bfloat16 autocast: the same model and the same batches reach 6.93e14 "
+        "that way, against 498.7 with eager attention at the same precision "
+        "and 610.4 with SDPA in fp32.",
+        "Load the model with attn_implementation=\"eager\", or drop the "
+        "autocast. Eager costs about 6 GiB more on a 1.5B model.",
+        "If this model genuinely has gradients this large, pass a larger "
+        "grad_norm_bound= knowingly.",
+    ]
+    raise RecoveryError(nl.join(lines))
+
 def backward_and_clip(loss, params, max_grad_norm, optimizer, scaler=None):
     """One backward, one clip, one step, in the order that keeps the log true.
 
@@ -488,6 +569,7 @@ def recover_model(model, train_dataset, *,
                   weight_decay: float = 0.05,
                   batch_size: int = 8,
                   max_grad_norm: Optional[float] = 1.0,
+                  grad_norm_bound: float = GRADIENT_NORM_BOUND,
                   schedule: str = "warmup_cosine",
                   warmup_ratio: float = 0.05,
                   max_lr: Optional[float] = None,
@@ -652,8 +734,12 @@ def recover_model(model, train_dataset, *,
                 # clipping asked for, an infinite bound measures without
                 # scaling anything.
                 lr_curve.append(float(opt.param_groups[0]["lr"]))
-                grad_norms.append(backward_and_clip(
-                    loss, params, max_grad_norm, opt, scaler))
+                norm = backward_and_clip(loss, params, max_grad_norm, opt,
+                                         scaler)
+                grad_norms.append(norm)
+                # On the FIRST offending step, not on a summary at the end.
+                check_gradient_norm(norm, step, model, amp_dtype,
+                                    grad_norm_bound)
                 opt.zero_grad(set_to_none=True)
                 # Not after the final optimizer step. Both schedules are
                 # unclamped past the planned end, exactly as torch's is, where
@@ -700,6 +786,8 @@ def recover_model(model, train_dataset, *,
         "shuffle": bool(shuffle), "order": order_label,
         "head_lr_multiplier": head_lr_multiplier,
         "max_grad_norm": max_grad_norm,
+        "grad_norm_bound": grad_norm_bound,
+        "attention": describe_attention(model),
         "amp_dtype": (None if amp_dtype is None else str(amp_dtype)),
         "amp_requested": (None if amp_requested is None else str(amp_requested)),
         "amp_note": amp_note,

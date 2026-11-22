@@ -112,6 +112,28 @@ Training-time sparsification that makes neural networks structurally resilient t
 > checkpoint reads 78.44% on it against the 80.3% on its card, the difference
 > being the resize and centre crop. All comparisons are internal to that setting.
 
+## Known issues
+
+**Exploding recovery gradients with SDPA attention under bfloat16 autocast on
+AMD MI250X.** Measured on Qwen2.5-1.5B: the same model, the same batches and
+the same 15 steps reach a pre-clip gradient norm of **6.93e14** under SDPA
+with bf16 autocast, against **498.7** with `attn_implementation="eager"` at
+the same precision and **610.4** with SDPA in fp32. With `max_grad_norm=1.0`
+the clip then scales every step by about 1e-14, so **`recover()` finishes,
+reports a loss curve that moved, and the model has not learned**: a 10M-token
+fine-tune left accuracy at 52.97% against the untrained model's 53.23%.
+
+It is model-dependent and not universal. OPT-1.3B under the same precision is
+healthy, with pre-clip maxima of 46.81 to 992.6 across six archived recovery
+runs, every loss curve falling, so no published figure in this repository is
+affected.
+
+**Until v0.7.1**, load the model with `attn_implementation="eager"` (about
+6 GiB more on a 1.5B model) or train without the autocast, and read
+`grad_norm_max` on the returned record: anything past about 1e4 is not a
+large gradient, it is this. v0.7.1 makes `recover()` raise on the first such
+step instead of clipping it away.
+
 ## Install
 
 ```bash
