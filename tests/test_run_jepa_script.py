@@ -294,3 +294,100 @@ def test_summary_table_falls_back_to_ascii(mod, monkeypatch):
     out.encode("cp1252")                       # the whole point: this must not raise
     assert "+" in out and "|" in out
     assert "┌" not in out
+
+
+def test_the_space_probe_is_removed_and_is_small_under_smoke(patched,
+                                                             tmp_path):
+    """A 2.43 GB probe was found left behind on a disk with 3% free.
+
+    Two things are asserted, because the first alone was already true and
+    did not help. The `finally` in `check_output_space` does delete the
+    probe; what left one behind was the suite being killed under memory
+    pressure, and a killed process runs no `finally`. So the probe's SIZE
+    under `--smoke` is the property that matters: a smoke run cannot leave
+    2.4 GB behind if it never writes it.
+
+    The 2.5 GB headroom is for `save_pretrained` on a real checkpoint. A
+    smoke model is a four-layer toy of a few megabytes, so that floor was
+    the entire probe.
+    """
+    mod = patched
+    out = tmp_path / "results"
+    out.mkdir(parents=True, exist_ok=True)
+
+    class Tiny:
+        def parameters(self):
+            import torch
+            return iter([torch.zeros(1000)])
+
+    sizes = []
+    real_open = open
+
+    def watching_open(path, mode="r", *a, **kw):
+        f = real_open(path, mode, *a, **kw)
+        if str(path).endswith(".space_probe"):
+            sizes.append(str(path))
+        return f
+
+    import builtins
+    builtins.open = watching_open
+    try:
+        mod.check_output_space(out, Tiny(),
+                              headroom_gb=mod.SMOKE_HEADROOM_GB)
+    finally:
+        builtins.open = real_open
+
+    probe = out / ".space_probe"
+    assert not probe.exists(), (
+        "the probe must be gone when the call returns; it is %d bytes"
+        % (probe.stat().st_size if probe.exists() else 0))
+    assert sizes, "no probe was written, so this test checked nothing"
+
+    # And the smoke headroom really is small, which is what bounds the
+    # damage when a `finally` never runs.
+    assert mod.SMOKE_HEADROOM_GB <= 0.1
+    assert mod.SAVE_HEADROOM_GB == 2.5
+
+
+def test_a_failing_probe_still_removes_the_file(patched, tmp_path):
+    """The `finally` path, executed: the probe is gone after an OSError too."""
+    mod = patched
+    out = tmp_path / "results"
+    out.mkdir(parents=True, exist_ok=True)
+
+    class Tiny:
+        def parameters(self):
+            import torch
+            return iter([torch.zeros(10)])
+
+    real_open = open
+
+    def failing_open(path, mode="r", *a, **kw):
+        if str(path).endswith(".space_probe"):
+            f = real_open(path, mode, *a, **kw)
+
+            class Boom:
+                def __enter__(self_inner):
+                    return self_inner
+
+                def __exit__(self_inner, *exc):
+                    f.close()
+                    return False
+
+                def write(self_inner, _b):
+                    raise OSError("simulated quota")
+            return Boom()
+        return real_open(path, mode, *a, **kw)
+
+    import builtins
+    import pytest as _pytest
+    builtins.open = failing_open
+    try:
+        with _pytest.raises(RuntimeError, match="Cannot reserve"):
+            mod.check_output_space(out, Tiny(),
+                                   headroom_gb=mod.SMOKE_HEADROOM_GB)
+    finally:
+        builtins.open = real_open
+
+    assert not (out / ".space_probe").exists(), (
+        "a failed probe must still be removed")

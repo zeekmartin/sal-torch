@@ -639,14 +639,37 @@ def _checkpoint_gb(model, with_optimizer: bool = True) -> float:
     return n * (12 if with_optimizer else 4) / 1e9
 
 
-def check_output_space(outdir: Path, model, with_optimizer: bool = True):
+#: Headroom added to the checkpoint's own size, for what `save_pretrained`
+#: needs while it writes. The default is for a real run.
+SAVE_HEADROOM_GB = 2.5
+
+#: Headroom under ``--smoke``. A smoke run's model is a four-layer toy whose
+#: checkpoint is a few megabytes, so the 2.5 GB floor was the ENTIRE probe:
+#: every smoke run, and every test that drives one, wrote and deleted 2.5 GB.
+#:
+#: That is not hypothetical. A 2.43 GB `.space_probe` was found in
+#: `pytest-of-41763/pytest-711/test_smoke_run_end_to_end_no_c0/results/` on a
+#: machine with 3% of its system disk free. The `finally` below does remove
+#: it -- what left it behind was the suite being killed under memory
+#: pressure, and `finally` does not run when the process is killed. The fix
+#: is therefore not more cleanup but a probe whose size matches the run: a
+#: smoke run cannot leave 2.4 GB behind if it never writes it.
+SMOKE_HEADROOM_GB = 0.05
+
+
+def check_output_space(outdir: Path, model, with_optimizer: bool = True,
+                       headroom_gb: float = SAVE_HEADROOM_GB):
     """Fail before training rather than after it.
 
     A quota is not visible in ``df``: a RunPod network volume reports hundreds of
     terabytes free while refusing to write a single gigabyte. So this actually
     writes a probe file of the size a checkpoint will need.
+
+    The probe is removed in a ``finally``, and that is not enough on its own:
+    a process killed by the OS runs no ``finally``. ``headroom_gb`` is what
+    keeps the worst case small when the run itself is small.
     """
-    need = _checkpoint_gb(model, with_optimizer) + 2.5    # + save_pretrained
+    need = _checkpoint_gb(model, with_optimizer) + headroom_gb
     free = _free_gb(outdir)
     log(f"  output space: {free:.1f}GB reported free, ~{need:.1f}GB needed")
 
@@ -1253,7 +1276,10 @@ def main(argv=None):
     # 5 -------------------------------------------------------- SAL training
     rule(f"SAL training ({epochs} epochs, mask_ratio={args.mask_ratio})")
     if not args.no_space_check:
-        check_output_space(outdir, model)
+        check_output_space(
+            outdir, model,
+            headroom_gb=(SMOKE_HEADROOM_GB if args.smoke
+                         else SAVE_HEADROOM_GB))
     from sal import SALConfig
     from sal.trainer import SALTrainer
 
