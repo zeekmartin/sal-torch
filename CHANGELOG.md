@@ -20,6 +20,18 @@ requires. Both are **v0.8.0 items**.
   cost come from two code paths. **v0.8.0: a documented way to train a
   matched dense control through the same object.**
 
+- **Head slicing cannot reach a grouped-query model, so neither can
+  `compress(slice_heads=True)`.** `slice_heads` refuses a GQA model, and the
+  refusal is **right**: removing query heads without removing whole KV groups
+  would corrupt the query-to-group mapping and return a model that runs and
+  is wrong. The consequence is that the pipeline's head-slicing path cannot
+  run on a modern decoder at all, since GQA is now the norm there, and the
+  only available mode is `slice_heads=False`, which masks and therefore
+  changes neither size nor speed. A user who wants a genuinely smaller
+  decoder has no path through the pipeline. **v0.8.0: slice whole KV groups,
+  so a GQA model can be pruned at group granularity, or state the limit in
+  `compress()`'s own error rather than leaving it to `slicing`.**
+
 - **`compress()` cannot reach every pruning method the package exports.**
   `prune_unstructured` and `prune_2of4` are public API, exported from `sal`
   and listed in `__all__`, and `compress()` takes head pruning and

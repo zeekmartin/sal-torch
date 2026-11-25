@@ -891,6 +891,13 @@ sal-torch on the target device.
     in this project is measured against, while `recover(control=...)` accepts
     one. The two halves of a single cost therefore come from two code paths.
     Fix: a documented way to train a matched control through the same object.
+  - **head slicing refuses a grouped-query model**, correctly, because
+    removing query heads without whole KV groups would corrupt the
+    query-to-group mapping. Since GQA is the norm in modern decoders, the
+    pipeline's head-slicing path cannot run on one, and the only mode left
+    masks rather than shrinks. Fix: slice whole KV groups so a GQA model can
+    be pruned at group granularity, or raise the limit from `compress()`
+    rather than from `slicing`.
   - **`compress()` cannot reach `prune_unstructured` or `prune_2of4`**, both
     of which are public API exported from `sal`. Unstructured and 2:4
     sparsity cannot be driven through the pipeline at all, so a measurement
