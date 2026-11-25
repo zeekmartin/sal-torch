@@ -891,6 +891,31 @@ sal-torch on the target device.
     in this project is measured against, while `recover(control=...)` accepts
     one. The two halves of a single cost therefore come from two code paths.
     Fix: a documented way to train a matched control through the same object.
+  - **the default calibration path runs with gradients enabled**:
+    `sparsity.prune_model` delegates to a grouped helper carrying
+    `@torch.no_grad()` and its own fall-through loop has none, and that loop
+    is the default of `prune_unstructured` and `prune_2of4`. Verified by
+    execution. Fix: the same decorator on both paths.
+  - **an evaluation does not chunk its batch**, so a decoder measurement
+    holds one fp32 logits copy of 4.64 GiB at batch 4 and sequence 2048 over
+    a 152 064-token vocabulary, with cross-entropy needing more than one.
+    Fix: chunk over the batch, or refuse and say what to pass.
+  - **reports do not distinguish masked from removed parameters**, and
+    `size_ratio` reads 1.0 for a masked model. Fix: say which, and refuse a
+    size or speed figure for a model whose parameters were only zeroed.
+  - **the checkpointing contract is left to the caller and failing it is
+    silent**, producing a gradient of exactly 0.0 with a loss curve that
+    moves. Fix: apply both halves automatically on a frozen-base model, and
+    raise on a trainable parameter whose gradient is zero for a whole epoch.
+  - **nothing makes a seed reach data sampling**, so a seed can be a dead
+    input: one campaign produced 55 bit-identical cells over ten seeds. Fix:
+    two seeds producing byte-identical training data is an error.
+  - **eager attention is not selected automatically where SDPA is unsafe**,
+    and the unsafe combination returns finite logits with corrupted
+    gradients. Fix: detect it at load, select eager or refuse.
+  - **latency is reported as a mean**, which one kernel-compilation outlier
+    of 58.4 s against a 1.913 s median moves by a factor of thirty. Fix: a
+    median with the first observation excluded and the count stated.
   - **head slicing refuses a grouped-query model**, correctly, because
     removing query heads without whole KV groups would corrupt the
     query-to-group mapping. Since GQA is the norm in modern decoders, the

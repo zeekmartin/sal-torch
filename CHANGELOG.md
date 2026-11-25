@@ -20,6 +20,68 @@ requires. Both are **v0.8.0 items**.
   cost come from two code paths. **v0.8.0: a documented way to train a
   matched dense control through the same object.**
 
+- **The default calibration path runs with gradients enabled.**
+  `sparsity.prune_model` routes on `group_size`: the grouped helper it
+  delegates to carries `@torch.no_grad()`, and the fall-through loop does
+  not. That loop is what runs when `group_size` is absent, which is the
+  default of both `prune_unstructured` and `prune_2of4`, so the calibration
+  forward builds the autograd graph and retains every activation it never
+  uses. Verified by executing it: a model whose `forward` records the grad
+  state reports `grad_enabled=True` and an output with a `grad_fn`. On a
+  decoder this is gigabytes during a pass that needs none. **v0.8.0: the
+  same decorator on both paths.**
+
+- **An evaluation does not chunk its batch, so a decoder measurement holds
+  logits proportional to the whole batch.** With `metric="loss"` at batch 4
+  and sequence 2048 over a 152 064-token vocabulary, one fp32 copy of the
+  logits is **4.64 GiB**, and cross-entropy needs more than one. A caller
+  gets no warning and no bound; the pipeline passes its own `batch_size`
+  straight through. **v0.8.0: chunk the measurement over the batch, or refuse
+  a batch whose logits would exceed a stated bound and say what to pass.**
+
+- **Reports do not distinguish masked parameters from removed ones.** A
+  masked head and a sliced head cost the same accuracy and nothing like the
+  same bytes, and `size_ratio` reads 1.0 for a masked model with no
+  indication that the compression was notional. **v0.8.0: a report states
+  which it was, and refuses to present a size or speed figure for a model
+  whose parameters were only zeroed.**
+
+- **The checkpointing contract is left to the caller and failing it is
+  silent.** Reentrant checkpointing cuts the gradient to a parameter inside a
+  block when no input to that block requires grad, which is every
+  frozen-base configuration. `use_reentrant=False` and
+  `enable_input_require_grads()` are applied together because they fail
+  differently, and getting it wrong produces a gradient of exactly 0.0 with a
+  loss curve that still moves: 1220 of 1220 steps on three arms of one
+  measured run. **v0.8.0: apply both when checkpointing is enabled on a model
+  with frozen parameters, and raise on a trainable parameter whose gradient is
+  exactly zero for a whole epoch**, which is the zero-gradient half of the
+  guard v0.7.1 shipped for an absurd one.
+
+- **Nothing makes a seed reach data sampling.** `torch.manual_seed(seed)`
+  followed by no draw is a dead input, and no part of the package notices. A
+  measured campaign produced **55 cells over ten seeds that were
+  bit-identical**, and a paired 95% interval over them had a standard
+  deviation of exactly zero. `recover()` already reshuffles per epoch from
+  its seed, which is right; what is missing is a documented contract and a
+  guard. **v0.8.0: two seeds that produce byte-identical training data are an
+  error, not a coincidence.**
+
+- **Eager attention is not selected automatically where SDPA is unsafe.**
+  Under SDPA with bfloat16 autocast on MI250X, a decoder returns finite
+  logits and corrupted gradients: measured pre-clip norms of 7.7e13, 3.6e18
+  and `inf` inside 40 steps against 15 to 140 under eager, after which
+  gradient clipping scales every step by `1/inf = 0` and nothing is learned.
+  A forward-only check passes. **v0.8.0: detect the combination at load and
+  either select eager or refuse with the measurement**, rather than leaving
+  it to release notes.
+
+- **Latency is reported as a mean.** The first step of a measured loop on
+  this hardware includes kernel compilation: **58.4 s against a 1.913 s
+  median**, a factor of thirty, so a five-step mean of 13.2 s is not a number
+  about anything. **v0.8.0: report a median with the first observation
+  excluded and the count stated.**
+
 - **Head slicing cannot reach a grouped-query model, so neither can
   `compress(slice_heads=True)`.** `slice_heads` refuses a GQA model, and the
   refusal is **right**: removing query heads without removing whole KV groups
