@@ -1,5 +1,34 @@
 # Changelog
 
+## [Unreleased]
+
+### Two gaps in `CompressionPipeline`, found by driving it end to end
+
+Both were found by using the documented public API on a decoder, not by a
+unit test, and neither revises a published figure. What they mean is that the
+pipeline cannot express something the package already supports or already
+requires. Both are **v0.8.0 items**.
+
+- **The pipeline cannot produce the matched control its own cost convention
+  requires.** `recover()` raises `recover() repairs what compress() damaged,
+  so it runs after it`, so it refuses to fine-tune a model that was never
+  compressed. Meanwhile `recover(control=...)` **accepts** a control to
+  compare against, and every pruning cost this project publishes is measured
+  as the arm minus a dense control trained for the **same** budget on the
+  **same** data. So a user following the documented convention has to leave
+  the pipeline to produce half of the comparison, and the two halves of one
+  cost come from two code paths. **v0.8.0: a documented way to train a
+  matched dense control through the same object.**
+
+- **`compress()` cannot reach every pruning method the package exports.**
+  `prune_unstructured` and `prune_2of4` are public API, exported from `sal`
+  and listed in `__all__`, and `compress()` takes head pruning and
+  quantization only. So unstructured and 2:4 sparsity cannot be driven
+  through the pipeline at all, and a measurement of them is not a measurement
+  of the shipped pipeline. **v0.8.0: `compress()` reaches every pruning
+  method `sal` exports, or the pipeline states which it does not reach and
+  why.**
+
 ## [0.7.1] - 2026-11-22
 
 **A safety patch, and nothing else.** One behaviour changes: `recover()` now

@@ -884,6 +884,19 @@ sal-torch on the target device.
   on the target runtime (PyTorch, ONNX Runtime, TensorRT, OpenVINO) at every
   compression stage, **reported per batch size**, since v0.6.x showed the
   batch-1 and batch-32 pictures are entirely different.
+- **Pipeline completeness**, two gaps found by driving `CompressionPipeline`
+  end to end on a decoder through its documented API:
+  - **`recover()` refuses to fine-tune an uncompressed model**, so the
+    pipeline cannot produce the matched dense control that every pruning cost
+    in this project is measured against, while `recover(control=...)` accepts
+    one. The two halves of a single cost therefore come from two code paths.
+    Fix: a documented way to train a matched control through the same object.
+  - **`compress()` cannot reach `prune_unstructured` or `prune_2of4`**, both
+    of which are public API exported from `sal`. Unstructured and 2:4
+    sparsity cannot be driven through the pipeline at all, so a measurement
+    of either is not a measurement of the shipped pipeline. Fix: `compress()`
+    reaches every pruning method the package exports, or the pipeline states
+    which it does not and why.
 - **Batch optimization** — resolve the padding overhead identified in v0.4.0
   (batched inference slower than single-sample on short texts). Fixed shapes +
   dynamic batching + sequence bucketing.
