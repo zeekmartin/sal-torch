@@ -20,6 +20,19 @@ requires. Both are **v0.8.0 items**.
   cost come from two code paths. **v0.8.0: a documented way to train a
   matched dense control through the same object.**
 
+- **`quantize(method="int4")` has no backend outside CUDA plus
+  bitsandbytes, and the simulated round-trip the published INT4 figures rest
+  on is not in the package.** `available_backends("int4")` returns an empty
+  list wherever bitsandbytes NF4 is unavailable, `torch.ao` has no int4
+  dynamic path, and the documented example `quantize(model, method="int4")`
+  therefore raises. Meanwhile every INT4 accuracy this project publishes was
+  produced by a per-channel fake-quantize round-trip that lives in a
+  repository script, which the results pages describe as "a simulated
+  per-channel quantize/dequantize round-trip". A user cannot reproduce the
+  published INT4 column with the shipped API. **v0.8.0: ship that round-trip
+  as a documented backend that names itself a simulation**, so the column is
+  reproducible from the package.
+
 - **The default calibration path runs with gradients enabled.**
   `sparsity.prune_model` routes on `group_size`: the grouped helper it
   delegates to carries `@torch.no_grad()`, and the fall-through loop does

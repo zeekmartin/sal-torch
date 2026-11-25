@@ -891,6 +891,12 @@ sal-torch on the target device.
     in this project is measured against, while `recover(control=...)` accepts
     one. The two halves of a single cost therefore come from two code paths.
     Fix: a documented way to train a matched control through the same object.
+  - **`quantize(method="int4")` has no backend outside CUDA plus
+    bitsandbytes**, so the documented example raises wherever NF4 is
+    unavailable, while the published INT4 column was produced by a
+    per-channel fake-quantize round-trip that lives in a repository script
+    rather than in the package. Fix: ship that round-trip as a documented
+    backend that names itself a simulation.
   - **the default calibration path runs with gradients enabled**:
     `sparsity.prune_model` delegates to a grouped helper carrying
     `@torch.no_grad()` and its own fall-through loop has none, and that loop
