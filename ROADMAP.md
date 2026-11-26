@@ -929,6 +929,17 @@ sal-torch on the target device.
     masks rather than shrinks. Fix: slice whole KV groups so a GQA model can
     be pruned at group granularity, or raise the limit from `compress()`
     rather than from `slicing`.
+  - **recovery clips gradients with the single-device helper**, which is the
+    wrong one for a model whose parameters are sharded across devices. Each
+    device then holds only a slice of every gradient, so the norm computed is
+    the slice's rather than the model's, and each device scales its own slice
+    by its own factor. The step that results is not clipped: it is scaled
+    unevenly by how the parameters happened to be divided. Nothing raises and
+    the reported norm looks reasonable. PyTorch's own sharded wrapper
+    documents its replacement method and says to prefer it under any sharded
+    strategy. A single-device user cannot hit this, which is every user the
+    published figures cover. Fix: detect a sharded model and clip through the
+    method that reduces across devices first, or refuse to clip and say why.
   - **`compress()` cannot reach `prune_unstructured` or `prune_2of4`**, both
     of which are public API exported from `sal`. Unstructured and 2:4
     sparsity cannot be driven through the pipeline at all, so a measurement

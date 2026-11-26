@@ -116,6 +116,24 @@ requires. Both are **v0.8.0 items**.
   method `sal` exports, or the pipeline states which it does not reach and
   why.**
 
+- **Recovery clips gradients with the single-device helper, which is the
+  wrong one for a sharded model.** `recover_model` calls
+  `torch.nn.utils.clip_grad_norm_`. When a model's parameters are sharded
+  across devices, each device holds only a slice of every gradient, so that
+  function returns the norm of the slice it can see rather than the model's
+  norm, and each device then scales its own slice by its own factor. The
+  resulting step is not clipped to `max_norm`: it is scaled unevenly
+  according to how the parameters happened to be divided. Nothing raises, and
+  the norm that gets recorded looks plausible. PyTorch's own sharded wrapper
+  ships a replacement method and its documentation says to use that one
+  instead under any sharded strategy, so this is the library's stated
+  contract rather than an inference. **A single-device user cannot hit it**,
+  which is every user the published figures cover, and it is silent for
+  anyone who shards. Found by reading the installed library while preparing a
+  multi-device run, at no compute cost. **v0.8.0: detect a sharded model and
+  clip through the method that reduces across devices first, or refuse to
+  clip and say why.**
+
 ## [0.7.1] - 2026-11-22
 
 **A safety patch, and nothing else.** One behaviour changes: `recover()` now
