@@ -946,6 +946,20 @@ sal-torch on the target device.
     of either is not a measurement of the shipped pipeline. Fix: `compress()`
     reaches every pruning method the package exports, or the pipeline states
     which it does not and why.
+  - **the recovery learning rate defaults to 5e-5, which is too large for a
+    billion-parameter decoder.** Both `recover_model()` and
+    `CompressionPipeline.recover()` take `lr: float = 5e-5`. On a 7B decoder
+    that rate, with the shipped `max_grad_norm=1.0` and the shipped
+    `warmup_cosine` schedule, drove a recovery whose loss rose by several
+    nats mid-run and only partly came back; the same recipe at 1e-5 trained
+    normally. The default is also silent in a way the other three knobs are
+    not: a caller who passes no `lr` inherits a rate five times the one that
+    works while `max_grad_norm`, `schedule` and `warmup_ratio` all inherit
+    correctly, so the run looks compliant in every record it writes. Fix:
+    make the default size-aware, or remove the default and require `lr`
+    explicitly, and document the measured rate per scale either way. A
+    default that is wrong at one scale and silent at every scale is worse
+    than no default.
 - **Batch optimization** — resolve the padding overhead identified in v0.4.0
   (batched inference slower than single-sample on short texts). Fixed shapes +
   dynamic batching + sequence bucketing.
