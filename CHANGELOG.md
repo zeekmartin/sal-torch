@@ -2,6 +2,59 @@
 
 ## [Unreleased]
 
+### The gradient-norm sanity bound stops healthy recovery of heavily pruned large models
+
+`recover()` raises on the first pre-clip gradient norm past
+`GRADIENT_NORM_BOUND`, which is `1.0e4`. The guard itself is right -- a
+campaign once ran 1221 steps at norms of 1e15, finished, and returned a
+populated record for a model that had not learned -- but **its value is
+derived from observations that do not cover the pruned-large-model case**,
+and the docstring says so: the healthy maxima behind it, 498.7 and 610.4,
+were both measured on a **dense 1.5B decoder run for 15 steps**.
+
+Measured since, on runs that each **verifiably learned** (evaluation loss
+after training lower than before, by a pre-registered margin):
+
+- a 1.5B decoder with 50% of its attention heads masked peaks at
+  **3 496.7** -- within a factor of 2.9 of the bound;
+- a **7B** decoder with 25-50% of its FFN neurons masked peaks at
+  **6 283 to 7 993**, while recovering **4.2 to 9.2 nats** of evaluation
+  loss.
+
+The peak scales with model width and with how much was removed, so the
+larger and more heavily pruned the model, the likelier `recover()` is to
+stop a run that would have succeeded. Two thirds of one such sweep were
+refused this way, each dying after a handful of steps.
+
+**v0.8.0 item: a bound that separates explosions from large healthy
+gradients, with the derivation documented.** The measured populations are
+far apart -- every healthy observation to date sits at or below ~8e3 and
+every measured explosion at or above ~7e14, about **eleven orders of
+magnitude** with nothing in between -- so a bound can be placed with
+several orders of margin on each side instead of a factor of twenty on one
+side only. The fix should also:
+
+- keep the non-finite case an unconditional stop, which is separate from
+  any threshold;
+- **report** rather than stop in the interval where nothing has been
+  observed, since replacing one premature stop with another would not help
+  the user whose large pruned model recovers fine;
+- state the derivation and its sources next to the constant, so the value
+  can be checked rather than trusted. A threshold is a published claim.
+
+**And the escape hatch is not reachable from the pipeline.**
+`sal.recovery.recover_model()` takes `grad_norm_bound=`, so a caller using
+that function directly can raise the bound knowingly. But
+`CompressionPipeline.recover()` -- the documented path, the one the
+diagnose-route-prune-recover narrative is built on -- does not accept it
+and does not forward it. A user who meets this stop through the pipeline
+has **no supported way past it**, which is part of the same v0.8.0 item.
+
+Until it is fixed, the workaround is to call `sal.recovery.recover_model()`
+directly with a bound chosen from data: `grad_norm_max` is recorded on
+every run, so the decision does not have to be guessed.
+
+
 ### Two gaps in `CompressionPipeline`, found by driving it end to end
 
 Both were found by using the documented public API on a decoder, not by a

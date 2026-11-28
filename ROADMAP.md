@@ -897,6 +897,31 @@ sal-torch on the target device.
     per-channel fake-quantize round-trip that lives in a repository script
     rather than in the package. Fix: ship that round-trip as a documented
     backend that names itself a simulation.
+  - **the gradient-norm sanity bound stops healthy recovery of heavily
+    pruned large models.** `recover()` raises on the first pre-clip norm
+    past `GRADIENT_NORM_BOUND = 1.0e4`. The guard is right -- a run can
+    otherwise spend its whole budget clipping by 1e-14 and report a loss
+    curve that moves over a model that has not learned -- but its VALUE
+    comes from healthy maxima of 498.7 and 610.4 measured on a **dense
+    1.5B decoder over 15 steps**, which is not the pruned-large-model
+    case. Measured since, on runs that each verifiably learned: a 1.5B
+    decoder at 50% of heads masked peaks at **3 496.7**, a factor of 2.9
+    below the bound, and a **7B** decoder at 25-50% of FFN neurons masked
+    peaks at **6 283 to 7 993** while recovering 4.2 to 9.2 nats. The peak
+    grows with width and with how much was removed, so the bound is
+    likeliest to misfire exactly where the package is most useful; two
+    thirds of one such sweep were refused by it. **And the escape hatch is
+    unreachable from the pipeline**: `recovery.recover_model()` takes
+    `grad_norm_bound=` while `CompressionPipeline.recover()` neither
+    accepts nor forwards it, so a user on the documented path has no
+    supported way past the stop. Fix: a bound that separates explosions
+    from large healthy gradients, with its derivation and sources stated
+    next to the constant -- the two populations are about eleven orders of
+    magnitude apart, so several orders of margin are available on each
+    side rather than a factor of twenty on one; keep the non-finite case
+    an unconditional stop; **report** rather than stop in the interval
+    where nothing has been observed; and expose the parameter on the
+    pipeline.
   - **the default calibration path runs with gradients enabled**:
     `sparsity.prune_model` delegates to a grouped helper carrying
     `@torch.no_grad()` and its own fall-through loop has none, and that loop
